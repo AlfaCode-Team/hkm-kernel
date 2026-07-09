@@ -53,11 +53,13 @@ install time (the runtime matches your exact PHP).
 | `hkm-config` | Set up / repair the full environment (kernel + userdata) |
 | `hkm upgrade [--check]` | Check for and install a newer release automatically |
 | `hkm version` / `--version` / `-v` | Show the Sentinel banner + version |
+| `hkm <command> --dev` | Run any command against the **development** kernel checkout instead of the installed one |
 
 ### Environment (all auto-detected — override only for non-standard layouts)
 | Variable | Meaning |
 |---|---|
 | `HKM_KERNEL_HOME` | Kernel root (holds `composer.json`, `vendor/`, `projects/`, `templates/`) |
+| `HKM_DEV_HOME` | Development kernel checkout used by `--dev` (set once: `hkm-config set-dev-home <path>`) |
 | `HKM_USERDATA_DIR` | Persistent registry dir (`projects.json` + `platform.json`) that **survives updates** |
 | `HKM_PHP_BIN` | Override the `php` binary |
 | `HKM_CLI_PATH` / `HKM_GLOBAL_AUTOLOAD` | Override the PHP CLI script / kernel autoload |

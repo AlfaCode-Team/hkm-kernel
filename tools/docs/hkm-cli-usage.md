@@ -276,11 +276,31 @@ publish on the next enable. Migrations get a UTC timestamp prefix
 HKM_PHP_BIN            override the php binary           (default: php)
 HKM_CLI_PATH           override the target php CLI script
 HKM_KERNEL_HOME        kernel root (registry at <root>/projects/projects.json)
+HKM_DEV_HOME           development kernel checkout used by --dev (hkm-config set-dev-home)
 HKM_GLOBAL_AUTOLOAD    override the kernel vendor/autoload.php
 PSP_GLOBAL_AUTOLOAD    explicit kernel autoload (exported to child PHP)
 PSP_PROJECTS_DIR       dir holding the kernel projects.json registry
 HKM_TEMPLATES_DIR      override the scaffolding templates directory
 ```
+
+## --dev — target the development kernel
+
+Every command accepts `--dev` (anywhere in the args; stripped before command
+parsing). It pins that ONE invocation to the DEVELOPMENT kernel instead of the
+installed stable copy — for contributors keeping both side by side:
+
+```bash
+hkm-config set-dev-home ~/code/php-service-platform   # one-time (validated)
+hkm run my-shop            # stable kernel (/opt/hkm-kernel)
+hkm run my-shop --dev      # SAME project on the dev checkout
+hkm doctor --dev           # confirm what --dev resolves to
+```
+
+Resolution order: `HKM_DEV_HOME` (works from the installed binary, anywhere) →
+walk UP from a repo-built launcher to the nearest `composer.json`. It exports
+`HKM_KERNEL_HOME` + `HKM_CLI_PATH` for the child process only — nothing
+persistent changes. When no dev kernel is found, `--dev` fails loudly; it never
+silently falls back to the stable kernel.
 
 **Resolution order**
 
