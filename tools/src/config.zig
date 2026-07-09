@@ -6,6 +6,7 @@
 //!   hkm-config print               # show the config file path + contents
 //!   hkm-config set-kernel-home <p> # pin HKM_KERNEL_HOME
 //!   hkm-config set-autoload <p>    # pin HKM_GLOBAL_AUTOLOAD (vendor/autoload.php)
+//!   hkm-config set-dev-home <p>    # pin HKM_DEV_HOME (dev checkout used by --dev)
 //!
 //! "check" resolves the kernel (env → relative to this binary → /opt/hkm-kernel)
 //! and, if the config file is missing or stale, writes HKM_KERNEL_HOME for you.
@@ -61,6 +62,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
         prompt.ok("HKM_GLOBAL_AUTOLOAD saved.");
         return;
     }
+    if (std.mem.eql(u8, action, "set-dev-home")) {
+        if (args.len < 3) return usage();
+        // The DEV kernel: a contributor's monorepo checkout, used only when a
+        // command is invoked with --dev. Validate it looks like a kernel root
+        // so a typo fails here rather than at first --dev use.
+        const p = util.trimSlash(args[2]);
+        if (!kernel.isKernelDir(io, p)) {
+            prompt.err("that path is not a kernel checkout (no composer.json).");
+            std.process.exit(1);
+        }
+        try userconfig.set(allocator, io, &env, "HKM_DEV_HOME", p);
+        prompt.ok("HKM_DEV_HOME saved. Use `hkm <command> --dev` to target it.");
+        return;
+    }
     if (std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "configure")) {
         std.process.exit(try runCheck(allocator, io, &env));
     }
@@ -74,6 +89,7 @@ fn usage() void {
     prompt.item("hkm-config print", "show the config file path + contents");
     prompt.item("hkm-config set-kernel-home <p>", "pin the kernel root");
     prompt.item("hkm-config set-autoload <p>", "pin vendor/autoload.php");
+    prompt.item("hkm-config set-dev-home <p>", "pin the development kernel checkout used by --dev");
 }
 
 fn runCheck(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !u8 {

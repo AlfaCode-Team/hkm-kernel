@@ -65,6 +65,12 @@ pub fn findCliPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap) ![]const 
     return (try resolve(allocator, io, env)).path;
 }
 
+/// Public probe: is `dir` a kernel root (holds composer.json)? Used to validate
+/// an explicit HKM_DEV_HOME before pinning the invocation to it.
+pub fn isKernelDir(io: Io, dir: []const u8) bool {
+    return isKernelRoot(io, dir);
+}
+
 /// A directory is a kernel root if it holds composer.json (true for both the
 /// dev monorepo and an installed /opt/hkm-kernel).
 fn isKernelRoot(io: Io, dir: []const u8) bool {
@@ -100,6 +106,26 @@ pub fn resolveHome(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !?[]const
         }
     } else |_| {}
     if (isKernelRoot(io, "/opt/hkm-kernel")) return "/opt/hkm-kernel";
+    return null;
+}
+
+/// Resolve the DEVELOPMENT kernel root by walking UP the directory tree from
+/// this launcher's own executable until a kernel root (a dir with composer.json)
+/// is found. Unlike resolveHome's self-location — which only checks fixed bundle
+/// layouts one level up — this handles a launcher run from anywhere inside the
+/// monorepo, e.g. `tools/zig-out/bin/hkm` (three levels below the repo root).
+/// Returns null when no ancestor is a kernel root.
+pub fn resolveDevHome(allocator: std.mem.Allocator, io: Io) !?[]const u8 {
+    const dir = std.process.executableDirPathAlloc(io, allocator) catch return null;
+    var cur: []const u8 = dir;
+    // Bound the climb so we never loop forever on a malformed path.
+    var depth: usize = 0;
+    while (depth < 32) : (depth += 1) {
+        if (isKernelRoot(io, cur)) return cur;
+        const parent = std.fs.path.dirname(cur) orelse return null;
+        if (std.mem.eql(u8, parent, cur)) return null; // reached filesystem root
+        cur = parent;
+    }
     return null;
 }
 

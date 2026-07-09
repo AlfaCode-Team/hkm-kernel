@@ -13,10 +13,18 @@ final class CompileRouteManifestStage implements BootStageContract
     /**
      * @param list<class-string> $moduleClasses
      * @param list<array{method: string, path: string, handler: string}> $projectRoutes
+     * @param list<string> $disabledRoutes
+     *   Project route policy (proj.json "routePolicy.disable" / Kernel::withRoutePolicy).
+     *   Each entry is EITHER a "METHOD /path" spec (drops that one plugin route) OR a
+     *   bare module domain (drops EVERY plugin route that module solves()). Applied
+     *   AFTER plugin routes and BEFORE project routes, so a project can veto a plugin
+     *   route and then optionally re-declare its own on the freed key. A spec that
+     *   matches nothing fails the boot — no silent typos.
      */
     public function __construct(
         private readonly array $moduleClasses,
         private readonly array $projectRoutes = [],
+        private readonly array $disabledRoutes = [],
         private readonly ManifestReader $reader = new ManifestReader(),
     ) {}
 
@@ -72,6 +80,13 @@ final class CompileRouteManifestStage implements BootStageContract
                 ];
             }
         }
+
+        // PASS 2a.5 — apply the project's route DISABLE policy. Runs on plugin
+        // routes only (project routes are compiled below and are the project's own
+        // to add/remove). Dropping BEFORE project routes frees the "METHOD path"
+        // key so a project may disable a plugin route AND declare its own on it
+        // without a duplicate-route boot failure.
+        $routes = $this->applyDisablePolicy($routes);
 
         // PASS 2b — project-layer routes (Kernel::withRoutes / proj.json), not in
         // any module.json. They carry no module and resolve under the synthetic
@@ -135,6 +150,59 @@ final class CompileRouteManifestStage implements BootStageContract
         }
 
         return $requires;
+    }
+
+    /**
+     * Drop plugin routes the project explicitly disabled, then verify every
+     * disable spec matched at least one route — an unmatched spec is a typo or a
+     * stale reference and fails the boot with a descriptive message (mirrors the
+     * unknown-requires-domain guard). Two spec forms, distinguished by shape:
+     *   - "METHOD /path"  → contains whitespace AND a "/path" part → exact route key
+     *   - "domain"        → anything else → every plugin route whose solves() matches
+     *
+     * @param array<string, array{module: ?class-string, solves: string, ...}> $routes
+     * @return array<string, array<string, mixed>>
+     */
+    private function applyDisablePolicy(array $routes): array
+    {
+        foreach ($this->disabledRoutes as $spec) {
+            $spec = trim($spec);
+            if ($spec === '') {
+                continue;
+            }
+
+            $isRouteKey = str_contains($spec, ' ') && str_contains($spec, '/');
+            $matched    = 0;
+
+            if ($isRouteKey) {
+                // Normalize "get  /register" → "GET /register".
+                [$method, $path] = preg_split('/\s+/', $spec, 2) ?: [$spec, ''];
+                $key = strtoupper($method) . ' ' . $path;
+                if (isset($routes[$key])) {
+                    unset($routes[$key]);
+                    $matched = 1;
+                }
+            } else {
+                // Domain form — drop every plugin route that module solves().
+                foreach ($routes as $key => $route) {
+                    if (($route['solves'] ?? null) === $spec) {
+                        unset($routes[$key]);
+                        $matched++;
+                    }
+                }
+            }
+
+            if ($matched === 0) {
+                throw new BootException(
+                    "routePolicy.disable [{$spec}] matched no plugin route. "
+                    . 'Use "METHOD /path" for a single route or a module domain to '
+                    . 'disable all of its routes — check the spelling and that the '
+                    . 'owning plugin is listed in withModules()/withEssentialModules().'
+                );
+            }
+        }
+
+        return $routes;
     }
 
     /**
