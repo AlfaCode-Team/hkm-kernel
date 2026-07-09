@@ -6,6 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-07-09
+
+### Added
+- **Project route policy — disable plugin routes without forking.** A plugin
+  still owns and declares its routes, but the deploying project is now the
+  final authority: `proj.json` gains `"routePolicy": { "disable": [...] }`
+  (wired via the new `Kernel::withRoutePolicy()` +
+  `EntryHelpers::projectRoutePolicy()`). Each spec is either `"METHOD /path"`
+  (one plugin route) or a module domain like `"oauth.server"` (every route that
+  module solves). Applied at boot to plugin routes BEFORE project routes
+  compile, so a project can veto a plugin route and re-declare its own on the
+  freed key. A spec matching nothing fails the build with a descriptive error —
+  typos never pass silently.
+- **`hkm <command> --dev`** — pin a single invocation to the DEVELOPMENT kernel
+  instead of the installed stable copy. Resolves via the new `HKM_DEV_HOME`
+  config key (set once with `hkm-config set-dev-home <checkout>`, validated),
+  or by walking up from a repo-built launcher to the nearest `composer.json`.
+  Exports `HKM_KERNEL_HOME` + `HKM_CLI_PATH` for the child process only —
+  nothing persistent changes, and the flag is stripped before downstream arg
+  parsing. Fails loudly when no dev kernel is found (never silently falls back
+  to stable).
+- `hkm-config set-dev-home <path>` subcommand + `HKM_DEV_HOME` in `hkm help`;
+  contributor "Dev environment" guide in `tools/README.md`.
+- New-project templates updated: scaffolded `proj.json` ships a
+  `routePolicy.disable` stub, the bootstrap wires `withRoutePolicy(...)`, and
+  the project README documents the three route verbs (add / override / disable).
+
 ## [1.0.5] - 2026-07-08
 
 ### Added
