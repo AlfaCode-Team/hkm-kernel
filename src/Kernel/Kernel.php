@@ -43,6 +43,8 @@ final class Kernel
     private array $essentialModules = [];
     /** @var list<array{method: string, path: string, handler: string}> */
     private array $projectRoutes = [];
+    /** @var array<string, string> disable-spec => spec (de-duplicated, insertion order) */
+    private array $disabledRoutes = [];
     private ?ErrorPipeline $errorPipeline = null;
     private ?\Closure $errorPipelineFun = null;
     private ?string $basePath = null;
@@ -179,6 +181,39 @@ final class Kernel
     }
 
     /**
+     * Declare the project's ROUTE-DISABLE policy — plugin routes the project
+     * chooses NOT to expose. A plugin OWNS and declares its routes, but the
+     * project deploying it stays the final authority: it can veto specific
+     * plugin routes here without forking the plugin.
+     *
+     *   ->withRoutePolicy([
+     *       'GET /register',   // disable one plugin route (method + path)
+     *       'oauth.server',    // disable EVERY route the oauth.server module solves()
+     *   ])
+     *
+     * Each spec is EITHER a "METHOD /path" string (one exact plugin route) or a
+     * bare module domain (all of that module's routes). Specs are applied at boot
+     * to plugin routes only, BEFORE project routes compile — so a project can
+     * disable a plugin route and then declare its own on the freed key. A spec
+     * matching nothing FAILS the build (no silent typos). Project routes declared
+     * via withRoutes() are the project's own and are not affected.
+     *
+     * Appends + de-duplicates; a base builder's disables carry into child projects.
+     *
+     * @param list<string> $disable
+     */
+    public function withRoutePolicy(array $disable): self
+    {
+        foreach ($disable as $spec) {
+            $spec = trim((string) $spec);
+            if ($spec !== '') {
+                $this->disabledRoutes[$spec] = $spec;
+            }
+        }
+        return $this;
+    }
+
+    /**
      * Build and validate the kernel. Fails fast on any misconfiguration.
      *
      * @throws \AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\BootFailureException
@@ -214,6 +249,7 @@ final class Kernel
             $this->core,
             $this->securityLayers,
             array_values($this->projectRoutes),
+            array_values($this->disabledRoutes),
         ))->run();
 
         $this->built = true;

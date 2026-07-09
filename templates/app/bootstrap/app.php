@@ -234,6 +234,13 @@ return Kernel::configure()
     // Keep these controllers thin; real domain logic lives in plugins.
     ->withRoutes(EntryHelpers::projectRoutes($projectRoot))
 
+    // Project ROUTE POLICY declared in proj.json ("routePolicy": {"disable": []}).
+    // A plugin OWNS its routes, but the project is the final authority: it can
+    // veto specific plugin routes ("METHOD /path") or a whole plugin's routes (a
+    // module domain) without forking the plugin. Applied to plugin routes before
+    // project routes compile — an unmatched spec fails the boot.
+    ->withRoutePolicy(EntryHelpers::projectRoutePolicy($projectRoot))
+
     // Security layers run BEFORE any module loads — a denied request costs zero
     // module work. CsrfTokenLayer here is a stateless, HMAC-signed token
     // (WordPress-nonce style): the token is signed with APP_KEY and bound to the

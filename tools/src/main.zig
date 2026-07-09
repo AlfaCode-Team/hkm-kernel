@@ -9,6 +9,7 @@ const cli_cmd = @import("commands/cli.zig");
 const doctor_cmd = @import("commands/doctor.zig");
 const upgrade_cmd = @import("commands/upgrade.zig");
 const kernel = @import("lib/kernel.zig");
+const util = @import("lib/util.zig");
 const userconfig = @import("lib/userconfig.zig");
 const banner = @import("lib/banner.zig");
 const prompt = @import("lib/prompt.zig");
@@ -29,6 +30,7 @@ fn printHelp() void {
     prompt.item("hkm doctor", "diagnose the local environment");
     prompt.item("hkm version", "show the Sentinel banner + version (also --version, -v)");
     prompt.item("hkm help", "show this help");
+    prompt.item("hkm <cmd> --dev", "use the development kernel (this monorepo) instead of the installed stable copy");
     prompt.blank();
 
     prompt.section("Environment");
@@ -39,6 +41,7 @@ fn printHelp() void {
     prompt.item("HKM_USERDATA_DIR", "persistent registry dir (projects.json + platform.json); survives updates");
     prompt.item("PSP_PROJECTS_DIR", "dir holding the kernel projects.json registry");
     prompt.item("HKM_KERNEL_HOME", "kernel root (registry at <root>/projects/projects.json)");
+    prompt.item("HKM_DEV_HOME", "development kernel checkout used by --dev (set once via hkm-config)");
 
     prompt.outro("Run 'hkm <command> --help' for command details");
 }
@@ -76,7 +79,58 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // `hkm-config` take effect. Real environment variables always win.
     userconfig.load(allocator, io, &env_map);
 
-    const args = try init.args.toSlice(allocator);
+    const raw_args = try init.args.toSlice(allocator);
+
+    // `--dev` (anywhere in the args) pins this invocation to the DEVELOPMENT
+    // kernel — the monorepo this launcher was built inside — instead of the
+    // installed stable copy under /opt. Useful when running a freshly-built
+    // tools/zig-out/bin/hkm from within the repo. We resolve the dev root by
+    // climbing to the nearest ancestor holding composer.json, export it as
+    // HKM_KERNEL_HOME + HKM_CLI_PATH so every command AND the passthrough use
+    // it, then strip the flag so downstream arg parsing never sees it.
+    var dev_mode = false;
+    var args_list: std.ArrayList([]const u8) = .empty;
+    defer args_list.deinit(allocator);
+    for (raw_args) |a| {
+        if (std.mem.eql(u8, a, "--dev")) {
+            dev_mode = true;
+            continue;
+        }
+        try args_list.append(allocator, a);
+    }
+    const args = args_list.items;
+
+    if (dev_mode) {
+        // Resolve the dev kernel in two ways, in order:
+        //   1. HKM_DEV_HOME — an explicit checkout path from config.env. This is
+        //      what lets the INSTALLED hkm (/usr/bin/hkm) target a contributor's
+        //      monorepo checkout anywhere on disk.
+        //   2. Walk up from the launcher — works when running the repo-built
+        //      tools/zig-out/bin/hkm from inside the checkout, no config needed.
+        var dev_home: ?[]const u8 = null;
+        if (env_map.get("HKM_DEV_HOME")) |h| {
+            if (h.len > 0) {
+                const t = util.trimSlash(h);
+                if (kernel.isKernelDir(io, t)) {
+                    dev_home = try allocator.dupe(u8, t);
+                } else {
+                    prompt.err(try std.fmt.allocPrint(allocator, "HKM_DEV_HOME points to {s} but that is not a kernel checkout (no composer.json).", .{t}));
+                    std.process.exit(1);
+                }
+            }
+        }
+        if (dev_home == null) dev_home = try kernel.resolveDevHome(allocator, io);
+
+        if (dev_home) |home| {
+            try env_map.put("HKM_KERNEL_HOME", home);
+            const cli = try std.fs.path.join(allocator, &.{ home, "bin", "hkm" });
+            try env_map.put("HKM_CLI_PATH", cli);
+            prompt.muted(try std.fmt.allocPrint(allocator, "dev mode: using kernel at {s}", .{home}));
+        } else {
+            prompt.err("--dev: no development kernel found. Set HKM_DEV_HOME to your checkout, or run the repo-built tools/zig-out/bin/hkm from inside it.");
+            std.process.exit(1);
+        }
+    }
 
     if (args.len <= 1) {
         printHelp();

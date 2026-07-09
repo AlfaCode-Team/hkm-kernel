@@ -4,6 +4,7 @@
     "domains": {{DOMAINS_JSON}},
     "features": [],
     "views": "resources",
+    "routePolicy": { "disable": [] },
     "routes": [
         { "method": "GET", "path": "/",     "handler": "{{STUDLY}}\\Infrastructure\\Http\\HomeController@index" },
         { "method": "GET", "path": "/ping", "handler": "{{STUDLY}}\\Infrastructure\\Http\\HomeController@ping"  }
