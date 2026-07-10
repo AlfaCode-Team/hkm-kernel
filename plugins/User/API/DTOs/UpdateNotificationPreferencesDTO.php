@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Plugins\User\API\DTOs;
 
-use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ValidationException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use Plugins\User\Domain\Entities\UserNotificationPreferences;
+use Plugins\Validation\AbstractDto;
 
 /**
  * Validated notification-preferences input. User id comes from the Identity.
@@ -17,15 +17,29 @@ use Plugins\User\Domain\Entities\UserNotificationPreferences;
  * partial payload never silently disables an omitted channel (security topics
  * stay on unless explicitly turned off). Unknown flag keys are rejected (422).
  */
-final readonly class UpdateNotificationPreferencesDTO
+final readonly class UpdateNotificationPreferencesDTO extends AbstractDto
 {
     /** @param array<string,bool> $flags */
     public function __construct(
         public array $flags,
     ) {}
 
+    protected static function rules(): array
+    {
+        // Only the envelope is shape-validated; the per-flag mapping below is
+        // business logic (present-key extraction), not validation.
+        return ['flags' => 'nullable|array'];
+    }
+
+    protected static function messages(): array
+    {
+        return ['flags.array' => 'flags must be an object of channel → topic booleans.'];
+    }
+
     public static function fromRequest(Request $request): self
     {
+        static::validated($request);
+
         $provided = [];
         $nested   = $request->input('flags');
 
@@ -44,10 +58,6 @@ final readonly class UpdateNotificationPreferencesDTO
             if ($request->has($key)) {
                 $provided[$key] = $request->boolean($key);
             }
-        }
-
-        if ($nested !== null && !is_array($nested)) {
-            throw new ValidationException(['flags' => 'flags must be an object of channel → topic booleans.']);
         }
 
         return new self($provided);

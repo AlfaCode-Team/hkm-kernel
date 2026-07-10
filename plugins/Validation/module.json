@@ -1,0 +1,17 @@
+{
+    "name": "validation",
+    "version": "1.0.0",
+    "solves": "validation.rules",
+    "type": "module",
+
+    "requires": [],
+    "exposes": [],
+
+    "routes": [],
+    "emits": [],
+    "listens": [],
+
+    "documentation": "The Validation plugin — a shared, dependency-free request-validation engine (Plugins\\Validation\\Validator) that produces the kernel's standard 422 ValidationException. DTOs extend Plugins\\Validation\\AbstractDto and declare rules() instead of hand-rolling error accumulation. Rules use Laravel-style strings ('required|email|max:150'); shape lives in rules, deep domain invariants stay in value objects. Extend with single closures (Validator::extend) or CodeIgniter-style rule-set CLASSES (Validator::extendWith) and reusable named rule GROUPS (Validator::group), all configured once at boot from config/validation.php. The Provider only loads that config; the Validator is used statically at the DTO boundary (no container, no per-request cost).",
+
+    "config": []
+}

@@ -87,6 +87,7 @@ use Plugins\Database\Provider as DatabaseProvider;
 use Plugins\Commands\Provider as CommandsProvider;
 use Plugins\Storage\Provider as StorageProvider;
 use Plugins\HttpClient\Provider as HttpClientProvider;
+use Plugins\Validation\Provider as ValidationProvider;
 use Plugins\Session\Provider as SessionProvider;
 use Plugins\Cookie\Provider as CookieProvider;
 use Plugins\RedisCache\Provider as RedisCacheProvider;
@@ -195,6 +196,17 @@ $ports = [
     EnqueueIndexNowListener::class => static fn($c) => new EnqueueIndexNowListener(
         $c->make(QueuePort::class),
     ),
+
+    // ── When you enable the User + Tenancy plugins ───────────────────────────
+    // The User plugin subscribes ProvisionTenantProfileListener to user.registered
+    // to write the per-tenant user_profiles row. The EventBus resolves listeners
+    // from the CoreContainer, so bind it here WITH Tenancy's connection resolver
+    // (same pattern as the SEO listener above). Left unbound it safely no-ops.
+    //
+    //   \Plugins\User\Infrastructure\Listeners\ProvisionTenantProfileListener::class
+    //       => static fn($c) => new \Plugins\User\Infrastructure\Listeners\ProvisionTenantProfileListener(
+    //           $c->make(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class),
+    //       ),
 ];
 
 if (filter_var($env('DB_POOL_ENABLED', 'false'), FILTER_VALIDATE_BOOL)) {
@@ -268,6 +280,12 @@ return Kernel::configure()
         // locale negotiation, and the translator used by modules and views.
         I18nProvider::class,
 
+        // Validation (solves: validation.rules) — the shared request-validation
+        // engine. Its boot() loads config/validation.php and registers the
+        // CommonRules + FinancialRules packs. DTOs extend Plugins\Validation\
+        // AbstractDto; built-in rules work without this, the packs need it.
+        ValidationProvider::class,
+
         // Database (solves: database.query) — the multi-driver database stack:
         // the DatabasePort adapter, the pooled adapter that borrows from the
         // ConnectionPool, and connection/schema management.
@@ -296,6 +314,14 @@ return Kernel::configure()
         // JSON-LD, robots, IndexNow. Exposes SeoServiceContract + the /api/seo/*
         // routes. Needs http.client (above) for its network actions.
         SiteSeoModule::class,
+
+        // Identity stack (enable together in an app that needs accounts):
+        //   \Plugins\User\Provider::class,      // user.management (identity + settings)
+        //   \Plugins\Feedback\Provider::class,  // feedback.management (/ajx/feedback)
+        //   \Plugins\Auth\Provider::class,      // auth.identity (login/tokens)
+        //   \Plugins\Tenancy\Provider::class,   // tenancy.routing (multi-tenant)
+        // The User plugin queues a verification email on signup ONLY when a
+        // MailPort is bound in withPorts() above (else it is skipped).
     ])
 
     // ESSENTIAL modules: registered into EVERY request container regardless of

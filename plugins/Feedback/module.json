@@ -1,0 +1,23 @@
+{
+    "name": "feedback",
+    "version": "1.0.0",
+    "solves": "feedback.management",
+    "type": "module",
+
+    "requires": ["database.management"],
+    "exposes": [],
+
+    "routes": [
+        { "method": "POST",   "path": "/ajx/feedback",      "handler": "Plugins\\Feedback\\Infrastructure\\Http\\Controllers\\FeedbackController@submit",       "filters": ["auth", "tenant", "throttle:5,1"] },
+        { "method": "GET",    "path": "/ajx/feedback",      "handler": "Plugins\\Feedback\\Infrastructure\\Http\\Controllers\\FeedbackController@index",        "filters": ["auth", "tenant"] },
+        { "method": "GET",    "path": "/ajx/feedback/{id}", "handler": "Plugins\\Feedback\\Infrastructure\\Http\\Controllers\\FeedbackController@show",         "filters": ["auth", "tenant"] },
+        { "method": "PATCH",  "path": "/ajx/feedback/{id}", "handler": "Plugins\\Feedback\\Infrastructure\\Http\\Controllers\\FeedbackController@updateStatus", "filters": ["auth", "tenant"] }
+    ],
+
+    "emits":   ["feedback.submitted"],
+    "listens": [],
+
+    "documentation": "The Feedback plugin — owns the feedback.management domain (extracted from the User plugin so each plugin owns one domain). Users submit categorised, rated feedback attributed to their authenticated Identity; admins triage it (feedback:manage). Rows live in the request's TENANT database (repository bound to the tenant-routed DatabasePort); the integration event feedback.submitted is dispatched only AFTER the write succeeds. Security-relevant actions are audited to the shared central audit_log table. Enabling publishes database/ (the user_feedback tenant-template migration).",
+
+    "config": []
+}
