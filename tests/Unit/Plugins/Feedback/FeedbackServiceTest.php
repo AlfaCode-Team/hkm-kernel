@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Plugins\User;
+namespace Tests\Unit\Plugins\Feedback;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\SecurityException;
@@ -10,12 +10,13 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ValidationException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use Plugins\User\API\DTOs\ListFeedbackQuery;
-use Plugins\User\API\DTOs\SubmitFeedbackDTO;
-use Plugins\User\Application\Services\FeedbackService;
-use Plugins\User\Infrastructure\Audit\AuditLogger;
+use Plugins\Feedback\API\DTOs\ListFeedbackQuery;
+use Plugins\Feedback\API\DTOs\SubmitFeedbackDTO;
+use Plugins\Feedback\Application\Services\FeedbackService;
+use Plugins\Feedback\Infrastructure\Audit\AuditLogger;
 use Psr\Container\ContainerInterface;
-use Tests\Unit\Plugins\User\Support\FakeFeedbackStore;
+use Tests\Unit\Plugins\Feedback\Support\FakeFeedbackStore;
+use Tests\Unit\Plugins\User\FakeRequest;
 
 #[CoversClass(FeedbackService::class)]
 final class FeedbackServiceTest extends TestCase
