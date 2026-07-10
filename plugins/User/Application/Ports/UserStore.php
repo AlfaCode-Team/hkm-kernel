@@ -28,6 +28,9 @@ interface UserStore
     /** Look up an active user by the SHA-256 hash of a "remember me" token. */
     public function findByRememberToken(string $tokenHash): ?User;
 
+    /** Look up an active user by the SHA-256 hash of a pending verification token. */
+    public function findByVerificationTokenHash(string $tokenHash): ?User;
+
     /** Persist (or clear, with null) the remember-token hash for a user. */
     public function updateRememberToken(string $userId, ?string $tokenHash): void;
 

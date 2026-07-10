@@ -20,7 +20,22 @@ interface UserServiceContract
     /** Keyset-paginated listing (admin-only). */
     public function list(ListUsersQuery $query): UserPage;
 
+    /** Admin/back-office registration — returns the full record for display. */
     public function register(RegisterUserDTO $dto): UserDTO;
+
+    /**
+     * Public self-signup. Returns ONLY the plaintext verification token for the
+     * caller to email — never the identity record, so a public registrant learns
+     * nothing about the created account beyond "check your inbox".
+     */
+    public function registerPublic(RegisterUserDTO $dto): string;
+
+    /**
+     * Confirm an email from the PUBLIC (unauthenticated) verification link. The
+     * token is matched by its stored hash and must be unexpired + unconsumed.
+     * Returns false on any miss. No identity required — this is the pre-login flow.
+     */
+    public function verifyEmailByToken(string $token): bool;
 
     public function find(string $id): ?UserDTO;
 

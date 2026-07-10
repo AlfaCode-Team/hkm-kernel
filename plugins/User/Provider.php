@@ -15,22 +15,22 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HashingPort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HttpClientPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\MailPort;
 use Plugins\User\Application\Ports\BreachChecker;
 use Plugins\User\Infrastructure\Gateways\NullBreachChecker;
 use Plugins\User\Infrastructure\Gateways\PwnedPasswordGateway;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\User\API\Contracts\UserServiceContract;
-use Plugins\User\Application\Services\FeedbackService;
 use Plugins\User\Application\Services\UserService;
 use Plugins\User\Application\Services\UserSettingsService;
 use Plugins\User\Infrastructure\Audit\AuditLogger;
 use Plugins\User\Infrastructure\Cli\RelayUserOutboxCommand;
-use Plugins\User\Infrastructure\Http\Controllers\FeedbackController;
+use Plugins\User\Infrastructure\Http\Controllers\UserController;
 use Plugins\User\Infrastructure\Http\Controllers\UserPageController;
 use Plugins\User\Infrastructure\Http\Controllers\UserSettingsController;
+use Plugins\User\Infrastructure\Listeners\ProvisionTenantProfileListener;
 use Plugins\User\Infrastructure\Outbox\OutboxWriter;
-use Plugins\User\Infrastructure\Persistence\FeedbackRepository;
 use Plugins\User\Infrastructure\Persistence\UserRepository;
 use Plugins\User\Infrastructure\Persistence\UserSettingsRepository;
 use Plugins\View\API\Contracts\ViewRendererContract;
@@ -71,9 +71,8 @@ final class Provider implements ModuleContract
     public function exposes(): array
     {
         // Only UserServiceContract is consumed cross-module (Auth/Tenancy).
-        // Feedback + settings are internal to this plugin (their own
-        // controllers), so they are NOT published — the controllers depend on
-        // the concrete services directly.
+        // Settings are internal to this plugin (their own controller), so they
+        // are NOT published — the controller depends on the concrete service.
         return [
             UserServiceContract::class,
         ];
@@ -133,29 +132,19 @@ final class Provider implements ModuleContract
                 breachChecker: $c->make(BreachChecker::class),
             ));
 
+        // Public/admin JSON controller. Bound explicitly so the OPTIONAL MailPort
+        // is injected only when a project wired one (else null → email is skipped).
+        $container->bindInternal(UserController::class, static fn(ModuleContainer $c) =>
+            new UserController(
+                $c->make(UserServiceContract::class),
+                $c->has(MailPort::class) ? $c->make(MailPort::class) : null,
+            ));
+
         // HTML page controller (renders the AJAX-driven UI shell).
         $container->bindInternal(UserPageController::class, static fn(ModuleContainer $c) =>
             new UserPageController(
                 $c->make(ViewRendererContract::class),
             ));
-
-        // ── Feedback (TENANT-scoped, internal) ───────────────────────────────
-        // Feedback lives in the request's TENANT database, so the repository
-        // takes the tenant-routed DatabasePort directly (NOT self::central()).
-        // The service is internal — its own controller depends on it directly.
-        $container->bindInternal(FeedbackRepository::class, static fn(ModuleContainer $c) =>
-            new FeedbackRepository($c->make(DatabasePort::class)));
-
-        $container->bindInternal(FeedbackService::class, static fn(ModuleContainer $c) =>
-            new FeedbackService(
-                repository: $c->make(FeedbackRepository::class),
-                eventBus:   $c->make(EventBus::class),
-                identity:   $c->make(Identity::class),
-                audit:      $c->make(AuditLogger::class),
-            ));
-
-        $container->bindInternal(FeedbackController::class, static fn(ModuleContainer $c) =>
-            new FeedbackController($c->make(FeedbackService::class)));
 
         // ── Per-user settings (TENANT-scoped singletons, internal) ───────────
         // One service + one repository for all four settings resources. Scoped
@@ -178,6 +167,11 @@ final class Provider implements ModuleContract
     {
         // Outbox relay — resolved via CoreContainer autowiring (DatabasePort + EventBus).
         $cli->command(RelayUserOutboxCommand::class);
+
+        // Write the per-tenant user_profiles row from an at-signup profile block.
+        // Resolved from the CoreContainer: the PROJECT binds this WITH a
+        // TenantConnectionResolverContract to make it write (else it no-ops).
+        $events->subscribe('user.registered', ProvisionTenantProfileListener::class);
     }
 
     /**

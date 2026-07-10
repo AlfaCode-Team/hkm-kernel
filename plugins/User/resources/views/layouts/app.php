@@ -63,7 +63,6 @@ $csrf    = $csrf    ?? '';
             <a href="/users">All users</a>
             <a href="/users/create">Create</a>
             <a href="/account/settings">Settings</a>
-            <a href="/account/feedback">Feedback</a>
         </nav>
     </header>
 

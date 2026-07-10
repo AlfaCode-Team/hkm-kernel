@@ -76,6 +76,8 @@ final class FakeUserService implements UserServiceContract
 
     public function list(ListUsersQuery $query): UserPage { throw new \BadMethodCallException(); }
     public function register(RegisterUserDTO $dto): UserDTO { throw new \BadMethodCallException(); }
+    public function registerPublic(RegisterUserDTO $dto): string { throw new \BadMethodCallException(); }
+    public function verifyEmailByToken(string $token): bool { throw new \BadMethodCallException(); }
     public function update(string $id, UpdateUserDTO $dto): ?UserDTO { throw new \BadMethodCallException(); }
     public function verifyEmail(string $id, VerifyEmailDTO $dto): ?UserDTO { throw new \BadMethodCallException(); }
     public function delete(string $id): bool { throw new \BadMethodCallException(); }
