@@ -50,12 +50,6 @@ final class UserPageController extends ViewController
         return $this->page('user::account/settings', ['title' => 'Account settings'], '/ajx');
     }
 
-    /** Feedback demo — create / list / view / update-status CRUD. */
-    public function feedback(): Response
-    {
-        return $this->page('user::account/feedback', ['title' => 'Feedback'], '/ajx');
-    }
-
     /** @param array<string,mixed> $data */
     private function page(string $view, array $data, string $apiBase = self::API_BASE): Response
     {

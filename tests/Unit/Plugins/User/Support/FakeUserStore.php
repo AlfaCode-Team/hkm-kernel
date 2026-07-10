@@ -56,6 +56,19 @@ final class FakeUserStore implements UserStore
         return null;
     }
 
+    public function findByVerificationTokenHash(string $tokenHash): ?User
+    {
+        if ($tokenHash === '') {
+            return null;
+        }
+        foreach ($this->byId as $user) {
+            if (hash_equals((string) $user->emailVerificationTokenHash(), $tokenHash)) {
+                return $user;
+            }
+        }
+        return null;
+    }
+
     public function updateRememberToken(string $userId, ?string $tokenHash): void
     {
         if ($tokenHash === null) {

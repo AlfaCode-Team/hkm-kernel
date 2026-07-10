@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\API\IntegrationEvents;
+namespace Plugins\Feedback\API\IntegrationEvents;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Events\Contracts\IntegrationEventContract;
 

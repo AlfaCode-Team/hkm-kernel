@@ -32,7 +32,6 @@ use Plugins\User\Domain\Events\UserDeletedDomainEvent;
 use Plugins\User\Domain\Events\UserRegisteredDomainEvent;
 use Plugins\User\Domain\Events\UserUpdatedDomainEvent;
 use Plugins\User\Infrastructure\Audit\AuditLogger;
-use Symfony\Component\VarDumper\VarDumper;
 
 /**
  * UserService — orchestrates the user.management domain.
@@ -84,7 +83,88 @@ final class UserService implements UserServiceContract
         );
     }
 
+    /** Verification token lifetime (seconds) — 24h. */
+    private const VERIFICATION_TTL = 86400;
+
+    /**
+     * ADMIN / back-office registration. Returns the FULL user record so it can
+     * be shown in an admin table. Still arms an email-verification token; when
+     * you need the plaintext token to email, use registerPublic() instead.
+     */
     public function register(RegisterUserDTO $dto): UserDTO
+    {
+        [$user] = $this->provision($dto);
+        return $user;
+    }
+
+    /**
+     * PUBLIC self-signup. Returns ONLY the plaintext verification token for the
+     * caller to email — never the identity record. A public registrant must not
+     * receive their id/email/verification state back, so the controller responds
+     * with a fixed "pending" status and this token stays server-side.
+     */
+    public function registerPublic(RegisterUserDTO $dto): string
+    {
+        [, $token] = $this->provision($dto);
+        return $token;
+    }
+
+    /**
+     * Confirm an email from the PUBLIC (unauthenticated) verification link. The
+     * emailed token is matched by its stored SHA-256 hash and must not be
+     * expired. One-time: verifyEmail() clears the token on success. Returns
+     * false on any miss (unknown/expired/consumed) so a forged token reveals
+     * nothing.
+     */
+    public function verifyEmailByToken(string $token): bool
+    {
+        if ($token === '') {
+            return false;
+        }
+
+        $user = $this->repository->findByVerificationTokenHash(hash('sha256', $token));
+        if ($user === null) {
+            $this->audit->record('user.email_verify.token_miss', []);
+            return false;
+        }
+
+        $expiresAt = $user->emailVerificationExpiresAt();
+        if ($expiresAt === null || $expiresAt < new \DateTimeImmutable()) {
+            $this->audit->record('user.email_verify.token_expired', ['userId' => $user->id()]);
+            return false;
+        }
+
+        $this->collector->beginCollection();
+        $this->transaction->begin();
+        try {
+            $user->verifyEmail();
+            if (!$user->commitChanges()) {
+                $this->transaction->rollback();
+                $this->collector->discard();
+                return true; // already verified — idempotent success
+            }
+
+            $this->flushEvents($user);
+            $this->repository->update($user);
+            $this->transaction->commit();
+        } catch (\Throwable $e) {
+            $this->transaction->rollback();
+            $this->collector->discard();
+            throw $this->wrap($e, 'user.verify_email.failed', ['id' => $user->id()]);
+        }
+
+        $this->collector->release();
+        $this->audit->record('user.email_verified', ['userId' => $user->id()]);
+
+        return true;
+    }
+
+    /**
+     * Shared registration core — arms a verification token and persists identity.
+     *
+     * @return array{0: UserDTO, 1: string} [record, plaintext verification token]
+     */
+    private function provision(RegisterUserDTO $dto): array
     {
         // Cheap pre-check for a friendly 422 before we hit the unique index;
         // the index + DuplicateUserException is the authoritative guard.
@@ -94,6 +174,10 @@ final class UserService implements UserServiceContract
 
         $this->assertNotBreached($dto->password);
 
+        // Emailed once; only its hash is stored. Time-boxed + one-time.
+        $plainToken = bin2hex(random_bytes(32));
+        $expiresAt  = (new \DateTimeImmutable())->modify('+' . self::VERIFICATION_TTL . ' seconds');
+
         $this->collector->beginCollection();
         $this->transaction->begin();
         try {
@@ -102,9 +186,11 @@ final class UserService implements UserServiceContract
                 email:        $dto->email,
                 passwordHash: $this->hasher->make($dto->password),
             );
-           
+            $user->startEmailVerification(hash('sha256', $plainToken), $expiresAt);
 
-            $this->flushEvents($user, $dto->tenantId);
+            // Profile (if submitted) rides on the event for a tenant-side write;
+            // it CANNOT join this central identity transaction (different DB).
+            $this->flushEvents($user, $dto->tenantId, $dto->profile);
             $this->repository->insert($user);
             $this->transaction->commit();
         } catch (\Throwable $e) {
@@ -116,7 +202,7 @@ final class UserService implements UserServiceContract
         $this->collector->release();
         $this->audit->record('user.registered', ['userId' => $user->id()]);
 
-        return UserDTO::fromEntity($user);
+        return [UserDTO::fromEntity($user), $plainToken];
     }
 
     public function find(string $id): ?UserDTO
@@ -360,19 +446,19 @@ final class UserService implements UserServiceContract
      * Collect the entity's domain events and write their integration
      * counterparts to the outbox — all inside the active transaction.
      */
-    private function flushEvents(User $user, string $originTenant = ''): void
+    private function flushEvents(User $user, string $originTenant = '', array $profile = []): void
     {
         foreach ($user->releaseEvents() as $event) {
             $this->collector->collect($event);
 
-            $integration = $this->toIntegration($event, $originTenant);
+            $integration = $this->toIntegration($event, $originTenant, $profile);
             if ($integration !== null) {
                 $this->outbox->write($integration);
             }
         }
     }
 
-    private function toIntegration(DomainEventContract $event, string $originTenant = ''): ?IntegrationEventContract
+    private function toIntegration(DomainEventContract $event, string $originTenant = '', array $profile = []): ?IntegrationEventContract
     {
         return match (true) {
             $event instanceof UserRegisteredDomainEvent => new UserRegisteredIntegrationEvent(
@@ -381,6 +467,7 @@ final class UserService implements UserServiceContract
                 email:      $event->email->value(),
                 occurredAt: $event->occurredAt->format(\DateTimeInterface::RFC3339),
                 tenantId:   $originTenant,
+                profile:    $profile,
             ),
             $event instanceof UserUpdatedDomainEvent => new UserUpdatedIntegrationEvent(
                 userId:     $event->userId->value(),

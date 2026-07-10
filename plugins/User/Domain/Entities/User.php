@@ -33,11 +33,12 @@ final class User extends Entity
         // cast is correct here — a '?datetime' would leak a 'nullable' param into
         // DatetimeCast and be misread as a literal date format.
         'email_verified_at' => 'datetime',
+        'email_verification_expires_at' => 'datetime',
         'created_at' => 'datetime',
     ];
 
-    /** Credentials never cross the serialization boundary. */
-    protected array $hidden = ['password_hash', 'remember_token'];
+    /** Credentials + the verification token hash never cross the serialization boundary. */
+    protected array $hidden = ['password_hash', 'remember_token', 'email_verification_token_hash'];
 
  
 
@@ -63,6 +64,8 @@ final class User extends Entity
             'remember_token' => null,
             'version' => 1,
             'email_verified_at' => null,
+            'email_verification_token_hash' => null,
+            'email_verification_expires_at' => null,
             'created_at' => $createdAt,
         ]);
         $user->syncOriginal();
@@ -115,6 +118,31 @@ final class User extends Entity
             return;
         }
         $this->email_verified_at = new \DateTimeImmutable();
+        // A consumed/confirmed account holds no live token.
+        $this->email_verification_token_hash = null;
+        $this->email_verification_expires_at = null;
+    }
+
+    /**
+     * Arm a pending email-verification token. Stores only the SHA-256 HASH of
+     * the emailed token (the raw token lives only in the email) plus a hard
+     * expiry. Re-arming replaces any previous pending token.
+     */
+    public function startEmailVerification(string $tokenHash, \DateTimeImmutable $expiresAt): void
+    {
+        $this->email_verification_token_hash = $tokenHash;
+        $this->email_verification_expires_at = $expiresAt;
+    }
+
+    public function emailVerificationTokenHash(): ?string
+    {
+        $v = $this->getRawAttribute('email_verification_token_hash');
+        return $v === null ? null : (string) $v;
+    }
+
+    public function emailVerificationExpiresAt(): ?\DateTimeImmutable
+    {
+        return $this->getDate('email_verification_expires_at');
     }
 
     /**

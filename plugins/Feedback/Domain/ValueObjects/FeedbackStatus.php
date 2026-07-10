@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Domain\ValueObjects;
+namespace Plugins\Feedback\Domain\ValueObjects;
 
 /**
  * FeedbackStatus — the triage lifecycle (`status` column).

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Domain\ValueObjects;
+namespace Plugins\Feedback\Domain\ValueObjects;
 
 /**
  * FeedbackMessage — the required free-text body (the `message` column).

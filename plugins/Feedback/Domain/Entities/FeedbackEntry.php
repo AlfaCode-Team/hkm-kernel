@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Domain\Entities;
+namespace Plugins\Feedback\Domain\Entities;
 
-use Plugins\User\Domain\ValueObjects\FeedbackCategory;
-use Plugins\User\Domain\ValueObjects\FeedbackId;
-use Plugins\User\Domain\ValueObjects\FeedbackMessage;
-use Plugins\User\Domain\ValueObjects\FeedbackRating;
-use Plugins\User\Domain\ValueObjects\FeedbackStatus;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackCategory;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackId;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackMessage;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackRating;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackStatus;
 use Project\Support\Entity\Entity;
 
 /**

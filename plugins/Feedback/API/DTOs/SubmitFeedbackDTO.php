@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\API\DTOs;
+namespace Plugins\Feedback\API\DTOs;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ValidationException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
-use Plugins\User\Domain\ValueObjects\FeedbackCategory;
-use Plugins\User\Domain\ValueObjects\FeedbackMessage;
-use Plugins\User\Domain\ValueObjects\FeedbackRating;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackCategory;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackMessage;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackRating;
 
 /**
  * Validated feedback-submission input. Field shape is validated HERE; the value

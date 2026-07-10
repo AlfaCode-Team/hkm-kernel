@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Domain\ValueObjects;
+namespace Plugins\Feedback\Domain\ValueObjects;
 
 /**
  * FeedbackId — the PUBLIC opaque identifier (the `feedback_id` char(36) column).
