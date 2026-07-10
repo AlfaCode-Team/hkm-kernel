@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Domain\ValueObjects;
+namespace Plugins\Feedback\Domain\ValueObjects;
 
 /**
  * FeedbackCategory — the optional `category` column (whitelist).

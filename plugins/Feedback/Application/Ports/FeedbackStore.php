@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Application\Ports;
+namespace Plugins\Feedback\Application\Ports;
 
-use Plugins\User\API\DTOs\ListFeedbackQuery;
-use Plugins\User\Domain\Entities\FeedbackEntry;
+use Plugins\Feedback\API\DTOs\ListFeedbackQuery;
+use Plugins\Feedback\Domain\Entities\FeedbackEntry;
 
 /**
  * Internal persistence port for user feedback (DIP seam).

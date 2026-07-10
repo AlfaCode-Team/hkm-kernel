@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Domain\ValueObjects;
+namespace Plugins\Feedback\Domain\ValueObjects;
 
 /**
  * FeedbackRating — an optional 1–5 star rating (the `rating` tinyint column).

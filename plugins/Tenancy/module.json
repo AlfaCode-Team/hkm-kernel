@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Multi-tenant control plane: tenant registry + per-tenant database routing. Identifies the tenant by TENANCY_MODE — 'claim' (default: authenticated Identity.tenantId, the SaaS/JWT model) or 'domain' (the Host sub-domain, the anonymous storefront model) — then rebinds an isolated tenant DatabasePort into the request container so every repository talks to the correct tenant database. Database-per-tenant isolation (MySQL/PostgreSQL/SQLite) on top of plugins/Database ConnectionManager.",
 
-  "requires": ["tenant.settings","database.management", "auth.identity", "user.management", "view.rendering"],
+  "requires": ["tenant.settings","database.management", "auth.identity", "user.management", "view.rendering","validation.rules"],
 
   "views": "resources/views",
 

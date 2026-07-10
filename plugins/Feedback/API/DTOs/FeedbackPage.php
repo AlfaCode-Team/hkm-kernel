@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\API\DTOs;
+namespace Plugins\Feedback\API\DTOs;
 
-use Plugins\User\Domain\Entities\FeedbackEntry;
+use Plugins\Feedback\Domain\Entities\FeedbackEntry;
 
 /**
  * A single keyset page of feedback entries plus the cursor for the next page.

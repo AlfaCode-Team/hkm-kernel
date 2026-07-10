@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\API\DTOs;
+namespace Plugins\Feedback\API\DTOs;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
-use Plugins\User\Domain\ValueObjects\FeedbackStatus;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackStatus;
 
 /**
  * Keyset-pagination query for admin feedback triage.

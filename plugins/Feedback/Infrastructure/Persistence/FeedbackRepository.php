@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Infrastructure\Persistence;
+namespace Plugins\Feedback\Infrastructure\Persistence;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\RepositoryException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
-use Plugins\User\API\DTOs\ListFeedbackQuery;
-use Plugins\User\Application\Ports\FeedbackStore;
-use Plugins\User\Domain\Entities\FeedbackEntry;
+use Plugins\Feedback\API\DTOs\ListFeedbackQuery;
+use Plugins\Feedback\Application\Ports\FeedbackStore;
+use Plugins\Feedback\Domain\Entities\FeedbackEntry;
 
 /**
  * FeedbackRepository — DatabasePort ONLY.

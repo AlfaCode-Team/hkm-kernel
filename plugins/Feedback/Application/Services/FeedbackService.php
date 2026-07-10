@@ -2,21 +2,21 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Application\Services;
+namespace Plugins\Feedback\Application\Services;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\SecurityException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ServiceException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ValidationException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
-use Plugins\User\API\DTOs\FeedbackPage;
-use Plugins\User\API\DTOs\ListFeedbackQuery;
-use Plugins\User\API\DTOs\SubmitFeedbackDTO;
-use Plugins\User\API\IntegrationEvents\FeedbackSubmittedIntegrationEvent;
-use Plugins\User\Application\Ports\FeedbackStore;
-use Plugins\User\Domain\Entities\FeedbackEntry;
-use Plugins\User\Domain\ValueObjects\FeedbackStatus;
-use Plugins\User\Infrastructure\Audit\AuditLogger;
+use Plugins\Feedback\API\DTOs\FeedbackPage;
+use Plugins\Feedback\API\DTOs\ListFeedbackQuery;
+use Plugins\Feedback\API\DTOs\SubmitFeedbackDTO;
+use Plugins\Feedback\API\IntegrationEvents\FeedbackSubmittedIntegrationEvent;
+use Plugins\Feedback\Application\Ports\FeedbackStore;
+use Plugins\Feedback\Domain\Entities\FeedbackEntry;
+use Plugins\Feedback\Domain\ValueObjects\FeedbackStatus;
+use Plugins\Feedback\Infrastructure\Audit\AuditLogger;
 
 /**
  * FeedbackService — orchestrates user feedback.

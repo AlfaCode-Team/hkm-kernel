@@ -14,7 +14,7 @@ use AlfacodeTeam\PhpServicePlatform\Commands\Migrate\CliCommandFactory as Migrat
 use Plugins\Commands\Configuration\EnvironmentConfigurationLoader;
 use Plugins\Commands\Exceptions\ConfigurationException;
 use Plugins\Commands\Configuration\ConfigurationValidator;
-use Plugins\Commands\Infrastructure\Http\Commands\{ModuleAddCommand, ModuleRemoveCommand};
+use Plugins\Commands\Infrastructure\Http\Commands\{ModuleAddCommand, ModuleRemoveCommand, RouteListCommand};
 use Plugins\Commands\Application\Services\ModuleManagementService;
 use Plugins\Commands\Application\Services\MigrationService;
 use Plugins\Commands\API\Contracts\{ModuleManagementServiceContract, MigrationServiceContract};
@@ -189,6 +189,9 @@ final class Provider implements ModuleContract
 
             $cli->command($scoped->makeInScope(ModuleAddCommand::class, $this->solves()));
             $cli->command($scoped->makeInScope(ModuleRemoveCommand::class, $this->solves()));
+
+            // Read-only introspection — no DB deps, resolves straight from the manifest.
+            $cli->command(new RouteListCommand());
 
             // ── Migration Commands with Enterprise Safeguards ──────────────
             try {

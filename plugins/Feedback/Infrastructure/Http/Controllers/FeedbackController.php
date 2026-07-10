@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Plugins\User\Infrastructure\Http\Controllers;
+namespace Plugins\Feedback\Infrastructure\Http\Controllers;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
-use Plugins\User\API\DTOs\ListFeedbackQuery;
-use Plugins\User\API\DTOs\SubmitFeedbackDTO;
-use Plugins\User\Application\Services\FeedbackService;
+use Plugins\Feedback\API\DTOs\ListFeedbackQuery;
+use Plugins\Feedback\API\DTOs\SubmitFeedbackDTO;
+use Plugins\Feedback\Application\Services\FeedbackService;
 use Project\Http\Controllers\ApiController;
 
 /**

@@ -22,8 +22,16 @@ final readonly class UserRegisteredIntegrationEvent implements IntegrationEventC
         public string $occurredAt,
         /** Originating tenant ('' when none) — lets a subscriber assign membership. */
         public string $tenantId = '',
+        /**
+         * Optional profile fields submitted at signup (primitives only, e.g.
+         * first_name/last_name/phone/timezone/locale). A tenant-side listener
+         * writes these to user_profiles. Empty when none were submitted.
+         *
+         * @var array<string, string>
+         */
+        public array $profile = [],
     ) {
-        $this->version = '1.0';
+        $this->version = '1.1';
     }
 
     public function name(): string
@@ -36,7 +44,7 @@ final readonly class UserRegisteredIntegrationEvent implements IntegrationEventC
         return $this->version;
     }
 
-    /** @return array<string, string> */
+    /** @return array<string, mixed> */
     public function payload(): array
     {
         return [
@@ -45,6 +53,7 @@ final readonly class UserRegisteredIntegrationEvent implements IntegrationEventC
             'email'      => $this->email,
             'occurredAt' => $this->occurredAt,
             'tenantId'   => $this->tenantId,
+            'profile'    => $this->profile,
             'version'    => $this->version,
         ];
     }
