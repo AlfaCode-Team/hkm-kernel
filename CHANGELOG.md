@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-07-11
+
+### Added
+- **`hkm plugins upgrade [project]` — split-safe project upgrade.** A new
+  command (aliases: `reconcile`, `migrate`) that upgrades a project after the
+  plugins it depends on have changed, in three idempotent phases: (1) dependency
+  healing — auto-enable the provider of any domain a plugin newly `requires`;
+  (2) assets + migrations — publish each enabled plugin's NEW assets and run its
+  pending migrations (delegates to `update`; already-applied migrations skip by
+  name); (3) **split reconciliation** — when a plugin SPLITS and a migration file
+  moves to a new plugin (e.g. Feedback extracted from User), the migration's
+  ownership in `var/plugin-assets.json` transfers to the new owner WITHOUT
+  touching the database. The shared `let_migrations` row is keyed by filename and
+  stays applied, so the table AND its data are preserved — and a later `disable`
+  of the OLD plugin can no longer roll back (drop) a table the NEW plugin owns.
+
+### Fixed
+- Plugin asset publishing now includes `database/tenant-template` migrations
+  (previously never copied into projects), so tenant-scoped tables ship on
+  enable/update and tenant-template splits reconcile correctly.
+
 ## [1.0.6] - 2026-07-09
 
 ### Added
@@ -144,7 +165,9 @@ macOS, and Windows, built and published automatically from a `v*` tag.
   (`phpunit.xml` is gitignored).
 - Windows cross-compilation: guarded POSIX-only raw-mode TTY code.
 
-[Unreleased]: https://github.com/AlfaCode-Team/php-service-platform/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/AlfaCode-Team/php-service-platform/compare/v1.0.7...HEAD
+[1.0.7]: https://github.com/AlfaCode-Team/php-service-platform/compare/v1.0.6...v1.0.7
+[1.0.6]: https://github.com/AlfaCode-Team/php-service-platform/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/AlfaCode-Team/php-service-platform/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/AlfaCode-Team/php-service-platform/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/AlfaCode-Team/php-service-platform/compare/v1.0.2...v1.0.3
