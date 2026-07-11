@@ -4,6 +4,8 @@
 # bin/psp (the PHP CLI) IS tracked; the arch-specific Zig binaries are not.
 /bin/hkm
 /bin/hkm-config
+# zig build output — rebuilt by `zig build` / tools/bundle.sh; never shipped from git.
+tools/zig-out/
 
 
 # ── AI ASSISTANT / INTERNAL DOCS (kept local, NOT shipped to GitHub) ──
