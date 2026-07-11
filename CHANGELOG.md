@@ -6,6 +6,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-07-11
+
+### Fixed
+- **`tenant:migrate` command collision.** The kernel's generic LetMigrate
+  `tenant:*` commands (registered via the `Commands` plugin's migration factory)
+  were overwriting the Tenancy plugin's registry-based `tenant:migrate` under the
+  CLI's last-wins registration, so the wrong command ran and demanded a
+  `tenants` resolver config the project does not use. The generic factory now
+  yields to any command a plugin already claimed via the new
+  `CliPipeline::hasQueued()` — so the Tenancy command wins when Tenancy is
+  enabled, and the kernel commands still register normally when it is not.
+
+### Changed
+- **Tenancy `tenant:migrate` template path is now project-relative.** The default
+  template migrations path resolves under the active project root
+  (`projects/<name>/database/tenant-template`) via `Paths::project()`. The
+  `TENANCY_TEMPLATE_PATH` override is honoured as-is when absolute, or resolved
+  under the project root when relative. The previous plugin-directory fallback
+  was removed.
+
+> Tenant migrations against MySQL / SQL Server also required a companion fix in
+> the `let-migrate` module (DDL implicitly commits, closing the open
+> transaction) — released separately in that package.
+
 ## [1.0.7] - 2026-07-11
 
 ### Added

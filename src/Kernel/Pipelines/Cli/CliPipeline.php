@@ -82,6 +82,28 @@ final class CliPipeline
     }
 
     /**
+     * Whether a command with this name has already been queued (as an eager
+     * instance) or added to the underlying application.
+     *
+     * Lets a generic command provider (e.g. the migration factory) yield to a
+     * plugin that already claimed the name, so a plugin-owned command is never
+     * silently overwritten by a later last-wins registration. Only eager
+     * instances expose a name here; class-string registrations do not.
+     */
+    public function hasQueued(string $name): bool
+    {
+        if ($this->app->has($name)) {
+            return true;
+        }
+        foreach ($this->eagerCommands as $command) {
+            if ($command->getName() === $name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Defer command registration until the CLI is actually used.
      *
      * The callback receives this pipeline and registers its commands via
