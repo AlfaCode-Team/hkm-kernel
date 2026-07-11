@@ -216,7 +216,16 @@ final class Provider implements ModuleContract
             // Register all 25+ migration commands. Pass the built instances
             // directly so their factory-injected dependencies are preserved
             // (re-instantiating via class-string would drop them).
+            //
+            // Yield to any command a plugin already claimed (queued at boot,
+            // before this deferred callback runs). This is why the kernel's
+            // generic LetMigrate `tenant:*` commands do NOT shadow the Tenancy
+            // plugin's registry-based equivalents when Tenancy is enabled — and
+            // they still register normally when it is not.
             foreach ($migrationFactory->all() as $commandInstance) {
+                if ($cli->hasQueued($commandInstance->getName())) {
+                    continue;
+                }
                 $cli->command($commandInstance);
             }
         });
