@@ -1,39 +1,103 @@
 # AlfacodeTeam PhpServicePlatform
 
-A modular **PHP 8.4+** backend framework built on the **Gated Demand Architecture
-(GDA)** pattern — security runs before any module loads, and only the modules a
-request actually needs are wired in. The kernel is codenamed **Sentinel**.
+> A modular **PHP 8.4+** service framework built on the **Gated Demand Architecture (GDA)**.
+> Security runs *before* any module loads, and only the modules a request actually needs are
+> ever wired in. The kernel is codenamed **Sentinel**.
 
-It ships as a **native cross-platform CLI** (`hkm`) built with Zig, so end users
-install and upgrade it like a Go/Rust binary — no Composer required to get started.
+[![PHP](https://img.shields.io/badge/PHP-8.4%2B-777bb4)](https://www.php.net/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+![Runtime](https://img.shields.io/badge/runtime-FPM%20%7C%20OpenSwoole-orange)
+
+It ships as a **native cross-platform CLI** (`hkm`) built with Zig, so you install and
+upgrade it like a Go/Rust binary — no Composer needed to get started.
 
 ---
 
-## Install (Linux / macOS / Windows)
+## Table of contents
 
-Download the latest release from
-[Releases](https://github.com/AlfaCode-Team/php-service-platform/releases/latest):
+1. [Why GDA?](#why-gda)
+2. [Install](#install)
+3. [The `hkm` CLI](#the-hkm-cli)
+4. [Your first project](#your-first-project)
+5. [Core concepts](#core-concepts)
+6. [The request lifecycle](#the-request-lifecycle)
+7. [Building a feature — end to end](#building-a-feature--end-to-end)
+8. [The five access rules](#the-five-access-rules)
+9. [Batteries included (plugins)](#batteries-included-plugins)
+10. [Development from source](#development-from-source)
+11. [Security defaults](#security-defaults)
+12. [License](#license)
 
-**Linux (Debian/Ubuntu/Kali):**
+---
+
+## Why GDA?
+
+Most frameworks boot everything, then decide what to do. GDA inverts that:
+
+| Principle | What it means in practice |
+|---|---|
+| **Security before everything** | A `SecurityGateway` runs before any module loads. A denied request costs *zero* module wiring. |
+| **Load only what is needed** | Only the modules required for *this* route are registered — resolved from a dependency graph per request. |
+| **One module, one domain** | Every module owns exactly one bounded business domain. No exceptions. |
+| **Isolation by default** | Modules cannot touch each other's internals — request-scoped containers enforce this at **runtime**. |
+| **Infrastructure independence** | The kernel defines *port* interfaces; the project supplies implementations (MySQL, Redis, S3, …). |
+| **Explicit over implicit** | Everything is declared in `module.json`. Nothing is auto-discovered at runtime. |
+
+The result: predictable performance (you pay only for what a route uses), strong domain
+boundaries that hold at runtime, and infrastructure you can swap without touching business
+code.
+
+> **This is not Laravel, Symfony, or Slim.** It borrows none of their conventions. If you're
+> coming from those, unlearn the globals and facades — everything here is explicit and injected.
+
+### The three worlds
+
+```text
+┌─────────────────────────────────────────────────┐
+│  PROJECT LAYER   (wiring only — no business logic)│
+│  ┌─────────────────────────────────────────────┐ │
+│  │  MODULE / PLUGIN LAYER  (bounded domains)   │ │
+│  │  ┌───────────────────────────────────────┐  │ │
+│  │  │  KERNEL (Sentinel)                    │  │ │
+│  │  │  boot · security · loading · DI ·     │  │ │
+│  │  │  pipelines · events · ports           │  │ │
+│  │  └───────────────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────┘
+```
+
+- **Kernel** — knows nothing about your domains. Changes rarely.
+- **Module/Plugin** — knows nothing about the project. Wires to the kernel through contracts.
+- **Project** — knows everything, contains no business logic. Pure wiring.
+
+---
+
+## Install
+
+Download the latest build from
+[Releases](https://github.com/AlfaCode-Team/php-service-platform/releases/latest).
+
+**Linux (Debian / Ubuntu / Kali)**
 ```bash
 sudo apt install ./hkm-kernel_<version>_amd64.deb
 hkm doctor        # verify PHP + extensions
 ```
 
-**macOS:** extract `hkm-kernel-<version>-macos-universal.tar.gz`, then run
+**macOS** — extract `hkm-kernel-<version>-macos-universal.tar.gz`, then run
 `HKM.app/Contents/Resources/opt/hkm-kernel/install.sh`.
 
-**Windows:** extract `hkm-kernel-<version>-windows-x86_64.zip`, run
-`hkm-kernel\install.bat`, add the folder to `PATH`.
+**Windows** — extract `hkm-kernel-<version>-windows-x86_64.zip`, run
+`hkm-kernel\install.bat`, and add the folder to `PATH`.
 
-The launcher **self-locates** the kernel — no environment variables required on a
-standard install. Dependencies are resolved with Composer on the target at
-install time (the runtime matches your exact PHP).
+The launcher **self-locates** the kernel — no environment variables required on a standard
+install. Runtime PHP dependencies are resolved with Composer on the target at install time,
+so they match your exact PHP.
 
 ### Requirements (verified by `hkm doctor`)
+
 - PHP **≥ 8.4.1**
 - Extensions: `json, mbstring, ctype, tokenizer, filter, pdo, openssl, curl, fileinfo`
-- At least one PDO driver (`mysql` / `pgsql` / `sqlite` / `sqlsrv`)
+- At least one PDO driver: `mysql` · `pgsql` · `sqlite` · `sqlsrv`
 - Optional: `redis`, `swoole`/`openswoole`, `gd`, `intl`
 
 ---
@@ -51,70 +115,387 @@ install time (the runtime matches your exact PHP).
 | `hkm ui [sync\|list\|link\|clean]` | Federate enabled plugins' UIs into the frontend |
 | `hkm doctor` | Diagnose PHP, extensions, and the resolved kernel path |
 | `hkm-config` | Set up / repair the full environment (kernel + userdata) |
-| `hkm upgrade [--check]` | Check for and install a newer release automatically |
+| `hkm upgrade [--check]` | Check for and install a newer release |
 | `hkm version` / `--version` / `-v` | Show the Sentinel banner + version |
-| `hkm <command> --dev` | Run any command against the **development** kernel checkout instead of the installed one |
+| `hkm <command> --dev` | Run any command against the **development** kernel checkout |
 
 ### Environment (all auto-detected — override only for non-standard layouts)
+
 | Variable | Meaning |
 |---|---|
-| `HKM_KERNEL_HOME` | Kernel root (holds `composer.json`, `vendor/`, `projects/`, `templates/`) |
-| `HKM_DEV_HOME` | Development kernel checkout used by `--dev` (set once: `hkm-config set-dev-home <path>`) |
-| `HKM_USERDATA_DIR` | Persistent registry dir (`projects.json` + `platform.json`) that **survives updates** |
+| `HKM_KERNEL_HOME` | Kernel root (`composer.json`, `vendor/`, `projects/`, `templates/`) |
+| `HKM_DEV_HOME` | Development kernel checkout used by `--dev` (`hkm-config set-dev-home <path>`) |
+| `HKM_USERDATA_DIR` | Persistent registry (`projects.json` + `platform.json`) that **survives updates** |
 | `HKM_PHP_BIN` | Override the `php` binary |
 | `HKM_CLI_PATH` / `HKM_GLOBAL_AUTOLOAD` | Override the PHP CLI script / kernel autoload |
 
 Run `hkm-config` once and it pins `HKM_KERNEL_HOME` and provisions a persistent
-`HKM_USERDATA_DIR` (migrating any existing registry) in
-`~/.config/hkm/config.env`.
+`HKM_USERDATA_DIR` (migrating any existing registry) into `~/.config/hkm/config.env`.
 
 ---
 
-## Development (from source)
+## Your first project
+
+```bash
+# 1. Scaffold — creates a hardened project skeleton
+hkm new ~/apps/shop --project=shop
+
+# 2. Verify the environment
+hkm doctor
+
+# 3. Run it locally
+hkm run shop
+#   → serving http://127.0.0.1:8000  (docroot pinned to app/public)
+
+# 4. Console + queue worker for the same project
+hkm cli shop migrate            # run migrations (LetMigrate)
+hkm worker shop                 # drain the job queue
+```
+
+A project is **wiring only**. Its bootstrap composes the kernel from a shared base and
+declares which plugins it activates:
+
+```php
+// projects/shop/bootstrap/app.php
+/** @var Kernel $builder */
+$builder = require __DIR__ . '/../../../app/bootstrap/base.php';
+
+return $builder
+    ->withProjectPath(dirname(__DIR__))
+    ->withModules([
+        Plugins\Auth\Provider::class,
+        Plugins\User\Provider::class,
+        Plugins\Task\Provider::class,
+    ])
+    ->build();
+```
+
+Incoming requests are mapped to a project by **host** (`app.example.com` → the `shop`
+project) via `DomainResolver`, falling back to the `HKM_PROJECT` env var, then `admin`.
+
+---
+
+## Core concepts
+
+### Modules & plugins
+
+A **plugin** (local business module) lives under `plugins/<Name>/`, uses the `Plugins\<Name>\`
+namespace, and follows a strict GDA folder layout:
+
+```
+plugins/Invoice/
+├── module.json                              ← single source of truth
+├── API/Contracts/InvoiceServiceContract.php ← the ONLY thing other modules may import
+├── Domain/                                  ← entities, value objects, domain events (zero external imports)
+├── Application/Services/InvoiceService.php  ← transaction + event orchestration
+├── Infrastructure/
+│   ├── Persistence/InvoiceRepository.php    ← DatabasePort only
+│   ├── Gateways/StripeGateway.php           ← vendor SDK only
+│   └── Http/Controllers/InvoiceController.php ← ≤3-line actions
+└── Provider.php                             ← implements ModuleContract
+```
+
+### `module.json` — the single source of truth
+
+Routes, config, dependencies, and emitted events are **declared**, never discovered:
+
+```json
+{
+  "name": "invoice",
+  "solves": "invoice.generation",
+  "type": "module",
+  "requires": ["database.query"],
+  "exposes": ["InvoiceServiceContract"],
+  "routes": [
+    { "method": "GET",  "path": "/api/invoices",      "handler": "InvoiceController@index" },
+    { "method": "POST", "path": "/api/invoices",      "handler": "InvoiceController@create", "filters": ["auth", "throttle:60,1"] },
+    { "method": "GET",  "path": "/api/invoices/{id}", "handler": "InvoiceController@show" }
+  ],
+  "emits": ["invoice.created", "invoice.paid"],
+  "config": ["INVOICE_CURRENCY", { "key": "INVOICE_TAX_RATE", "type": "float", "required": false }]
+}
+```
+
+If a module reads an env var that isn't in `config[]`, **boot fails** — no silent misconfig.
+
+### Ports (infrastructure independence)
+
+The kernel defines interfaces; the project binds implementations once, at the app-lifetime
+container:
+
+```php
+->withPorts([
+    DatabasePort::class => new MySQLAdapter(config('database')),
+    CachePort::class    => new RedisAdapter(config('cache')),
+    QueuePort::class    => new RedisQueueAdapter(config('jobs')),
+    MailPort::class     => new SmtpMailAdapter(config('mail')),
+    StoragePort::class  => new S3StorageAdapter(config('storage')),
+])
+```
+
+Swap MySQL for Postgres, or SMTP for SES, without touching a single line of domain code.
+
+---
+
+## The request lifecycle
+
+```text
+Request
+  │
+  ▼  SecurityGateway  (runs BEFORE any module loads)
+  │   Firewall → RateLimiter → CSRF → [your Auth layer]   ── deny = zero module cost
+  ▼
+HTTP pipeline
+  1. CorrelationIdStage   propagate X-Correlation-ID
+  2. SecurityStage        run the gateway, attach Identity
+  3. ResolveStage         route-manifest lookup → service name
+  4. LoadStage            build dependency graph → wire ONLY those modules
+     ↳ RouteFilterStage   run the route's declared filters[] (auth, throttle, …)
+  5. ExecuteStage         contract → DTO → controller → Response
+  6. ErrorStage (wraps all) classify → notify (Slack/Mail/DB/File) → HTTP response
+```
+
+Every stage is `handle(Request $request, callable $next): Response`. Modules add
+cross-cutting behaviour by registering hooks in `Provider::boot()`, or opt individual routes
+into named **filters** via `module.json`.
+
+---
+
+## Building a feature — end to end
+
+A complete vertical slice. Each layer has one job and may only talk to the layer below it.
+
+### 1. Domain — pure, zero external imports
+
+```php
+// Domain/ValueObjects/Money.php
+final readonly class Money
+{
+    private function __construct(private int $amount, private string $currency) {   // integer cents — NEVER float
+        if ($this->amount < 0) throw new \DomainException('Money cannot be negative');
+    }
+    public static function of(int|float $amount, string $currency): self {
+        return new self((int) round($amount * 100), strtoupper($currency));
+    }
+    public function add(self $o): self {
+        if ($this->currency !== $o->currency) throw new \DomainException('Currency mismatch');
+        return new self($this->amount + $o->amount, $this->currency);   // operations return NEW instances
+    }
+    public function amount(): int { return $this->amount; }
+}
+```
+
+### 2. Service — transaction + event orchestration (the mandatory shape)
+
+```php
+final class InvoiceService implements InvoiceServiceContract
+{
+    public function __construct(
+        private readonly InvoiceRepository    $repository,
+        private readonly TransactionManager   $transaction,
+        private readonly DomainEventCollector $collector,
+        private readonly EventBus             $eventBus,
+        private readonly Identity             $identity,     // from the SecurityGateway
+    ) {}
+
+    public function create(CreateInvoiceDTO $dto): InvoiceResponseDTO
+    {
+        // authorization first
+        if (!$this->identity->hasPermission('invoice:create')) {
+            throw new ServiceException('invoice.unauthorized', layer: 'service.invoice');
+        }
+
+        $this->collector->beginCollection();
+        $this->transaction->begin();
+        try {
+            $invoice = Invoice::create(ClientId::from($dto->clientId), Money::of($dto->amount, 'USD'));
+            foreach ($invoice->releaseEvents() as $e) $this->collector->collect($e);
+            $this->repository->save($invoice);
+            $this->transaction->commit();
+        } catch (\Throwable $e) {
+            $this->transaction->rollback();
+            $this->collector->discard();                     // ALWAYS — no phantom events on rollback
+            throw new ServiceException('invoice.create.failed', layer: 'service.invoice', previous: $e);
+        }
+
+        // integration events dispatch ONLY after a successful commit — never inside try{}
+        $this->eventBus->dispatch(new InvoiceCreatedIntegrationEvent($invoice->id()->value(), $dto->amount));
+
+        return InvoiceResponseDTO::from($invoice);
+    }
+}
+```
+
+### 3. Repository — `DatabasePort` only, translate every `\PDOException`
+
+```php
+final class InvoiceRepository
+{
+    public function __construct(private readonly DatabasePort $db, private readonly Identity $identity) {}
+
+    public function find(string $id): Invoice
+    {
+        try {
+            $row = $this->db->queryOne(
+                'SELECT * FROM invoices WHERE id = :id AND tenant_id = :t AND deleted_at IS NULL',
+                ['id' => $id, 't' => $this->identity->tenantId],     // ALWAYS tenant-scoped
+            );
+        } catch (\PDOException $e) {
+            throw new RepositoryException("find invoice [$id]", layer: 'repository.invoice', previous: $e);
+        }
+        return $row ? InvoiceHydrator::hydrate($row) : throw new RepositoryException("Invoice [$id] not found");
+    }
+}
+```
+
+### 4. Controller — ≤3 lines: DTO → service → Response
+
+```php
+final class InvoiceController
+{
+    public function __construct(private readonly InvoiceServiceContract $service) {}   // contract only
+
+    public function create(Request $request): Response
+    {
+        $dto = CreateInvoiceDTO::fromRequest($request);   // validation happens here
+        return Response::json($this->service->create($dto)->toArray(), 201);
+    }
+}
+```
+
+### 5. Provider — wire it together
+
+```php
+class Provider implements ModuleContract
+{
+    public function solves(): string  { return 'invoice.generation'; }
+    public function requires(): array { return [DatabasePort::class]; }
+    public function exposes(): array  { return [InvoiceServiceContract::class]; }
+
+    public function register(ModuleContainer $c): void
+    {
+        $c->bindInternal(InvoiceRepository::class, fn($c) =>
+            new InvoiceRepository($c->make(DatabasePort::class), $c->make(Identity::class)));
+
+        $c->bind(InvoiceServiceContract::class, fn($c) => new InvoiceService(
+            $c->make(InvoiceRepository::class), $c->make(TransactionManager::class),
+            $c->make(DomainEventCollector::class), $c->make(EventBus::class), $c->make(Identity::class),
+        ));
+    }
+
+    public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void
+    {
+        // $events->subscribe('payment.succeeded', MarkInvoicePaidListener::class);
+    }
+}
+```
+
+Add `Plugins\Invoice\Provider::class` to a project's `withModules([...])` and the routes,
+config validation, and DI are live.
+
+### Testing — always fakes, never real infrastructure
+
+```php
+$sut = new InvoiceService(
+    new InMemoryInvoiceRepository(), new FakeTransactionManager(),
+    new DomainEventCollector(), $bus = new FakeIntegrationEventBus(), Identity::asUser('u-1', 'tenant-a'),
+);
+$result = $sut->create($validDto);
+
+$bus->assertDispatched(InvoiceCreatedIntegrationEvent::class, times: 1);
+$this->assertNotNull($result->invoiceId);
+```
+
+---
+
+## The five access rules
+
+These are **enforced at runtime** by `ModuleContainer::bindInternal()` — a violation throws
+`ScopeViolationException`, not a lint warning.
+
+```text
+Controller  →  Service      (published contract interface ONLY)
+Service     →  Repository AND Gateway   (the ONLY layer that may call both)
+Repository  →  DatabasePort ONLY        (no HTTP, no vendor SDK)
+Gateway     →  Vendor SDK ONLY          (no DB, no services)
+Domain      →  NOTHING EXTERNAL         (zero imports outside Domain/)
+```
+
+**Never** (a partial list the framework actively rejects):
+- Routes defined in PHP — only in `module.json` / `proj.json`.
+- `float` for money — use a `Money` value object with integer cents.
+- Vendor exceptions (`\PDOException`, Stripe, …) escaping their layer — translate them.
+- Integration events dispatched inside a `try{}` — only after commit.
+- Another module's internal class imported — use its published contract.
+- `getenv()` for a `.env` value — use the `env()` helper.
+- Business logic in a controller — max 3 lines.
+
+---
+
+## Batteries included (plugins)
+
+Drop-in modules under `plugins/`, activated per project:
+
+| Plugin | Domain | What you get |
+|---|---|---|
+| **Auth** | `auth.identity` | JWT / PAT / session issuance + verification, refresh-token rotation, guards |
+| **OAuth2** | `oauth.server` | Native OAuth 2.1 + OIDC server (auth code + PKCE, device code, JWKS, introspection) |
+| **User** | `user.management` | Central identity store, email verification, transactional outbox, audit log |
+| **Tenancy** | `tenancy.routing` | Multi-tenant DB routing, memberships, invitations, per-tenant isolation |
+| **Validation** | `validation.rules` | Request validation engine + `AbstractDto` (`rules()`), ~45 built-in rules |
+| **Mail** | `mail.delivery` | Native dependency-free mailer — SMTP/Sendmail/`mail()`, DKIM, attachments |
+| **Storage** | `storage.local` | `StoragePort` over local disk **or** S3 (Flysystem), signed temp URLs |
+| **Session / Cookie** | `session.management` / `http.cookies` | Encrypted sessions, flash, CSRF; queued encrypted cookies |
+| **HttpClient** | `http.client` | `HttpClientPort` (cURL) with idempotent-safe retries + coroutine backoff |
+| **View / ViteManifest / Pageflow** | frontend | PHP templating, Vite asset resolution, Inertia-style SPA bridge |
+| **SecurityFilters** | `http.security_filters` | CORS + secure headers; route-filter aliases `auth`, `throttle`, `hmac`, `shield` |
+| **I18n** | `i18n.translation` | File-based translator, pluralization, `Accept-Language` negotiation |
+
+Each plugin ships its own `README.md` — e.g. [Auth](plugins/Auth/README.md),
+[Tenancy](plugins/Tenancy/README.md), [User](plugins/User/README.md),
+[OAuth2](plugins/OAuth2/README.md).
+
+---
+
+## Development from source
 
 ```bash
 git clone --recurse-submodules git@github.com:AlfaCode-Team/php-service-platform.git
 cd php-service-platform
 composer install
-vendor/bin/phpunit          # run the test suite
+vendor/bin/phpunit                         # run the test suite
 
 # Build the native launcher (needs Zig — see tools/.zig-version):
 cd tools && zig build --release=small      # → ../bin/hkm + ../bin/hkm-config
 ```
 
 ### Building release bundles
+
 ```bash
 VERSION=1.2.3 ./tools/bundle.sh all         # .deb + macOS .app + Windows .zip → dist/
 # MODULES=git ./tools/bundle.sh linux       # fetch path-repo modules from pinned commits
 ```
-Releases are cut by pushing a `v*` tag — CI runs the test suite first, then builds
-all three OS bundles on Linux and publishes them automatically.
 
----
+Releases are cut by pushing a `v*` tag — CI runs the test suite first, then builds all three
+OS bundles and publishes them automatically.
 
-## Architecture at a glance
-
-- **Kernel (Sentinel)** — boot pipeline, SecurityGateway, on-demand loading,
-  scoped DI containers, HTTP/CLI/Worker pipelines, ports.
-- **Plugins** (`plugins/`, `Plugins\` namespace) — bounded business/infrastructure
-  modules (Auth, OAuth2, Tenancy, User, Storage, Session, Cookie, View, …).
-- **Projects** (`projects/`) — per-project wiring; the runtime resolves an
-  incoming host to a project via `DomainResolver`.
-
-See the per-plugin `README.md` files (e.g. [Auth](plugins/Auth/README.md),
-[Tenancy](plugins/Tenancy/README.md), [User](plugins/User/README.md)) and the
+For deep dives, see the layer guides in [`docs/ai-context/`](docs/) and the
 [CHANGELOG](CHANGELOG.md).
 
 ---
 
 ## Security defaults
 
-Scaffolded projects are hardened by default: `.env` is `chmod 600`, debug output
-is force-disabled when `APP_ENV=production`, and every new project ships web-server
-configs (`app/public/.htaccess`, `app/apache.conf.example`, `app/nginx.conf.example`)
-that pin the docroot to `app/public`, deny dotfiles, and add baseline security
-headers. Keep secrets (`APP_KEY`, JWT signing keys, DB credentials) out of the CLI
-config and, in production, behind a `SECRETS_PROVIDER`.
+Scaffolded projects are hardened out of the box:
+
+- `.env` is `chmod 600`; debug output is force-disabled when `APP_ENV=production`.
+- Every project ships web-server configs (`app/public/.htaccess`,
+  `app/apache.conf.example`, `app/nginx.conf.example`) pinning the docroot to `app/public`,
+  denying dotfiles, and adding baseline security headers.
+- The `SecurityGateway` (firewall → rate limiter → CSRF → your auth layer) runs before any
+  module — denied requests never touch business code.
+- Keep secrets (`APP_KEY`, JWT signing keys, DB credentials) out of the CLI config and,
+  in production, behind a `SECRETS_PROVIDER`.
 
 ---
 
