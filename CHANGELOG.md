@@ -6,6 +6,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-07-13
+
+### Added
+- **Audit plugin (`audit.trail`)** — the single owner of the shared central
+  `audit_log` table. User, Feedback and Tenancy no longer write the table
+  themselves; they require `audit.trail` and record through the published
+  `AuditServiceContract` (actor/tenant auto-filled, JSON log line + best-effort
+  persistence — an audit write never breaks the action it records).
+  `AuditReaderContract` adds keyset-paginated queries + retention purge.
+- **Auth: device sessions, mobile auth and OTP password reset.** New routes:
+  `GET/DELETE /auth/sessions[/{id}]` + `POST /auth/logout-other-devices`
+  (device-session listing/revocation backed by the new tenant `auth_sessions`
+  table), `POST /auth/mobile/{login,register,logout}` (token-first mobile flow),
+  and `POST /auth/password/{forgot,verify-otp,reset}` (OTP reset via the
+  CachePort-backed broker, mail optional). New config keys:
+  `AUTH_SESSION_TTL/REFRESH`, `AUTH_FINGERPRINT_HEADER`,
+  `AUTH_MOBILE_ACCESS_TTL/AUTOVERIFY`, `AUTH_OTP_TTL`; namespaced `auth::` views.
+- **SocialAuth: end-to-end social sign-in.** `GET /auth/social/{driver}` →
+  provider redirect, `/callback` maps the profile onto a central user (linked
+  identity → email match → create) opening a platform session or returning a
+  JWT+refresh pair (`?mode=token`); `POST /auth/social/{driver}/token` verifies
+  native-SDK tokens (Google access/id token, Apple identity token vs JWKS) for
+  mobile. Links persist in central `social_identities`.
+- **Authorization: policy seeding + enforcement surfaces.** `SeedPolicyCommand`
+  (CSV policy seed via `config/policy.seed.csv`), HTTP pipeline stages, and
+  globally autoloaded `Engine/functions.php` helpers. Auth now requires
+  `authorization.policy` and resolves roles through the new `RoleResolver`.
+- **Tenancy: `var/tenants.json` default tenant for the CLI.** `tenant:create`
+  records the provisioned tenant (last created = default) so `tenant:delete` /
+  `tenant:host:add` work without `--tenant`/`--slug`; new `tenant:remember`
+  backfills pre-existing tenants (`--slug`, `--tenant`, `--all`, or interactive).
+  Hints are re-validated against the registry and stale entries self-drop.
+- **`hkm plugins update` — full analyse + sync.** Update now compares every
+  publishable surface (config, database migrations/tenant-template/seeders/
+  factories, resources, ui) byte-for-byte against the project: publishes NEW
+  files, refreshes content-drifted files (plugin wins), re-syncs a drifted
+  plugin ui mirror (+ glue regen), and runs migrations when a central OR tenant
+  migration changed. Dry-run previews the full analysis.
+- **Kernel: request-scoped `client.ip` binding.** `OnDemandLoader::load()`
+  exposes the client IP in the request container so request-scoped services
+  (e.g. the audit trail) can attribute an action's origin without threading it
+  through controllers.
+
+### Changed
+- **Tenant-membership is now part of the user fetch.** `UserServiceContract`
+  id-based operations take a `checkMembership` flag; `ModelUserProvider` fetches
+  with membership enforced, so on a tenant-scoped request a user without an
+  active seat is indistinguishable from a non-existent user.
+- **Tenant-scoped tables moved to `database/tenant-template/`.** Auth
+  (personal access tokens, refresh tokens, auth_sessions), Authorization
+  (casbin_rule) and OAuth2 (oauth_* tables) migrations are now provisioned per
+  tenant database instead of the central DB.
+- **User outbox refactored into GDA layers** (`OutboxRelayService` +
+  `OutboxRepository` replace the Infrastructure outbox writer/relay pair) and
+  the email-verification flow gained a full page path (`VerifyEmailResult`,
+  `account/verify` view, `VerifyEmail.tsx` site page).
+- **`hkm` tenant migrate passes are now independent.** A plugin shipping only
+  tenant-template migrations still gets its tenant pass, and `tenant:migrate`
+  is triggered by shipped tenant-template files (registry-driven) instead of a
+  `tenants` key in `config/let-migrate.php`.
+- `modules/let-migrate` bumped: safe transaction handling around implicit DDL
+  commits; unsigned integers, CHECK constraints and table options in the schema
+  builder.
+
+### Fixed
+- **`AuthUserProxy::withSecurity()`/`withAccessToken()` dropped `joinedAt`**,
+  shifting constructor arguments and throwing a `TypeError` on every session /
+  JWT guard resolution.
+
 ## [1.0.8] - 2026-07-11
 
 ### Fixed
