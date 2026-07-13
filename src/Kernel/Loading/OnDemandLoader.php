@@ -48,7 +48,17 @@ final class OnDemandLoader
 
     public function load(DependencyGraph $graph, Request $request): ModuleContainer
     {
-        return $this->loadWithIdentity($graph, $request->identity());
+        $container = $this->loadWithIdentity($graph, $request->identity());
+
+        // Expose the client IP for request-scoped services (e.g. the audit trail)
+        // to attribute an action's origin without threading it through every
+        // controller. Bound only on the HTTP path — worker jobs have no request.
+        $ip = $request->ip();
+        if ($ip !== null && $ip !== '') {
+            $container->bind('client.ip', static fn (): string => $ip);
+        }
+
+        return $container;
     }
 
     /**

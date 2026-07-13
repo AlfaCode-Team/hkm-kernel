@@ -11,6 +11,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Contracts\HttpStageCon
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
 use Plugins\Auth\API\Contracts\AuthServiceContract;
 use Plugins\Auth\Application\Services\AuthService;
+use Plugins\Auth\Application\Services\DeviceSessionService;
 use Plugins\Auth\Domain\ValueObjects\Recaller;
 use Plugins\Cookie\Infrastructure\CookieJar;
 use Plugins\User\API\Contracts\UserServiceContract;
@@ -69,6 +70,19 @@ final class SessionAuthStage implements HttpStageContract
             }
 
             return $next($request);
+        }
+
+        // Fingerprint + device-session validation (old __DEV__ semantics): a
+        // request that can't reproduce the login fingerprint, or whose server-
+        // side session row was revoked/expired, loses the session outright.
+        if ($container->has(DeviceSessionService::class)) {
+            $devices = $container->make(DeviceSessionService::class);
+            if ($devices instanceof DeviceSessionService && !$devices->verify($session, $request)) {
+                $devices->teardown($session);
+                $session->invalidate();
+
+                return $next($request); // continue as guest
+            }
         }
 
         $identity = new Identity(

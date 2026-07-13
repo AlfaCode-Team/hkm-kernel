@@ -1,0 +1,17 @@
+{
+    "name": "audit",
+    "version": "1.0.0",
+    "solves": "audit.trail",
+    "type": "module",
+
+    "requires": ["database.management"],
+    "exposes": ["AuditServiceContract", "AuditReaderContract"],
+
+    "routes": [],
+    "emits":   [],
+    "listens": [],
+
+    "documentation": "The Audit plugin — owns the audit.trail domain and the shared central `audit_log` table. It is the SINGLE writer/reader of that table: other plugins (User, Feedback, Tenancy) require `audit.trail` and record security-relevant actions through the published AuditServiceContract instead of writing the table themselves (which would duplicate the writer and violate table ownership). Records identifiers + structured meta only — never passwords, hashes, tokens, or raw PII — so the trail is safe to ship to a SIEM. Each entry is emitted as a JSON log line (source=audit) AND persisted best-effort to `audit_log` (an audit write never breaks the action it records). The service auto-fills actor (Identity) and tenant (TenantContextStage's `tenant.current`) when a caller does not pass them. AuditReaderContract exposes keyset-paginated queries + retention purge for control-plane admin surfaces. Enabling publishes database/ (the central audit_log migration).",
+
+    "config": []
+}

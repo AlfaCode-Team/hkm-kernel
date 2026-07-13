@@ -30,6 +30,13 @@ interface MembershipServiceContract
     public function isActiveMember(string $userId, string $tenantId): bool;
 
     /**
+     * The user's active membership in the tenant — seat AND tenant routable —
+     * or null when they hold none. Carries the seat's role, so authentication
+     * can hydrate the user's tenant role from the membership record.
+     */
+    public function activeMember(string $userId, string $tenantId): ?TenantSummary;
+
+    /**
      * Select a tenant: verify active membership + routable tenant, then mint a
      * tenant-scoped access token (the `tnt` claim). Records `tenant.switch` in
      * the audit log.

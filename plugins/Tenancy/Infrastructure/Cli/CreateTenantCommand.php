@@ -15,6 +15,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\EncryptionPort;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Tenancy\Infrastructure\Cli\Concerns\ManagesTenantDatabase;
 use Plugins\Tenancy\Domain\ValueObjects\TenantStatus;
+use Plugins\Tenancy\Support\TenantsFile;
 use Plugins\Tenancy\Support\Token;
 
 /**
@@ -257,6 +258,15 @@ final class CreateTenantCommand extends AbstractCommand
         }
 
         $this->success("Tenant [{$tenantId}] is ACTIVE.");
+
+        // Remember the tenant in var/tenants.json (last created = default) so
+        // tenant:delete / tenant:host:add work without --tenant/--slug.
+        // Best-effort convenience — never fail a provisioned tenant over it.
+        try {
+            TenantsFile::remember($tenantId, $slug, $name);
+            $this->info("Recorded as default tenant in " . TenantsFile::path() . '.');
+        } catch (\Throwable) {
+        }
 
         return self::SUCCESS;
     }

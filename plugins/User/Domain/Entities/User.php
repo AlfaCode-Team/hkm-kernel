@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Plugins\User\Domain\Entities;
 
+use Plugins\Tenancy\API\DTOs\TenantSummary;
+use Plugins\User\API\IntegrationEvents\UserRegisteredIntegrationEvent;
 use Plugins\User\Domain\Events\UserDeletedDomainEvent;
 use Plugins\User\Domain\Events\UserRegisteredDomainEvent;
 use Plugins\User\Domain\Events\UserUpdatedDomainEvent;
@@ -35,12 +37,34 @@ final class User extends Entity
         'email_verified_at' => 'datetime',
         'email_verification_expires_at' => 'datetime',
         'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     /** Credentials + the verification token hash never cross the serialization boundary. */
     protected array $hidden = ['password_hash', 'remember_token', 'email_verification_token_hash'];
 
  
+    protected TenantSummary|null $membership = null;
+    
+
+    /**
+     * Summary of setMembership
+     * @param mixed $membership
+     * @return void
+     */
+    public function setMembership(?TenantSummary $membership): void
+    {
+        $this->membership = $membership;
+    }
+
+    /**
+     * Summary of getMembership
+     * @return TenantSummary|null
+     */
+    public function getMembership(): ?TenantSummary
+    {
+        return $this->membership;
+    }
 
     /**
      * Register a brand-new user. $passwordHash MUST already be a bcrypt hash
@@ -76,6 +100,7 @@ final class User extends Entity
             email: $email,
             occurredAt: $createdAt,
         ));
+       
 
         return $user;
     }
@@ -118,9 +143,13 @@ final class User extends Entity
             return;
         }
         $this->email_verified_at = new \DateTimeImmutable();
-        // A consumed/confirmed account holds no live token.
-        $this->email_verification_token_hash = null;
-        $this->email_verification_expires_at = null;
+        // The token hash + expiry are deliberately KEPT (not nulled): once the
+        // account is verified, email_verified_at is the authoritative gate, so a
+        // second click of the SAME (still-unexpired) link resolves to the same
+        // user and is reported as "already verified" instead of a confusing
+        // "invalid link". It confers no new power — verifyEmail() short-circuits
+        // above, so the token can never re-verify or mutate state — and it self-
+        // expires at its original TTL. Do NOT re-null these here.
     }
 
     /**

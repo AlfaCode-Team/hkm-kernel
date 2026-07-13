@@ -83,7 +83,10 @@ final class FeedbackRepository implements FeedbackStore
 
     public function paginate(ListFeedbackQuery $query): array
     {
-        $params = ['limit' => $query->limit + 1];
+        // Inline LIMIT as a validated int: bound params bind as strings and
+        // native prepares (EMULATE_PREPARES=false) reject `LIMIT '100'`.
+        $limit  = max(1, min(1001, $query->limit + 1));
+        $params = [];
         $where  = [];
 
         if ($query->status !== null) {
@@ -103,7 +106,7 @@ final class FeedbackRepository implements FeedbackStore
             $rows = $this->db->query(
                 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . $clause . '
                  ORDER BY id DESC
-                 LIMIT :limit',
+                 LIMIT ' . $limit,
                 $params,
             );
         } catch (\Throwable $e) {

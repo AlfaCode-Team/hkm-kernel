@@ -43,6 +43,15 @@ interface AuthorizationServiceContract
     public function rolesOf(string $user, ?string $domain = null): array;
 
     /**
+     * Effective permissions for a user — their own grants PLUS everything
+     * inherited through the role hierarchy, flattened to "object:action"
+     * strings (the platform Identity->permissions convention).
+     *
+     * @return list<string>
+     */
+    public function permissionsOf(string $user, ?string $domain = null): array;
+
+    /**
      * Add a permission policy rule: subject can do action on object.
      */
     public function grant(string $subject, string $object, string $action, string ...$extra): bool;

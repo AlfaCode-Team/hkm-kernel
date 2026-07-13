@@ -50,7 +50,10 @@ final class UserRepository implements UserStore
      */
     public function paginate(ListUsersQuery $query): array
     {
-        $params = ['limit' => $query->limit + 1];
+        // Inline LIMIT as a validated int: bound params bind as strings and
+        // native prepares (EMULATE_PREPARES=false) reject `LIMIT '100'`.
+        $limit  = max(1, min(1001, $query->limit + 1));
+        $params = [];
         $cursor = '';
         if ($query->after !== null) {
             // user_id DESC → fetch rows strictly "older" than the cursor.
@@ -63,7 +66,7 @@ final class UserRepository implements UserStore
                 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
                  WHERE deleted_at IS NULL' . $cursor . '
                  ORDER BY user_id DESC
-                 LIMIT :limit',
+                 LIMIT ' . $limit,
                 $params,
             );
         } catch (\Throwable $e) {
@@ -168,9 +171,12 @@ final class UserRepository implements UserStore
         return $row !== null;
     }
 
-    public function insert(User $user): void
+    public function insert(User &$user): void
     {
-        $now = self::now();
+        // The entity is the source of truth for created_at (set at register()).
+        // updated_at equals it on first insert.
+        $createdAt = $user->createdAt();
+        $updatedAt = $createdAt;
 
         try {
             $this->db->execute(
@@ -192,8 +198,8 @@ final class UserRepository implements UserStore
                     'email_verified_at' => self::fmt($user->emailVerifiedAt()),
                     'verif_token'       => $user->emailVerificationTokenHash(),
                     'verif_expires'     => self::fmt($user->emailVerificationExpiresAt()),
-                    'created_at'        => $now,
-                    'updated_at'        => $now,
+                    'created_at'        => self::fmt($createdAt),
+                    'updated_at'        => self::fmt($updatedAt),
                 ],
             );
         } catch (\Throwable $e) {
@@ -207,6 +213,11 @@ final class UserRepository implements UserStore
                 previous: $e,
             );
         }
+
+        // Reflect the persisted timestamps back onto the caller's entity, then
+        // mark it clean so it reports no pending changes after the write.
+        $user->setAttribute('updated_at', $updatedAt);
+        $user->syncOriginal();
     }
 
     /**
@@ -257,6 +268,7 @@ final class UserRepository implements UserStore
                 previous: $e,
             );
         }
+           
 
         if ($affected < 1) {
             throw new OptimisticLockException(

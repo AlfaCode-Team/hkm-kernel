@@ -24,6 +24,17 @@ export default function Register() {
             <CardTitle>Create your account</CardTitle>
           </CardHeader>
           <CardContent>
+            {form.wasSuccessful ? (
+              <div className="space-y-4 text-center">
+                <p className="text-sm text-foreground">
+                  Almost there — we&apos;ve emailed you a verification link.
+                  Follow it, or enter the token to confirm your address.
+                </p>
+                <Button asChild className="w-full">
+                  <Link href="/verify-email">Verify email</Link>
+                </Button>
+              </div>
+            ) : (
             <form onSubmit={submit} className="space-y-4">
               <Field label="Username" htmlFor="username" error={form.errors.username}>
                 <Input
@@ -52,6 +63,7 @@ export default function Register() {
                 {form.processing ? "Creating…" : "Sign up"}
               </Button>
             </form>
+            )}
           </CardContent>
         </Card>
         <p className="mt-4 text-center text-sm text-muted-foreground">

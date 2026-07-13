@@ -43,6 +43,19 @@ final class UserPageController extends ViewController
         return $this->page('user::users/edit', ['title' => 'Edit user', 'userId' => $id]);
     }
 
+    /**
+     * Email-verification landing page. The link emailed on public signup points
+     * here (`GET /verify-email?token=...`); the page prefills the token from the
+     * query string (if present) and POSTs it to `/ajx/users/verify`. Also usable
+     * as a manual "paste your token" form when the link was not followed.
+     */
+    public function verify(): Response
+    {
+        $token = (string) $this->resolveRequest()->query('token', '');
+
+        return $this->page('user::account/verify', ['title' => 'Verify email', 'token' => $token]);
+    }
+
     /** Account settings demo — read/update CRUD for the 4 settings resources. */
     public function settings(): Response
     {

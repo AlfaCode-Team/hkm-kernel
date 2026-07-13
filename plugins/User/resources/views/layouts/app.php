@@ -123,7 +123,7 @@ $csrf    = $csrf    ?? '';
             create:   (payload) => request('POST', '', payload),
             update:   (id, payload) => request('PUT', '/' + encodeURIComponent(id), payload),
             remove:   (id) => request('DELETE', '/' + encodeURIComponent(id)),
-            csrf, flash,
+            request, csrf, flash,
         };
     })();
     </script>

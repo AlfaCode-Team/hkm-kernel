@@ -20,6 +20,10 @@ use Project\Support\Entity\Entity;
  */
 final class Membership extends Entity
 {
+    /** @var array<string, string> */
+    protected array $casts = [
+        'joinedAt' => 'datetime'
+    ];
     public static function of(
         string $userId,
         string $tenantId,
@@ -30,12 +34,12 @@ final class Membership extends Entity
         TenantStatus $tenantStatus,
     ): self {
         $m = (new self())->forceFill([
-            'userId'       => $userId,
-            'tenantId'     => $tenantId,
-            'tenantName'   => $tenantName,
-            'tenantSlug'   => $tenantSlug,
-            'role'         => $role,
-            'status'       => $status,
+            'userId' => $userId,
+            'tenantId' => $tenantId,
+            'tenantName' => $tenantName,
+            'tenantSlug' => $tenantSlug,
+            'role' => $role,
+            'status' => $status,
             'tenantStatus' => $tenantStatus,
         ]);
         $m->syncOriginal();
@@ -46,13 +50,17 @@ final class Membership extends Entity
     /** @param array<string, mixed> $row */
     public static function fromRow(array $row): self
     {
-        $m = (new self())->forceFill([
-            'userId'       => (string) $row['user_id'],
-            'tenantId'     => (string) $row['tenant_id'],
-            'tenantName'   => (string) ($row['name'] ?? ''),
-            'tenantSlug'   => (string) ($row['slug'] ?? ''),
-            'role'         => (string) $row['role'],
-            'status'       => MembershipStatus::from((int) $row['status']),
+      
+
+        $m = (new self([
+            'joinedAt' => $row['joined_at']
+        ]))->forceFill([
+            'userId' => (string) $row['user_id'],
+            'tenantId' => (string) $row['tenant_id'],
+            'tenantName' => (string) ($row['name'] ?? ''),
+            'tenantSlug' => (string) ($row['slug'] ?? ''),
+            'role' => (string) $row['role'],
+            'status' => MembershipStatus::from((int) $row['status']),
             'tenantStatus' => TenantStatus::from((int) ($row['tenant_status'] ?? TenantStatus::Active->value)),
         ]);
         $m->syncOriginal();
@@ -64,5 +72,9 @@ final class Membership extends Entity
     public function isRoutable(): bool
     {
         return $this->status->isActive() && $this->tenantStatus->isRoutable();
+    }
+    public function joinedAt(): ?\DateTimeImmutable
+    {
+        return $this->getDate('joinedAt');
     }
 }

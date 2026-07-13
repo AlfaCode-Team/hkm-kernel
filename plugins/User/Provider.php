@@ -16,21 +16,24 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HashingPort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HttpClientPort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\MailPort;
+use Plugins\Tenancy\API\Contracts\MembershipServiceContract;
 use Plugins\User\Application\Ports\BreachChecker;
 use Plugins\User\Infrastructure\Gateways\NullBreachChecker;
 use Plugins\User\Infrastructure\Gateways\PwnedPasswordGateway;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\User\API\Contracts\UserServiceContract;
+use Plugins\User\Application\Services\OutboxRelayService;
 use Plugins\User\Application\Services\UserService;
 use Plugins\User\Application\Services\UserSettingsService;
-use Plugins\User\Infrastructure\Audit\AuditLogger;
 use Plugins\User\Infrastructure\Cli\RelayUserOutboxCommand;
 use Plugins\User\Infrastructure\Http\Controllers\UserController;
 use Plugins\User\Infrastructure\Http\Controllers\UserPageController;
 use Plugins\User\Infrastructure\Http\Controllers\UserSettingsController;
 use Plugins\User\Infrastructure\Listeners\ProvisionTenantProfileListener;
-use Plugins\User\Infrastructure\Outbox\OutboxWriter;
+use Plugins\User\Application\Ports\OutboxPort;
+use Plugins\User\Infrastructure\Persistence\OutboxRepository;
 use Plugins\User\Infrastructure\Persistence\UserRepository;
 use Plugins\User\Infrastructure\Persistence\UserSettingsRepository;
 use Plugins\View\API\Contracts\ViewRendererContract;
@@ -60,6 +63,7 @@ final class Provider implements ModuleContract
     {
         return [
             DatabaseConnectionManagerContract::class,
+            AuditServiceContract::class,
             HashingPort::class,
             CachePort::class,
             ViewRendererContract::class,
@@ -86,22 +90,11 @@ final class Provider implements ModuleContract
         $container->bindInternal(UserRepository::class, static fn(ModuleContainer $c) =>
             new UserRepository(self::central($c)));
 
-        $container->bindInternal(OutboxWriter::class, static fn(ModuleContainer $c) =>
-            new OutboxWriter(self::central($c)));
-
-        $container->bindInternal(AuditLogger::class, static function (ModuleContainer $c) {
-            $identity = $c->make(Identity::class);
-            // Persist to the shared central `audit_log` table in addition to the
-            // log line (central connection — audit is never tenant-routed). The
-            // active tenant is published by Tenancy's TenantContextStage under the
-            // 'tenant.current' container key (a plain string — no Tenancy import).
-            $tenantId = $c->has('tenant.current') ? (string) $c->make('tenant.current') : null;
-            return new AuditLogger(
-                $identity->userId ?: null,
-                db:       self::central($c),
-                tenantId: $tenantId,
-            );
-        });
+        // Sole data-access seam for user_outbox (write + relay ops); central conn.
+        $container->bindInternal(OutboxRepository::class, static fn(ModuleContainer $c) =>
+            new OutboxRepository(self::central($c)));
+        $container->bind(OutboxPort::class, static fn(ModuleContainer $c) =>
+            $c->make(OutboxRepository::class));
 
         // Breached-password screening (NIST 800-63B). Enabled with
         // USER_BREACH_CHECK; uses the HIBP k-anonymity range API via
@@ -120,16 +113,21 @@ final class Provider implements ModuleContract
         });
 
         $container->bind(UserServiceContract::class, static fn(ModuleContainer $c) =>
-            new UserService(
+            
+
+        new UserService(
                 repository:    $c->make(UserRepository::class),
                 transaction:   $c->make(TransactionManager::class),
                 collector:     $c->make(DomainEventCollector::class),
-                outbox:        $c->make(OutboxWriter::class),
+                outbox:        $c->make(OutboxPort::class),
+                eventBus:      $c->make(EventBus::class),
                 hasher:        $c->make(HashingPort::class),
                 identity:      $c->make(Identity::class),
                 cache:         $c->make(CachePort::class),
-                audit:         $c->make(AuditLogger::class),
+                audit:         $c->make(AuditServiceContract::class),
                 breachChecker: $c->make(BreachChecker::class),
+                tenantId:      $c->has('tenant.current') ? (string) $c->make('tenant.current') : null,
+                membership:    $c->has(MembershipServiceContract::class) ? $c->make(MembershipServiceContract::class) : null,
             ));
 
         // Public/admin JSON controller. Bound explicitly so the OPTIONAL MailPort
@@ -156,7 +154,7 @@ final class Provider implements ModuleContract
             new UserSettingsService(
                 $c->make(UserSettingsRepository::class),
                 $c->make(Identity::class),
-                $c->make(AuditLogger::class),
+                $c->make(AuditServiceContract::class),
             ));
 
         $container->bindInternal(UserSettingsController::class, static fn(ModuleContainer $c) =>
@@ -165,8 +163,26 @@ final class Provider implements ModuleContract
 
     public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void
     {
-        // Outbox relay — resolved via CoreContainer autowiring (DatabasePort + EventBus).
-        $cli->command(RelayUserOutboxCommand::class);
+        // Outbox relay — must read the CENTRAL `user_outbox` (the ConnectionManager
+        // default), NOT the kernel DatabasePort port (which a project may bind to
+        // an unrelated/unconfigured connection). Build it on the CLI path with a
+        // scoped container that carries the Database ConnectionManager so
+        // OutboxRepository targets the same central DB the write side uses.
+        // Deferred so HTTP/worker builds never pay for it.
+        $cli->defer(function (CliPipeline $cli) use ($events): void {
+            $c = new ModuleContainer($cli->container());
+            $c->setScope('database.management');
+            (new \Plugins\Database\Provider())->register($c);
+            $c->setScope('user.management');
+            (new self())->register($c);
+
+            $cli->command(new RelayUserOutboxCommand(
+                new OutboxRelayService(
+                    $c->makeInScope(OutboxRepository::class, 'user.management'),
+                    $events,
+                ),
+            ));
+        });
 
         // Write the per-tenant user_profiles row from an at-signup profile block.
         // Resolved from the CoreContainer: the PROJECT binds this WITH a

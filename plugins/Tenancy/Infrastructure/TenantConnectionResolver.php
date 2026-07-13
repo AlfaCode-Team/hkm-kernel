@@ -73,6 +73,7 @@ final class TenantConnectionResolver implements TenantConnectionResolverContract
         $tenant = $this->registry->find($tenantId)
             ?? $this->reject($name, UnknownTenantException::for($tenantId));
 
+           
         try {
             $this->guardStatus($tenant);
         } catch (TenantUnavailableException $e) {

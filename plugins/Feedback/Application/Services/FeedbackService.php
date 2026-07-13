@@ -16,7 +16,7 @@ use Plugins\Feedback\API\IntegrationEvents\FeedbackSubmittedIntegrationEvent;
 use Plugins\Feedback\Application\Ports\FeedbackStore;
 use Plugins\Feedback\Domain\Entities\FeedbackEntry;
 use Plugins\Feedback\Domain\ValueObjects\FeedbackStatus;
-use Plugins\Feedback\Infrastructure\Audit\AuditLogger;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 
 /**
  * FeedbackService — orchestrates user feedback.
@@ -41,7 +41,7 @@ final class FeedbackService
         private readonly FeedbackStore $repository,
         private readonly EventBus $eventBus,
         private readonly Identity $identity,
-        private readonly AuditLogger $audit,
+        private readonly AuditServiceContract $audit,
     ) {}
 
     public function submit(SubmitFeedbackDTO $dto): FeedbackEntry
@@ -81,7 +81,7 @@ final class FeedbackService
             occurredAt: $entry->createdAt()->format(\DateTimeInterface::RFC3339),
         ));
 
-        $this->audit->record('feedback.submitted', ['feedbackId' => $entry->id()->value()]);
+        $this->audit->record('feedback.submitted', meta: ['feedbackId' => $entry->id()->value()]);
 
         return $entry;
     }
@@ -147,7 +147,7 @@ final class FeedbackService
             return null;
         }
 
-        $this->audit->record('feedback.status_changed', [
+        $this->audit->record('feedback.status_changed', meta: [
             'feedbackId' => $feedbackId,
             'status'     => $entry->status()->value,
         ]);

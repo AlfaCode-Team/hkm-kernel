@@ -18,15 +18,22 @@ final readonly class UserDTO
         public string $email,
         public bool $emailVerified,
         public string $createdAt,
+        public array $roles = [],
+        public ?string $tenantId = null,
+        public ?string $joinedAt = null,
     ) {}
 
     public static function fromEntity(User $user): self
     {
+        $roles = $user->getMembership()?->role;
         return new self(
             id:            $user->id(),
             username:      $user->username(),
             email:         $user->email(),
             emailVerified: $user->isEmailVerified(),
+            roles:         $roles !== null ? [$roles] : [],
+            joinedAt:      $user->getMembership()?->joinedAt,
+            tenantId:      $user->getMembership()?->tenantId,
             createdAt:     $user->createdAt()->format(\DateTimeInterface::RFC3339),
         );
     }
@@ -40,6 +47,9 @@ final readonly class UserDTO
             'email'         => $this->email,
             'emailVerified' => $this->emailVerified,
             'createdAt'     => $this->createdAt,
+            'roles'         => $this->roles,
+            'joinedAt'     => $this->joinedAt,
+            'tenantId'      => $this->tenantId,
         ];
     }
 }

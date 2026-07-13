@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Plugins\Auth\Application\Services;
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ServiceException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
@@ -48,8 +49,10 @@ final class AuthService implements AuthServiceContract
         private readonly ?CachePort $cache = null,
         private readonly ?string $jwtPrivateKey = null,
         private readonly ?string $jwtKid = null,
+        private readonly ?\Plugins\Auth\Application\Auth\RoleResolver $roles = null,
+        private readonly ?TransactionManager $transaction = null, // central-connection tx
     ) {
-    }
+    } 
 
     /** Asymmetric algorithms sign with a private key rather than a shared secret. */
     private function isAsymmetric(): bool
@@ -70,10 +73,20 @@ final class AuthService implements AuthServiceContract
         // the user selects a tenant and membership is verified against the
         // central `user_tenants` table; an access token issued at login carries
         // no tenant (empty) so it routes to the central connection only.
+        // RBAC enrichment: when the caller didn't supply roles/permissions and
+        // the Authorization plugin is loaded, resolve them from the policy store
+        // so the access token carries the user's effective grants.
+        $tenant = (string) ($claims['tnt'] ?? $claims['tenant'] ?? '');
+        if (!isset($claims['roles']) && !isset($claims['permissions']) && $this->roles !== null) {
+            $resolved            = $this->roles->forUser($userId, $tenant);
+            $claims['roles']       = $resolved['roles'];
+            $claims['permissions'] = $resolved['permissions'];
+        }
+
         $now = time();
         $payload = [
             'sub'         => $userId,
-            'tnt'         => $claims['tnt'] ?? $claims['tenant'] ?? '',
+            'tnt'         => $tenant,
             'roles'       => array_values($claims['roles'] ?? []),
             'permissions' => array_values($claims['permissions'] ?? []),
             'iat'         => $now,
@@ -123,14 +136,14 @@ final class AuthService implements AuthServiceContract
             ? (new \DateTimeImmutable())->add(new \DateInterval('PT' . $ttlSeconds . 'S'))
             : null;
 
-        $this->tokens->store($id, $userId, $name, $hash, $abilities, $expiresAt);
+        $this->transactional(fn () => $this->tokens->store($id, $userId, $name, $hash, $abilities, $expiresAt));
 
         return ['id' => $id, 'token' => $plaintext];
     }
 
     public function revokePersonalAccessToken(string $id): void
     {
-        $this->tokens->delete($id);
+        $this->transactional(fn () => $this->tokens->delete($id));
     }
 
     public function startSession(
@@ -140,6 +153,15 @@ final class AuthService implements AuthServiceContract
         array $permissions = [],
         string $tenantId = '',
     ): void {
+        // RBAC enrichment: when the caller passes no explicit roles/permissions
+        // and Authorization is loaded, resolve the user's effective grants so the
+        // session Identity carries them (parity with issueJwt()).
+        if ($roles === [] && $permissions === [] && $this->roles !== null) {
+            $resolved    = $this->roles->forUser($userId, $tenantId);
+            $roles       = $resolved['roles'];
+            $permissions = $resolved['permissions'];
+        }
+
         // Session-fixation defence: rotate the id whenever the privilege level
         // changes (anonymous → authenticated). Existing flash data is preserved.
         $session->regenerate();
@@ -175,5 +197,28 @@ final class AuthService implements AuthServiceContract
     public function verifyPassword(string $plain, string $hash): bool
     {
         return $this->hasher->check($plain, $hash);
+    }
+
+    /**
+     * Bracket a unit of work in a transaction on the central auth connection.
+     * Nesting-aware (TransactionManager), and a straight pass-through when no
+     * manager was injected (unit tests with in-memory stores).
+     */
+    private function transactional(callable $work): mixed
+    {
+        if ($this->transaction === null) {
+            return $work();
+        }
+
+        $this->transaction->begin();
+        try {
+            $result = $work();
+            $this->transaction->commit();
+
+            return $result;
+        } catch (\Throwable $e) {
+            $this->transaction->rollback();
+            throw $e;
+        }
     }
 }

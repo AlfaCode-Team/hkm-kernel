@@ -57,6 +57,18 @@ final class UserFlowController
         return $this->pageflow->render($request, 'User/Register', 'admin');
     }
 
+    /**
+     * Public: email-verification landing → component "User/VerifyEmail". The
+     * emailed link points here (`/verify-email?token=...`); the token is passed
+     * as a prop so the page can prefill and POST it to /ajx/users/verify.
+     */
+    public function verifyEmail(Request $request): Response
+    {
+        return $this->pageflow->render($request, 'User/VerifyEmail', 'admin', [
+            'token' => (string) $request->query('token', ''),
+        ]);
+    }
+
     /** Public: the signed-in user's own profile → component "User/Profile". */
     public function profile(Request $request): Response
     {

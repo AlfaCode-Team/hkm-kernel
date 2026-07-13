@@ -10,6 +10,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SessionPort;
 use Plugins\Auth\Application\Ports\Authenticatable;
 use Plugins\Auth\Application\Ports\GuardContext;
 use Plugins\Auth\Application\Ports\GuardDriver;
+use Plugins\Auth\Application\Ports\StatefulGuard;
 use Plugins\Auth\Application\Ports\UserProvider;
 
 /**
@@ -57,12 +58,18 @@ final class AuthManager
     /**
      * @param array<string, mixed>            $config          auth_config()
      * @param \Closure(string): ?UserProvider $providerFactory builds a named provider
+     * @param \Closure(string,UserProvider,Request): ?StatefulGuard $statefulFactory
+     *        builds the WRITE-side guard (attempt/login/logout) for stateful
+     *        drivers — wired by the Provider with the module's collaborators.
      */
     public function __construct(
         private readonly array $config,
         private readonly \Closure $providerFactory,
         private readonly ?SessionPort $session = null,
         private readonly ?\Plugins\Auth\API\Contracts\AuthServiceContract $auth = null,
+        private readonly ?\Closure $statefulFactory = null,
+        private readonly ?\Plugins\Auth\API\Contracts\RefreshTokenServiceContract $refreshTokens = null,
+        private readonly int $accessTtl = 3600,
     ) {}
 
     /**
@@ -78,6 +85,36 @@ final class AuthManager
         }
 
         return $this->auth->issueJwt($userId, $claims, $ttlSeconds);
+    }
+
+    /**
+     * Mint the full mobile/API credential pair for an ALREADY-VERIFIED user:
+     * a short-lived access JWT + a revocable refresh token. The single front-door
+     * call for stateless issuance (mobile login/register), so callers never touch
+     * AuthService / RefreshTokenService directly.
+     *
+     * @param array{roles?:list<string>,permissions?:list<string>,tnt?:string} $claims
+     * @return array{accessToken:string,tokenType:string,expiresAt:int,refreshToken:string,refreshExpiresAt:string}
+     */
+    public function issueTokenPair(string $userId, array $claims = [], ?string $device = null, ?string $ip = null): array
+    {
+        if ($this->auth === null || $this->refreshTokens === null) {
+            throw new ServiceException(
+                'AuthManager cannot issue a token pair — AuthService/RefreshTokenService not wired.',
+                layer: 'service.auth',
+            );
+        }
+
+        $accessToken = $this->auth->issueJwt($userId, $claims, $this->accessTtl);
+        $refresh     = $this->refreshTokens->issue($userId, device: $device, ip: $ip);
+
+        return [
+            'accessToken'      => $accessToken,
+            'tokenType'        => 'Bearer',
+            'expiresAt'        => time() + $this->accessTtl,
+            'refreshToken'     => $refresh->token,
+            'refreshExpiresAt' => $refresh->expiresAt,
+        ];
     }
 
     /**
@@ -167,7 +204,7 @@ final class AuthManager
     {
         $this->guards = [];
 
-        return $this;
+        return $this; 
     }
 
     /** Forward unknown calls (check/user/id/identity/...) to the default guard. */
@@ -224,9 +261,15 @@ final class AuthManager
         /** @var GuardDriver $driver */
         $driver = new $driverClass();
 
-        return new GuardAccessor($name, $driver, $context, $this->request);
-    }
+        // Stateful drivers also get the WRITE-side guard so the old ergonomics
+        // hold: $manager->guard('web')->attempt($credentials, $remember).
+        $stateful = $driverName === 'session' && $this->statefulFactory !== null
+            ? ($this->statefulFactory)($name, $provider, $this->request)
+            : null;
 
+        return new GuardAccessor($name, $driver, $context, $this->request, $stateful);
+    }
+ 
     private function defaultGuard(): string
     {
         return (string) ($this->config['defaults']['guard'] ?? 'web');

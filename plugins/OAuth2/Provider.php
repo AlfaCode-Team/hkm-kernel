@@ -79,7 +79,10 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function exposes(): array
     {
-        return [ClientStore::class];
+        return [
+            ClientStore::class,
+            \Plugins\OAuth2\Application\Ports\AuthorizationFlow::class,
+        ];
     }
 
     public function register(ModuleContainer $container): void
@@ -128,6 +131,11 @@ final class Provider implements ModuleContract
                 $c->make(ScopeValidator::class),
                 (int) (env('OAUTH_CODE_TTL') ?: 60),
             ));
+
+        // Published port: headless code issuance for first-party authenticated
+        // flows (Auth's mobile login/register — old __DEV__ PKCE-without-browser).
+        $container->bind(\Plugins\OAuth2\Application\Ports\AuthorizationFlow::class,
+            static fn(ModuleContainer $c) => $c->make(AuthorizationService::class));
 
         $container->bindInternal(TokenService::class, static fn(ModuleContainer $c) =>
             new TokenService(

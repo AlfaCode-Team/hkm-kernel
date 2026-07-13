@@ -37,4 +37,23 @@ interface PasswordBroker
      * success, else INVALID_TOKEN / INVALID_USER.
      */
     public function reset(string $email, string $token, string $newPassword): string;
+
+    // ── OTP mode (old __DEV__ mobile forgot-password flow) ──────────────────────
+
+    /**
+     * Mint a reset token AND a short-lived 6-digit OTP for it. Returns the OTP
+     * for the caller to email, or null when there is nothing to send (unknown
+     * email / throttled) — the caller MUST respond identically either way so the
+     * endpoint never reveals whether an address is registered.
+     *
+     * @return array{otp:string, email:string}|null
+     */
+    public function sendOtp(string $email): ?array;
+
+    /**
+     * Verify a 6-digit OTP. On success the OTP is CONSUMED (single-use) and the
+     * underlying reset token is returned — pass it to reset(). Null on any miss
+     * (wrong code, expired, unknown email).
+     */
+    public function verifyOtp(string $email, string $otp): ?string;
 }

@@ -6,6 +6,8 @@ namespace Tests\Unit\Plugins\User;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Events\DomainEventCollector;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
+use Psr\Container\ContainerInterface;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\SecurityException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ValidationException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
@@ -18,7 +20,7 @@ use Plugins\User\Application\Services\UserService;
 use Plugins\User\Domain\Entities\User;
 use Plugins\User\Domain\ValueObjects\Email;
 use Plugins\User\Domain\ValueObjects\Username;
-use Plugins\User\Infrastructure\Audit\AuditLogger;
+use Plugins\Audit\Application\Services\AuditService;
 use Tests\Unit\Plugins\User\Support\FakeCache;
 use Tests\Unit\Plugins\User\Support\FakeDatabasePort;
 use Tests\Unit\Plugins\User\Support\FakeHasher;
@@ -48,11 +50,20 @@ final class UserServiceTest extends TestCase
             transaction: new TransactionManager(new FakeDatabasePort()),
             collector:   new DomainEventCollector(),
             outbox:      $this->outbox,
+            eventBus:    new EventBus($this->emptyContainer()),
             hasher:      $this->hasher,
             identity:    $identity,
             cache:       $this->cache,
-            audit:       new AuditLogger('actor', static fn(string $l) => null),
+            audit:       new AuditService(writer: null, sink: static fn(string $l) => null, actorId: 'actor'),
         );
+    }
+
+    private function emptyContainer(): ContainerInterface
+    {
+        return new class implements ContainerInterface {
+            public function get(string $id): mixed { throw new \RuntimeException('no bindings'); }
+            public function has(string $id): bool { return false; }
+        };
     }
 
     private function seedUser(string $username = 'janedoe', string $email = 'janedoe@example.com'): User

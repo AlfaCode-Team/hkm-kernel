@@ -29,7 +29,7 @@ return new class implements MigrationInterface {
             // WHY:   The consumer-side idempotency key: at-least-once delivery
             //        means a message can arrive twice, so consumers dedupe on
             //        this value. CHAR(36) = canonical UUID string length.
-            // WHERE: Written by OutboxWriter; carried in the dispatched event so
+            // WHERE: Written by OutboxRepository; carried in the dispatched event so
             //        downstream handlers can skip duplicates. uniq_event_id below.
             $t->char('event_id', 36)->comment('UUID — idempotency key for consumers');
 
@@ -37,7 +37,7 @@ return new class implements MigrationInterface {
             // WHAT:  The integration event's logical name (e.g. user.registered).
             // WHY:   Lets the relay/consumers route by type without decoding the
             //        payload. 100 chars comfortably fits any dotted event name.
-            // WHERE: Set from IntegrationEventContract::name() by OutboxWriter.
+            // WHERE: Set from IntegrationEventContract::name() by OutboxRepository.
             $t->string('event_name', 100)->comment('e.g. user.registered');
 
             // --- Event version ----------------------------------------------
