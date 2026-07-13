@@ -9,6 +9,7 @@ use AlfacodeTeam\PhpIoCli\Components\TextInput;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Tenancy\API\Contracts\TenantHostServiceContract;
+use Plugins\Tenancy\Support\TenantsFile;
 
 /**
  * tenant:host:add — register a hostname for a tenant (seed-friendly).
@@ -62,22 +63,36 @@ final class AddTenantHostCommand extends AbstractCommand
         $interactive = $this->isInteractive();
         $central     = $this->connections->default();
 
-        // Tenant — by flag, else pick from a Select of registered tenants.
+        // Tenant — by flag, else the default recorded by tenant:create in
+        // var/tenants.json (validated against the registry; a stale hint is
+        // dropped), else pick from a Select of registered tenants.
         if ($id !== '' || $slug !== '') {
             $tenantId = $this->resolveTenantId($central, $id, $slug);
             if ($tenantId === null) {
                 $this->error('Tenant not found in the registry.');
                 return self::FAILURE;
             }
-        } elseif ($interactive) {
-            $tenantId = $this->selectTenant($central);
+        } else {
+            $tenantId = null;
+            $fallback = TenantsFile::defaultTenant();
+            if ($fallback !== null) {
+                $tenantId = $this->resolveTenantId($central, $fallback['tenant_id'], '');
+                if ($tenantId !== null) {
+                    $this->info("Using default tenant [{$fallback['slug']}] from " . TenantsFile::path() . '.');
+                } else {
+                    TenantsFile::forget($fallback['tenant_id']);
+                    $this->warning('Recorded default tenant no longer exists in the registry — stale entry dropped from var/tenants.json.');
+                }
+            }
+            if ($tenantId === null && $interactive) {
+                $tenantId = $this->selectTenant($central);
+            }
             if ($tenantId === null) {
-                $this->error('No tenants in the registry — create one with tenant:create first.');
+                $this->error($interactive
+                    ? 'No tenants in the registry — create one with tenant:create first.'
+                    : 'Provide --tenant <id> or --slug <slug> (no default tenant recorded in var/tenants.json).');
                 return self::FAILURE;
             }
-        } else {
-            $this->error('Provide --tenant <id> or --slug <slug>.');
-            return self::FAILURE;
         }
 
         // Hostname — by flag, else prompt with inline validation.

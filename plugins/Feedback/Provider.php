@@ -12,9 +12,9 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Feedback\Application\Services\FeedbackService;
-use Plugins\Feedback\Infrastructure\Audit\AuditLogger;
 use Plugins\Feedback\Infrastructure\Http\Controllers\FeedbackController;
 use Plugins\Feedback\Infrastructure\Persistence\FeedbackRepository;
 
@@ -40,6 +40,7 @@ final class Provider implements ModuleContract
     {
         return [
             DatabaseConnectionManagerContract::class,
+            AuditServiceContract::class,
         ];
     }
 
@@ -57,25 +58,12 @@ final class Provider implements ModuleContract
         $container->bindInternal(FeedbackRepository::class, static fn(ModuleContainer $c) =>
             new FeedbackRepository($c->make(DatabasePort::class)));
 
-        // Audit persists to the shared CENTRAL `audit_log` table + a log line.
-        // The active tenant is published by Tenancy's TenantContextStage under
-        // the 'tenant.current' container key (a plain string — no Tenancy import).
-        $container->bindInternal(AuditLogger::class, static function (ModuleContainer $c) {
-            $identity = $c->make(Identity::class);
-            $tenantId = $c->has('tenant.current') ? (string) $c->make('tenant.current') : null;
-            return new AuditLogger(
-                $identity->userId ?: null,
-                db:       self::central($c),
-                tenantId: $tenantId,
-            );
-        });
-
         $container->bindInternal(FeedbackService::class, static fn(ModuleContainer $c) =>
             new FeedbackService(
                 repository: $c->make(FeedbackRepository::class),
                 eventBus:   $c->make(EventBus::class),
                 identity:   $c->make(Identity::class),
-                audit:      $c->make(AuditLogger::class),
+                audit:      $c->make(AuditServiceContract::class),
             ));
 
         $container->bindInternal(FeedbackController::class, static fn(ModuleContainer $c) =>
@@ -85,11 +73,5 @@ final class Provider implements ModuleContract
     public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void
     {
         // No pipeline hooks or subscriptions — routes carry the wiring.
-    }
-
-    /** The CENTRAL connection (owns the shared `audit_log` table). */
-    private static function central(ModuleContainer $c): DatabasePort
-    {
-        return $c->make(DatabaseConnectionManagerContract::class)->default();
     }
 }

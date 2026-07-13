@@ -61,6 +61,18 @@ final class Provider implements ModuleContract
 
     public function register(ModuleContainer $container): void
     {
+        // ONE nesting-aware transaction manager for ALL Auth writes. Every Auth
+        // repository is pinned to the CENTRAL connection, so transactions must
+        // bracket that same connection — the kernel's request TransactionManager
+        // wraps the (possibly tenant-rebound) DatabasePort and would open the
+        // transaction on the wrong database. Shared (singleton) so composed
+        // flows (revokeOthers → establish) nest instead of double-beginning.
+        $container->singleton('auth.transaction', static fn(ModuleContainer $c) =>
+            new \AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager(
+                $c->make(DatabaseConnectionManagerContract::class)->default(),
+            )
+        );
+
         $container->bindInternal(PersonalAccessTokenRepository::class, static fn(ModuleContainer $c) =>
             new PersonalAccessTokenRepository(
                 // Central connection — tokens belong to the control plane, not a
@@ -68,6 +80,39 @@ final class Provider implements ModuleContract
                 // the per-request (tenant-rebound) DatabasePort.
                 $c->make(DatabaseConnectionManagerContract::class)->default(),
                 env('AUTH_PAT_TABLE') ?: 'personal_access_tokens',
+            )
+        );
+
+        // Device-session registry (central — auth_sessions is control-plane).
+        $container->bindInternal(\Plugins\Auth\Infrastructure\Persistence\DeviceSessionRepository::class,
+            static fn(ModuleContainer $c) =>
+                new \Plugins\Auth\Infrastructure\Persistence\DeviceSessionRepository(
+                    $c->make(DatabaseConnectionManagerContract::class)->default(),
+                )
+        );
+
+        // Fingerprint + server-side session validation. Public bind (not exposed
+        // cross-module) so SessionAuthStage can resolve it from the request
+        // container on every stateful request.
+        $container->bind(\Plugins\Auth\Application\Services\DeviceSessionService::class,
+            static fn(ModuleContainer $c) =>
+                new \Plugins\Auth\Application\Services\DeviceSessionService(
+                    sessions:          $c->make(\Plugins\Auth\Infrastructure\Persistence\DeviceSessionRepository::class),
+                    ttlDays:           (int) (\auth_config('session.ttl_days') ?? 30),
+                    refreshDays:       (int) (\auth_config('session.refresh_days') ?? 7),
+                    fingerprintHeader: (string) (\auth_config('session.client_fingerprint_header') ?? 'X-Client-Fingerprint'),
+                    transaction:       $c->make('auth.transaction'),
+                )
+        );
+
+        // RBAC bridge — resolves a user's roles/permissions from the
+        // Authorization plugin's policy store when it is loaded for the request;
+        // degrades to empty lists otherwise (optional dependency).
+        $container->bindInternal(\Plugins\Auth\Application\Auth\RoleResolver::class, static fn(ModuleContainer $c) =>
+            new \Plugins\Auth\Application\Auth\RoleResolver(
+                $c->has(\Plugins\Authorization\API\Contracts\AuthorizationServiceContract::class)
+                    ? $c->make(\Plugins\Authorization\API\Contracts\AuthorizationServiceContract::class)
+                    : null,
             )
         );
 
@@ -82,21 +127,19 @@ final class Provider implements ModuleContract
                 cache:         $c->has(CachePort::class) ? $c->make(CachePort::class) : null,
                 jwtPrivateKey: self::readKey(env('JWT_PRIVATE_KEY'), env('JWT_PRIVATE_KEY_FILE')),
                 jwtKid:        env('JWT_KID') ?: null,
+                roles:         $c->make(\Plugins\Auth\Application\Auth\RoleResolver::class),
+                transaction:   $c->make('auth.transaction'),
             )
         );
 
         // Session login/logout controller for web + AJAX. Credentials verified by
         // the User module; SessionPort (essential) carries the stateful session.
+        // Session login/logout drives the AuthManager 'web' guard; the
+        // controller only needs the device registry for the list/revoke-by-id
+        // endpoints (the login flow itself goes through the guard).
         $container->bindInternal(SessionAuthController::class, static fn(ModuleContainer $c) =>
             new SessionAuthController(
-                $c->make(AuthServiceContract::class),
-                $c->make(UserServiceContract::class),
-                $c->make(SessionPort::class),
-                // Cookie is essential, but resolve defensively so Auth still
-                // boots if it is ever unwired — remember-me just no-ops.
-                $c->has(\Plugins\Cookie\Infrastructure\CookieJar::class)
-                    ? $c->make(\Plugins\Cookie\Infrastructure\CookieJar::class)
-                    : null,
+                $c->make(\Plugins\Auth\Application\Services\DeviceSessionService::class),
             )
         );
 
@@ -118,10 +161,11 @@ final class Provider implements ModuleContract
         // Refresh-token service (revocable long-lived first-party sessions).
         $container->bind(\Plugins\Auth\API\Contracts\RefreshTokenServiceContract::class, static fn(ModuleContainer $c) =>
             new \Plugins\Auth\Application\Services\RefreshTokenService(
-                tokens:     $c->make(\Plugins\Auth\Application\Ports\RefreshTokenStore::class),
-                auth:       $c->make(AuthServiceContract::class),
-                refreshTtl: (int) (env('AUTH_REFRESH_TTL') ?: 2592000),
-                accessTtl:  (int) (env('AUTH_REFRESH_ACCESS_TTL') ?: 900),
+                tokens:      $c->make(\Plugins\Auth\Application\Ports\RefreshTokenStore::class),
+                auth:        $c->make(AuthServiceContract::class),
+                refreshTtl:  (int) (env('AUTH_REFRESH_TTL') ?: 2592000),
+                accessTtl:   (int) (env('AUTH_REFRESH_ACCESS_TTL') ?: 900),
+                transaction: $c->make('auth.transaction'),
             )
         );
 
@@ -140,14 +184,39 @@ final class Provider implements ModuleContract
                 )
         );
 
+        // Mobile auth flow (old __DEV__ /v1/auth/*). PUBLIC binds so a project
+        // route override (adding "requires": ["auth.identity","oauth.server"])
+        // can resolve them — that override is how PKCE mode is enabled; without
+        // it the OAuth2 module isn't in the graph and PKCE returns a clear 4xx.
+        $container->bind(\Plugins\Auth\Application\Services\MobileAuthService::class, static fn(ModuleContainer $c) =>
+            new \Plugins\Auth\Application\Services\MobileAuthService(
+                users:         $c->make(UserServiceContract::class),
+                auth:          $c->make(AuthServiceContract::class),
+                oauthFlow:     $c->has(\Plugins\OAuth2\Application\Ports\AuthorizationFlow::class)
+                    ? $c->make(\Plugins\OAuth2\Application\Ports\AuthorizationFlow::class)
+                    : null,
+                autoVerify:    !\in_array(strtolower((string) (env('AUTH_MOBILE_AUTOVERIFY') ?? '1')), ['0', 'false', 'off', 'no'], true),
+            )
+        );
+
+        $container->bind(\Plugins\Auth\Infrastructure\Http\Controllers\MobileAuthController::class,
+            static fn(ModuleContainer $c) =>
+                new \Plugins\Auth\Infrastructure\Http\Controllers\MobileAuthController(
+                    $c->make(UserServiceContract::class),
+                    $c->make(\Plugins\Auth\Application\Services\MobileAuthService::class),
+                )
+        );
+
         // Default user provider (ModelUserProvider over the central identity store).
         // Passing AuthServiceContract lights up the HasApiTokens surface on proxies.
+        // The tenant gate makes membership part of the fetch: on a tenant-scoped
+        // request a user with no active seat in that tenant simply does not exist.
         $container->bind(\Plugins\Auth\Application\Ports\UserProvider::class, static fn(ModuleContainer $c) =>
             new \Plugins\Auth\Application\Auth\ModelUserProvider(
                 $c->make(UserServiceContract::class),
                 'users',
                 ['identifier', 'email', 'username'],
-                $c->make(AuthServiceContract::class),
+                $c->make(AuthServiceContract::class)
             )
         );
 
@@ -158,7 +227,21 @@ final class Provider implements ModuleContract
                 new \Plugins\Auth\Application\Auth\PasswordResetBroker(
                     $c->make(UserServiceContract::class),
                     $c->make(CachePort::class),
+                    otpTtlSeconds: (int) (env('AUTH_OTP_TTL') ?: 600),
                 )
+            );
+
+            // OTP forgot-password endpoints (old __DEV__ mobile flow). MailPort
+            // is OPTIONAL — without a mailer the OTP is only visible in dev
+            // transports; the flow itself keeps working.
+            $container->bindInternal(\Plugins\Auth\Infrastructure\Http\Controllers\PasswordResetController::class,
+                static fn(ModuleContainer $c) =>
+                    new \Plugins\Auth\Infrastructure\Http\Controllers\PasswordResetController(
+                        $c->make(\Plugins\Auth\Application\Ports\PasswordBroker::class),
+                        $c->has(\AlfacodeTeam\PhpServicePlatform\Kernel\Ports\MailPort::class)
+                            ? $c->make(\AlfacodeTeam\PhpServicePlatform\Kernel\Ports\MailPort::class)
+                            : null,
+                    )
             );
         }
 
@@ -176,12 +259,34 @@ final class Provider implements ModuleContract
                             $c->make(UserServiceContract::class),
                             $name,
                             ['identifier', 'email', 'username'],
-                            $c->make(AuthServiceContract::class),
+                            $c->make(AuthServiceContract::class)
                         )
                         : null;
                 },
                 session: $c->has(SessionPort::class) ? $c->make(SessionPort::class) : null,
                 auth:    $c->make(AuthServiceContract::class),
+                statefulFactory: static function (string $name, \Plugins\Auth\Application\Ports\UserProvider $provider, \AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request $request) use ($c): ?\Plugins\Auth\Application\Ports\StatefulGuard {
+                    if (!$c->has(SessionPort::class)) {
+                        return null;
+                    }
+
+                    // WRITE-side guard for the old flow:
+                    //   auth()->guard('web')->attempt($credentials, remember: true)
+                    $guard = new \Plugins\Auth\Application\Auth\StatefulSessionGuard(
+                        name:     $name,
+                        provider: $provider,
+                        session:  $c->make(SessionPort::class),
+                        users:    $c->make(UserServiceContract::class),
+                        cookies:  $c->has(\Plugins\Cookie\Infrastructure\CookieJar::class)
+                            ? $c->make(\Plugins\Cookie\Infrastructure\CookieJar::class)
+                            : null,
+                        devices:  $c->make(\Plugins\Auth\Application\Services\DeviceSessionService::class),
+                    );
+
+                    return $guard->setRequest($request);
+                },
+                refreshTokens: $c->make(\Plugins\Auth\API\Contracts\RefreshTokenServiceContract::class),
+                accessTtl:     (int) (env('AUTH_MOBILE_ACCESS_TTL') ?: 3600),
             )
         );
     }
@@ -210,6 +315,7 @@ final class Provider implements ModuleContract
             $cli->command(new \Plugins\Auth\Infrastructure\Cli\PruneAccessTokensCommand($repository));
         });
     }
+
 
     /**
      * Resolve a PEM signing key from either an inline env value or a file path

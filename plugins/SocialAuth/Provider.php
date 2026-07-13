@@ -10,8 +10,18 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HttpClientPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SessionPort;
+use Plugins\Auth\API\Contracts\AuthServiceContract;
+use Plugins\Auth\API\Contracts\RefreshTokenServiceContract;
+use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\SocialAuth\API\Contracts\SocialAuthServiceContract;
 use Plugins\SocialAuth\Application\Services\SocialAuthService;
+use Plugins\SocialAuth\Application\Services\SocialLoginService;
+use Plugins\SocialAuth\Infrastructure\Gateways\ProviderTokenGateway;
+use Plugins\SocialAuth\Infrastructure\Http\Controllers\SocialAuthController;
+use Plugins\SocialAuth\Infrastructure\Persistence\SocialIdentityRepository;
+use Plugins\User\API\Contracts\UserServiceContract;
 
 /**
  * SocialAuth plugin — OAuth1/OAuth2 social login (ported Socialite engine).
@@ -30,7 +40,16 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [];
+        // Mirrors module.json "requires": the login bridge maps provider
+        // profiles onto central users and issues platform credentials via the
+        // Auth plugin's published contracts; token sign-in verifies against the
+        // provider over HttpClientPort.
+        return [
+            DatabaseConnectionManagerContract::class,
+            UserServiceContract::class,
+            AuthServiceContract::class,
+            HttpClientPort::class,
+        ];
     }
 
     /** @return list<class-string> */
@@ -47,6 +66,44 @@ final class Provider implements ModuleContract
                 baseUrl: env('SOCIAL_AUTH_BASE_URL') ?: '',
             );
         });
+
+        // Provider-account → user links (central — control-plane table).
+        $container->bindInternal(SocialIdentityRepository::class, static fn(ModuleContainer $c) =>
+            new SocialIdentityRepository(
+                $c->make(DatabaseConnectionManagerContract::class)->default(),
+            )
+        );
+
+        // Find-or-create bridge onto the central identity store.
+        $container->bindInternal(SocialLoginService::class, static fn(ModuleContainer $c) =>
+            new SocialLoginService(
+                $c->make(SocialIdentityRepository::class),
+                $c->make(UserServiceContract::class),
+            )
+        );
+
+        // Native-SDK token verification (google access_token/id_token, apple
+        // identity_token against Apple's JWKS).
+        $container->bindInternal(ProviderTokenGateway::class, static fn(ModuleContainer $c) =>
+            new ProviderTokenGateway(
+                $c->make(HttpClientPort::class),
+                googleClientId: env('GOOGLE_CLIENT_ID') ?: '',
+                appleClientId:  env('APPLE_CLIENT_ID') ?: '',
+            )
+        );
+
+        $container->bindInternal(SocialAuthController::class, static fn(ModuleContainer $c) =>
+            new SocialAuthController(
+                social:          $c->make(SocialAuthServiceContract::class),
+                login:           $c->make(SocialLoginService::class),
+                tokens:          $c->make(ProviderTokenGateway::class),
+                auth:            $c->make(AuthServiceContract::class),
+                refreshTokens:   $c->make(RefreshTokenServiceContract::class),
+                session:         $c->make(SessionPort::class),
+                accessTtl:       (int) (env('AUTH_MOBILE_ACCESS_TTL') ?: 3600),
+                successRedirect: env('SOCIAL_AUTH_SUCCESS_REDIRECT') ?: '/',
+            )
+        );
     }
 
     public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void

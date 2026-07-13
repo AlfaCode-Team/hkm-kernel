@@ -36,7 +36,12 @@ interface UserStore
 
     public function existsByUsernameOrEmail(string $username, string $email, ?string $exceptUserId = null): bool;
 
-    public function insert(User $user): void;
+    /**
+     * Persist a new user. Passed by reference so the store can reflect the
+     * persisted timestamps (created_at / updated_at) back onto the entity,
+     * leaving the caller with a fully-synced aggregate.
+     */
+    public function insert(User &$user): void;
 
     public function update(User $user): void;
 

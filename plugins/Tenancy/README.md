@@ -137,6 +137,35 @@ The tenant template lives in `database/tenant-template/`. Override with
 applied batch for fleet-wide drift visibility. A failing tenant is skipped, not
 fatal — the run is resumable.
 
+### `var/tenants.json` — default tenant for the CLI
+
+A successful `tenant:create` records the tenant in the project's
+`var/tenants.json` (`Plugins\Tenancy\Support\TenantsFile`) and makes it the
+**default** (last created wins). Commands that target one tenant then work
+without `--tenant`/`--slug`:
+
+```
+hkm tenant:create --name="Acme" --slug=acme ...   # recorded as default
+hkm tenant:host:add --host=acme.localhost --verified   # → default tenant
+hkm tenant:delete --drop-database                       # → default tenant
+```
+
+Tenants provisioned BEFORE this existed (or after a `var/` wipe — it is
+disposable) are backfilled with `tenant:remember`:
+
+```
+hkm tenant:remember                  # only one tenant registered → recorded; else interactive pick
+hkm tenant:remember --slug=acme      # one tenant by slug (becomes the default)
+hkm tenant:remember --all            # every registered tenant (last = default)
+```
+
+The file is a convenience HINT only — the central `tenants` table stays the
+source of truth. Every command re-validates the recorded id against the
+registry and silently drops a stale entry (e.g. a tenant deleted elsewhere).
+`tenant:delete` also removes the entry on success; the default falls back to
+the last remaining recorded tenant. `tenant:migrate` needs no id either way —
+it fleet-migrates every active tenant by default.
+
 ## Isolation guarantees
 
 - **Fail closed.** Unknown / suspended / deleted / unreachable tenant → throw.

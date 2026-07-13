@@ -91,11 +91,13 @@ final class FakeUserStore implements UserStore
         return false;
     }
 
-    public function insert(User $user): void
+    public function insert(User &$user): void
     {
         if ($this->existsByUsernameOrEmail($user->username(), $user->email())) {
             throw new DuplicateUserException();
         }
+        $user->setAttribute('updated_at', $user->createdAt());
+        $user->syncOriginal();
         $this->byId[$user->id()] = $user;
     }
 

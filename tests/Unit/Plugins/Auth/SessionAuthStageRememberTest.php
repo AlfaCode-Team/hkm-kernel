@@ -8,6 +8,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Container\CoreContainer;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Container\ModuleContainer;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Events\DomainEventCollector;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SessionPort;
@@ -22,7 +23,7 @@ use Plugins\Cookie\Infrastructure\CookieJar;
 use Plugins\User\API\Contracts\UserServiceContract;
 use Plugins\User\Application\Services\UserService;
 use Plugins\User\Domain\Entities\User;
-use Plugins\User\Infrastructure\Audit\AuditLogger;
+use Plugins\Audit\Application\Services\AuditService;
 use Tests\Unit\Plugins\Auth\Support\FakeSession;
 use Tests\Unit\Plugins\Auth\Support\RecordingDatabasePort;
 use Tests\Unit\Plugins\User\Support\FakeCache;
@@ -67,10 +68,11 @@ final class SessionAuthStageRememberTest extends TestCase
             transaction: new TransactionManager(new FakeDatabasePort()),
             collector:   new DomainEventCollector(),
             outbox:      new FakeOutbox(),
+            eventBus:    new EventBus(new CoreContainer()),
             hasher:      new FakeHasher(),
             identity:    Identity::guest(),
             cache:       new FakeCache(),
-            audit:       new AuditLogger('actor', static fn(string $l) => null),
+            audit:       new AuditService(writer: null, sink: static fn(string $l) => null, actorId: 'actor'),
         );
 
         $auth = new AuthService(

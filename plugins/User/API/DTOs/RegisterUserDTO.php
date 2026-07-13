@@ -10,6 +10,7 @@ use Plugins\User\Domain\ValueObjects\Email;
 use Plugins\User\Domain\ValueObjects\PasswordPolicy;
 use Plugins\User\Domain\ValueObjects\Username;
 use Plugins\Validation\AbstractDto;
+use Plugins\Validation\Validator;
 
 /**
  * Validated registration input. rules() carry the field SHAPE (mirrored by the
@@ -41,22 +42,23 @@ final readonly class RegisterUserDTO extends AbstractDto
          * @var array<string, string>
          */
         public array $profile = [],
-    ) {}
+    ) {
+    }
 
     /** Profile keys accepted at signup — never trust arbitrary request input. */
     private const PROFILE_FIELDS = [
         'first_name' => 80,
-        'last_name'  => 80,
-        'phone'      => 15,
-        'timezone'   => 50,
-        'locale'     => 5,
+        'last_name' => 80,
+        'phone' => 15,
+        'timezone' => 50,
+        'locale' => 5,
     ];
 
     protected static function rules(): array
     {
         return [
             'username' => 'required|string|min:5|max:50|regex:/^[A-Za-z0-9._-]+$/',
-            'email'    => 'required|string|email|max:150',
+            'email' => 'required|string|email|max:150',
             'password' => 'required|string',
         ];
     }
@@ -64,29 +66,52 @@ final readonly class RegisterUserDTO extends AbstractDto
     protected static function messages(): array
     {
         return [
-            'username.min'   => 'Username must be between 5 and 50 characters.',
-            'username.max'   => 'Username must be between 5 and 50 characters.',
+            'username.min' => 'Username must be between 5 and 50 characters.',
+            'username.max' => 'Username must be between 5 and 50 characters.',
             'username.regex' => 'Username may only contain letters, digits, dot, underscore and hyphen.',
-            'email.email'    => 'Email is not a valid address.',
-            'email.max'      => 'Email must be 150 characters or fewer.',
+            'email.email' => 'Email is not a valid address.',
+            'email.max' => 'Email must be 150 characters or fewer.',
+        ];
+    }
+
+    /**
+     * Validation for the OPTIONAL profile fields. Every rule is `nullable`, so
+     * an absent field passes; a present one must match. Uses only CORE Validator
+     * rules (no CommonRules registration needed). Keys mirror PROFILE_FIELDS.
+     *
+     * @return array<string, string>
+     */
+    private static function profileRules(): array
+    {
+        return [
+            'first_name' => "nullable|string|max:80|regex:/^[\\p{L}\\p{M} .,'\\-]+$/u",
+            'last_name'  => "nullable|string|max:80|regex:/^[\\p{L}\\p{M} .,'\\-]+$/u",
+            'phone'      => 'nullable|string|max:15|regex:/^[0-9+()\\s-]+$/',
+            'timezone'   => 'nullable|string|timezone',
+            'locale'     => 'nullable|string|max:5|regex:/^[A-Za-z]{2}([_-][A-Za-z]{2})?$/',
         ];
     }
 
     public static function fromRequest(Request $request): self
     {
-        // Shape errors + password-strength errors combine into one 422.
+        // Shape errors + password-strength errors + profile-field errors all
+        // combine into one 422. Profile is validated on the ASSEMBLED array so a
+        // derived full_name → first_name/last_name split is checked too.
+        $profile = self::profileFrom($request);
+
         $errors = static::collectErrors($request->all());
         $errors += PasswordPolicy::validate((string) $request->input('password', ''));
+        $errors += Validator::make($profile, self::profileRules())->errors();
         if ($errors !== []) {
             throw new ValidationException($errors);
         }
 
         return new self(
             username: Username::fromString(trim((string) $request->input('username', ''))),
-            email:    Email::fromString(trim((string) $request->input('email', ''))),
+            email: Email::fromString(trim((string) $request->input('email', ''))),
             password: (string) $request->input('password', ''),
             tenantId: (string) ($request->attribute('tenant') ?? ''),
-            profile:  self::profileFrom($request),
+            profile: $profile,
         );
     }
 
@@ -98,6 +123,28 @@ final readonly class RegisterUserDTO extends AbstractDto
             $value = trim((string) $request->input($key, ''));
             if ($value !== '') {
                 $profile[$key] = mb_substr($value, 0, $max);
+            }
+        }
+
+        // Some clients send a single "full name" instead of first/last. Split it
+        // (first token → first_name, remainder → last_name) to fill only the
+        // parts not already supplied explicitly — explicit fields always win.
+        $full = trim((string) $request->input(
+            'full_name',
+            (string) $request->input(
+                'fullname',
+                (string) $request->input('name', '')
+            )
+        ));
+        if ($full !== '') {
+            $parts = preg_split('/\s+/', $full, 2) ?: [];
+            $first = trim($parts[0] ?? '');
+            $last = trim($parts[1] ?? '');
+            if ($first !== '' && !isset($profile['first_name'])) {
+                $profile['first_name'] = mb_substr($first, 0, self::PROFILE_FIELDS['first_name']);
+            }
+            if ($last !== '' && !isset($profile['last_name'])) {
+                $profile['last_name'] = mb_substr($last, 0, self::PROFILE_FIELDS['last_name']);
             }
         }
 

@@ -4,20 +4,29 @@
     "solves": "auth.social",
     "type": "module",
 
-    "requires": [],
+    "requires": ["database.management", "user.management", "auth.identity", "http.client"],
     "exposes": ["Plugins\\SocialAuth\\API\\Contracts\\SocialAuthServiceContract"],
 
-    "routes": [],
+    "routes": [
+        { "method": "GET",  "path": "/auth/social/{driver}",          "handler": "Plugins\\SocialAuth\\Infrastructure\\Http\\Controllers\\SocialAuthController@redirect", "filters": ["throttle:20,1"] },
+        { "method": "GET",  "path": "/auth/social/{driver}/callback", "handler": "Plugins\\SocialAuth\\Infrastructure\\Http\\Controllers\\SocialAuthController@callback", "filters": ["throttle:20,1"] },
+        { "method": "POST", "path": "/auth/social/{driver}/token",    "handler": "Plugins\\SocialAuth\\Infrastructure\\Http\\Controllers\\SocialAuthController@token",    "filters": ["throttle:10,1"] }
+    ],
     "emits": [],
     "listens": [],
 
+    "documentation": "Social sign-in, end to end: GET /auth/social/{driver} redirects to the provider, the callback maps the profile onto a central user (linked identity -> email match -> create) and opens a platform session (web) or returns a JWT+refresh pair (?mode=token). POST /auth/social/{driver}/token verifies a native-SDK token (google access_token/id_token, apple identity_token vs JWKS) for mobile. Links live in central social_identities.",
+
     "config": [
-        { "key": "SOCIAL_AUTH_BASE_URL", "type": "string", "required": false },
+        { "key": "SOCIAL_AUTH_BASE_URL",         "type": "string", "required": false },
+        { "key": "SOCIAL_AUTH_SUCCESS_REDIRECT", "type": "string", "required": false },
+        { "key": "AUTH_MOBILE_ACCESS_TTL",       "type": "int",    "required": false },
         { "key": "GITHUB_CLIENT_ID",     "type": "string", "required": false },
         { "key": "GITHUB_CLIENT_SECRET", "type": "string", "required": false },
         { "key": "GITHUB_REDIRECT_URI",  "type": "string", "required": false },
         { "key": "GOOGLE_CLIENT_ID",     "type": "string", "required": false },
         { "key": "GOOGLE_CLIENT_SECRET", "type": "string", "required": false },
-        { "key": "GOOGLE_REDIRECT_URI",  "type": "string", "required": false }
+        { "key": "GOOGLE_REDIRECT_URI",  "type": "string", "required": false },
+        { "key": "APPLE_CLIENT_ID",      "type": "string", "required": false }
     ]
 }

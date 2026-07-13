@@ -6,7 +6,7 @@ namespace Tests\Unit\Plugins\Tenancy;
 
 use PHPUnit\Framework\TestCase;
 use Plugins\Auth\API\Contracts\AuthServiceContract;
-use Plugins\Tenancy\Application\Ports\AuditSink;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Tenancy\Application\Ports\MembershipReader;
 use Plugins\Tenancy\Application\Services\MembershipService;
 use Plugins\Tenancy\Domain\Entities\Membership;
@@ -77,7 +77,7 @@ final class MembershipServiceTest extends TestCase
             public function verifyPassword(string $plain, string $hash): bool { return $plain === $hash; }
         };
 
-        $sink = new class($audit) implements AuditSink {
+        $sink = new class($audit) implements AuditServiceContract {
             public function __construct(private \ArrayObject $log) {}
             public function record(string $action, ?string $userId = null, ?string $tenantId = null, array $meta = [], ?string $ip = null): void
             {

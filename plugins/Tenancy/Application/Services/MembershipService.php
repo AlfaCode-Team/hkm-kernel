@@ -8,7 +8,7 @@ use Plugins\Auth\API\Contracts\AuthServiceContract;
 use Plugins\Tenancy\API\Contracts\MembershipServiceContract;
 use Plugins\Tenancy\API\DTOs\TenantSelection;
 use Plugins\Tenancy\API\DTOs\TenantSummary;
-use Plugins\Tenancy\Application\Ports\AuditSink;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Tenancy\Application\Ports\MembershipReader;
 use Plugins\Tenancy\Domain\Exceptions\NotAMemberException;
 
@@ -31,7 +31,7 @@ final class MembershipService implements MembershipServiceContract
     public function __construct(
         private readonly MembershipReader $memberships,
         private readonly AuthServiceContract $auth,
-        private readonly AuditSink $audit,
+        private readonly AuditServiceContract $audit,
         private readonly int $tokenTtl = 3600,
     ) {}
 
@@ -45,13 +45,22 @@ final class MembershipService implements MembershipServiceContract
 
     public function isActiveMember(string $userId, string $tenantId): bool
     {
-        return $this->memberships->find($userId, $tenantId)?->isRoutable() === true;
+        return $this->activeMember($userId, $tenantId) !== null;
+    }
+
+    public function activeMember(string $userId, string $tenantId): ?TenantSummary
+    {
+        $membership = $this->memberships->find($userId, $tenantId);
+
+        return $membership !== null && $membership->isRoutable()
+            ? TenantSummary::fromMembership($membership)
+            : null;
     }
 
     public function selectTenant(string $userId, string $tenantId, ?string $ip = null): TenantSelection
     {
         $membership = $this->memberships->find($userId, $tenantId);
-
+ 
         if ($membership === null || !$membership->isRoutable()) {
             $this->audit->record('tenant.switch_denied', $userId, $tenantId, [], $ip);
             throw NotAMemberException::for($userId, $tenantId);

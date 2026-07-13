@@ -9,6 +9,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Tenancy\Domain\Entities\Tenant;
 use Plugins\Tenancy\Infrastructure\Cli\Concerns\ManagesTenantDatabase;
+use Plugins\Tenancy\Support\TenantsFile;
 
 /**
  * tenant:delete — de-provision a tenant (the inverse of tenant:create).
@@ -48,15 +49,29 @@ final class DeleteTenantCommand extends AbstractCommand
         $id   = (string) $this->option('tenant');
         $slug = (string) $this->option('slug');
 
+        // No id/slug → fall back to the default recorded by tenant:create in
+        // var/tenants.json (the hint is still validated against the registry).
+        $fromFile = false;
         if ($id === '' && $slug === '') {
-            $this->error('Provide --tenant <id> or --slug <slug>.');
-            return self::FAILURE;
+            $fallback = TenantsFile::defaultTenant();
+            if ($fallback === null) {
+                $this->error('Provide --tenant <id> or --slug <slug> (no default tenant recorded in var/tenants.json).');
+                return self::FAILURE;
+            }
+            $id       = $fallback['tenant_id'];
+            $fromFile = true;
+            $this->info("Using default tenant [{$fallback['slug']}] from " . TenantsFile::path() . '.');
         }
 
         $central = $this->connections->default();
         $tenant  = $this->resolve($central, $id, $slug);
         if ($tenant === null) {
-            $this->error('Tenant not found in the registry.');
+            if ($fromFile) {
+                TenantsFile::forget($id);
+                $this->error('Recorded default tenant no longer exists in the registry — stale entry dropped from var/tenants.json. Re-run with --tenant or --slug.');
+            } else {
+                $this->error('Tenant not found in the registry.');
+            }
             return self::FAILURE;
         }
 
@@ -98,6 +113,7 @@ final class DeleteTenantCommand extends AbstractCommand
         try {
             $central->execute('DELETE FROM tenants WHERE tenant_id = :id', ['id' => $tenant->tenantId]);
             $this->info('· removed registry row.');
+            TenantsFile::forget($tenant->tenantId);
         } catch (\Throwable $e) {
             $failed++;
             $this->error("· could not remove registry row: {$e->getMessage()}");

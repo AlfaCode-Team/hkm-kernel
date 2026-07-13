@@ -13,6 +13,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
 use Plugins\Auth\API\Contracts\AuthServiceContract;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Tenancy\API\Contracts\InvitationServiceContract;
 use Plugins\Tenancy\API\Contracts\MembershipServiceContract;
@@ -21,9 +22,7 @@ use Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract;
 use Plugins\Tenancy\API\Contracts\TenantHostRegistryContract;
 use Plugins\Tenancy\API\Contracts\TenantHostServiceContract;
 use Plugins\Tenancy\API\Contracts\TenantRegistryContract;
-use Plugins\Tenancy\Application\Ports\AuditReader;
-use Plugins\Tenancy\Application\Ports\AuditSink;
-use Plugins\Tenancy\Application\Ports\AuditWriter;
+use Plugins\Tenancy\Application\Listeners\AssignTenantMembershipOnUserRegistered;
 use Plugins\Tenancy\Application\Ports\InvitationStore;
 use Plugins\Tenancy\Application\Ports\MembershipReader;
 use Plugins\Tenancy\Application\Ports\MembershipWriter;
@@ -31,13 +30,10 @@ use Plugins\Tenancy\Application\Ports\DnsResolver;
 use Plugins\Tenancy\Application\Ports\TenantProvisioner;
 use Plugins\Tenancy\Application\Ports\TenantWriteStore;
 use Plugins\Tenancy\Application\Ports\TenantHostStore;
-use Plugins\Tenancy\Application\Services\AuditService;
 use Plugins\Tenancy\Application\Services\InvitationService;
 use Plugins\Tenancy\Application\Services\MembershipService;
 use Plugins\Tenancy\Application\Services\TenantAdminService;
 use Plugins\Tenancy\Application\Services\TenantHostService;
-use Plugins\Tenancy\Infrastructure\Persistence\AuditTrail;
-use Plugins\Tenancy\Infrastructure\Persistence\AuditLogRepository;
 use Plugins\Tenancy\Infrastructure\Dns\SystemDnsResolver;
 use Plugins\Tenancy\Infrastructure\Http\Controllers\InvitationController;
 use Plugins\Tenancy\Infrastructure\Http\Controllers\TenantAdminController;
@@ -84,7 +80,7 @@ final class Provider implements ModuleContract
 
     public function requires(): array
     {
-        return ['database.management', 'auth.identity', 'user.management'];
+        return ['database.management', 'auth.identity', 'user.management', 'audit.trail'];
     }
 
     public function exposes(): array
@@ -146,35 +142,37 @@ final class Provider implements ModuleContract
         // is differs.
         $container->singleton(TenantIdentifier::class, static function ($c): TenantIdentifier {
             return match (self::mode()) {
-                'host'   => new HostTenantIdentifier($c->make(TenantHostRegistryContract::class)),
+                'host' => new HostTenantIdentifier($c->make(TenantHostRegistryContract::class)),
                 'domain' => new DomainTenantIdentifier(self::baseDomains(), self::reservedSubdomains()),
-                default  => new ClaimTenantIdentifier(),
+                default => new ClaimTenantIdentifier(),
             };
         });
 
         // ── custom-domain management (UI-driven) ─────────────────────────────
         // Writes the central tenant_hosts table; DNS adapter scans live records
         // to prove ownership of a domain by the verification token.
-        $container->bindInternal(TenantHostStore::class, static fn ($c): TenantHostStore =>
+        $container->bindInternal(TenantHostStore::class, static fn($c): TenantHostStore =>
             new TenantHostRepository($c->make(DatabaseConnectionManagerContract::class)->default()));
 
-        $container->bindInternal(DnsResolver::class, static fn (): DnsResolver => new SystemDnsResolver());
+        $container->bindInternal(DnsResolver::class, static fn(): DnsResolver => new SystemDnsResolver());
 
-        $container->bind(TenantHostServiceContract::class, static fn ($c): TenantHostServiceContract =>
+        $container->bind(TenantHostServiceContract::class, static fn($c): TenantHostServiceContract =>
             new TenantHostService(
-                hosts:           $c->make(TenantHostStore::class),
-                dns:             $c->make(DnsResolver::class),
-                audit:           $c->make(AuditSink::class),
-                registry:        $c->make(TenantHostRegistryContract::class),
-                challengePrefix:   (string) (env('TENANCY_DNS_CHALLENGE_PREFIX') ?: '_psp-verify'),
-                valuePrefix:       (string) (env('TENANCY_DNS_VALUE_PREFIX') ?: 'psp-verify='),
+                hosts: $c->make(TenantHostStore::class),
+                dns: $c->make(DnsResolver::class),
+                audit: $c->make(AuditServiceContract::class),
+                registry: $c->make(TenantHostRegistryContract::class),
+                challengePrefix: (string) (env('TENANCY_DNS_CHALLENGE_PREFIX') ?: '_psp-verify'),
+                valuePrefix: (string) (env('TENANCY_DNS_VALUE_PREFIX') ?: 'psp-verify='),
                 maxHostsPerTenant: self::intEnv('TENANCY_MAX_HOSTS_PER_TENANT', 25),
             ));
 
-        $container->bindInternal(TenantHostController::class, static fn ($c): TenantHostController =>
+        $container->bindInternal(TenantHostController::class, static fn($c): TenantHostController =>
             new TenantHostController($c->make(TenantHostServiceContract::class)));
 
-        $container->bind(TenantContextStage::class, static fn ($c): TenantContextStage =>
+        $container->bind(
+            TenantContextStage::class,
+            static fn($c): TenantContextStage =>
             new TenantContextStage(
                 $c->make(TenantConnectionResolverContract::class),
                 $c->make(TenantIdentifier::class),
@@ -184,30 +182,22 @@ final class Provider implements ModuleContract
         // ── tenant-selection flow (central control plane) ────────────────────
         // Membership + audit read/write the CENTRAL connection (user_tenants /
         // audit_log live in the control-plane DB), pinned via the manager default.
-        $container->bindInternal(MembershipReader::class, static fn ($c): MembershipReader =>
+        $container->bindInternal(MembershipReader::class, static fn($c): MembershipReader =>
             new MembershipRepository($c->make(DatabaseConnectionManagerContract::class)->default()));
 
-        // Write side: repository (persistence seam) behind the audit service.
-        $container->bindInternal(AuditWriter::class, static fn ($c): AuditWriter =>
-            new AuditTrail($c->make(DatabaseConnectionManagerContract::class)->default()));
+        // Audit is now owned by the shared Audit plugin (solves audit.trail).
+        // Tenancy records through its published AuditServiceContract instead of
+        // writing `audit_log` itself — see requires: ["audit.trail"].
 
-        // Application service owns the best-effort policy consumed by all services.
-        $container->bindInternal(AuditSink::class, static fn ($c): AuditSink =>
-            new AuditService($c->make(AuditWriter::class), self::optionalLogger($c)));
-
-        // Read/query side of the same central `audit_log` table.
-        $container->bindInternal(AuditReader::class, static fn ($c): AuditReader =>
-            new AuditLogRepository($c->make(DatabaseConnectionManagerContract::class)->default()));
-
-        $container->bind(MembershipServiceContract::class, static fn ($c): MembershipServiceContract =>
+        $container->bind(MembershipServiceContract::class, static fn($c): MembershipServiceContract =>
             new MembershipService(
                 memberships: $c->make(MembershipReader::class),
-                auth:        $c->make(AuthServiceContract::class),
-                audit:       $c->make(AuditSink::class),
-                tokenTtl:    self::intEnv('TENANCY_TOKEN_TTL', 3600),
+                auth: $c->make(AuthServiceContract::class),
+                audit: $c->make(AuditServiceContract::class),
+                tokenTtl: self::intEnv('TENANCY_TOKEN_TTL', 3600),
             ));
 
-        $container->bindInternal(TenantController::class, static fn ($c): TenantController =>
+        $container->bindInternal(TenantController::class, static fn($c): TenantController =>
             new TenantController($c->make(MembershipServiceContract::class)));
 
         // ── tenant administration (control-plane CRUD) ───────────────────────
@@ -215,7 +205,7 @@ final class Provider implements ModuleContract
         // the tenant:create / tenant:delete CLI commands. The service orchestrates
         // two internal ports: persistence (DatabasePort only) and provisioning
         // (DDL + template migrations). Both pin to the CENTRAL connection.
-        $container->bindInternal(TenantWriteStore::class, static fn ($c): TenantWriteStore =>
+        $container->bindInternal(TenantWriteStore::class, static fn($c): TenantWriteStore =>
             new TenantAdminRepository($c->make(DatabaseConnectionManagerContract::class)->default()));
 
         $container->bindInternal(TenantProvisioner::class, static function ($c): TenantProvisioner {
@@ -224,39 +214,43 @@ final class Provider implements ModuleContract
             return new DdlTenantProvisioner(
                 central: $c->make(DatabaseConnectionManagerContract::class)->default(),
                 templatePath: (is_string($template) && $template !== '')
-                    ? $template
-                    : __DIR__ . '/database/tenant-template',
+                ? $template
+                : __DIR__ . '/database/tenant-template',
             );
         });
 
-        $container->bind(TenantAdminServiceContract::class, static fn ($c): TenantAdminServiceContract =>
+        $container->bind(TenantAdminServiceContract::class, static fn($c): TenantAdminServiceContract =>
             new TenantAdminService(
-                store:       $c->make(TenantWriteStore::class),
+                store: $c->make(TenantWriteStore::class),
                 provisioner: $c->make(TenantProvisioner::class),
-                registry:    $c->make(TenantRegistryContract::class),
-                crypto:      $c->make(EncryptionPort::class),
-                identity:    $c->make(\AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity::class),
+                registry: $c->make(TenantRegistryContract::class),
+                crypto: $c->make(EncryptionPort::class),
+                identity: $c->make(\AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity::class),
             ));
 
-        $container->bindInternal(TenantAdminController::class, static fn ($c): TenantAdminController =>
+        $container->bindInternal(TenantAdminController::class, static fn($c): TenantAdminController =>
             new TenantAdminController($c->make(TenantAdminServiceContract::class)));
 
         // ── invitations (email onboarding) ───────────────────────────────────
-        $container->bindInternal(InvitationStore::class, static fn ($c): InvitationStore =>
+        $container->bindInternal(InvitationStore::class, static fn($c): InvitationStore =>
             new InvitationRepository($c->make(DatabaseConnectionManagerContract::class)->default()));
 
-        $container->bindInternal(MembershipWriter::class, static fn ($c): MembershipWriter =>
+        $container->bindInternal(MembershipWriter::class, static fn($c): MembershipWriter =>
             new MembershipRepository($c->make(DatabaseConnectionManagerContract::class)->default()));
 
-        $container->bind(InvitationServiceContract::class, static fn ($c): InvitationServiceContract =>
+
+        $container->bindInternal(AssignTenantMembershipOnUserRegistered::class, static fn($c): AssignTenantMembershipOnUserRegistered =>
+            new AssignTenantMembershipOnUserRegistered($c->make(MembershipWriter::class)));
+
+        $container->bind(InvitationServiceContract::class, static fn($c): InvitationServiceContract =>
             new InvitationService(
                 invitations: $c->make(InvitationStore::class),
                 memberships: $c->make(MembershipWriter::class),
-                audit:       $c->make(AuditSink::class),
+                audit: $c->make(AuditServiceContract::class),
             ));
 
         // ── HTTP boundary for the invitation flow ────────────────────────────
-        $container->bindInternal(InvitationController::class, static fn ($c): InvitationController =>
+        $container->bindInternal(InvitationController::class, static fn($c): InvitationController =>
             new InvitationController(
                 $c->make(InvitationServiceContract::class),
                 $c->make(UserServiceContract::class),
@@ -307,11 +301,15 @@ final class Provider implements ModuleContract
                 (new \Plugins\Database\Provider())->register($c);
                 $c->setScope((new \Plugins\Crypto\Provider())->solves());
                 (new \Plugins\Crypto\Provider())->register($c);
+                // Audit publishes AuditServiceContract, which the Tenancy services
+                // built below (TenantHostService, …) now depend on.
+                $c->setScope((new \Plugins\Audit\Provider())->solves());
+                (new \Plugins\Audit\Provider())->register($c);
                 $c->setScope('tenancy.routing');
                 (new self())->register($c);
 
                 $connections = $c->make(DatabaseConnectionManagerContract::class);
-                $crypto      = $c->make(EncryptionPort::class);
+                $crypto = $c->make(EncryptionPort::class);
 
                 $cli->command(new \Plugins\Tenancy\Infrastructure\Cli\CreateTenantCommand($connections, $crypto));
                 $cli->command(new \Plugins\Tenancy\Infrastructure\Cli\MigrateTenantsCommand(
@@ -320,6 +318,7 @@ final class Provider implements ModuleContract
                     $crypto,
                 ));
                 $cli->command(new \Plugins\Tenancy\Infrastructure\Cli\DeleteTenantCommand($connections));
+                $cli->command(new \Plugins\Tenancy\Infrastructure\Cli\RememberTenantCommand($connections));
                 $cli->command(new \Plugins\Tenancy\Infrastructure\Cli\AddTenantHostCommand(
                     $c->make(TenantHostServiceContract::class),
                     $connections,

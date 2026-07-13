@@ -20,12 +20,14 @@ final class PasswordResetBroker implements PasswordBroker
 {
     private const TOKEN_PREFIX    = 'auth:pwreset:tok:';
     private const THROTTLE_PREFIX = 'auth:pwreset:thr:';
+    private const OTP_PREFIX      = 'auth:pwreset:otp:';
 
     public function __construct(
         private readonly UserServiceContract $users,
         private readonly CachePort $cache,
         private readonly int $ttlSeconds = 3600,
         private readonly int $throttleSeconds = 60,
+        private readonly int $otpTtlSeconds = 600,
     ) {}
 
     public function sendResetLink(string $email): array
@@ -83,6 +85,47 @@ final class PasswordResetBroker implements PasswordBroker
         $this->cache->delete(self::THROTTLE_PREFIX . $this->key($email));
 
         return self::PASSWORD_RESET;
+    }
+
+    // ── OTP mode (old __DEV__ mobile forgot-password flow) ──────────────────────
+
+    public function sendOtp(string $email): ?array
+    {
+        $result = $this->sendResetLink($email);
+        if (($result['status'] ?? '') !== self::RESET_LINK_SENT || !isset($result['token'])) {
+            return null; // unknown user or throttled — caller responds generically
+        }
+
+        // 6-digit OTP paired with the underlying reset token: "otp|token",
+        // short-lived and single-use (consumed by verifyOtp).
+        $otp = str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
+        $this->cache->set(
+            self::OTP_PREFIX . $this->key((string) $result['email']),
+            $otp . '|' . $result['token'],
+            $this->otpTtlSeconds,
+        );
+
+        return ['otp' => $otp, 'email' => (string) $result['email']];
+    }
+
+    public function verifyOtp(string $email, string $otp): ?string
+    {
+        $email  = mb_strtolower(trim($email));
+        $cached = $this->cache->get(self::OTP_PREFIX . $this->key($email));
+
+        if (!is_string($cached) || $cached === '') {
+            return null;
+        }
+
+        [$storedOtp, $token] = explode('|', $cached, 2) + [1 => ''];
+        if ($token === '' || !hash_equals($storedOtp, trim($otp))) {
+            return null;
+        }
+
+        // Single-use: burn the OTP; the underlying token stays valid for reset().
+        $this->cache->delete(self::OTP_PREFIX . $this->key($email));
+
+        return $token;
     }
 
     private function key(string $email): string

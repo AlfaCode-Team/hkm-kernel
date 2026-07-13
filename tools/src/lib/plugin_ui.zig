@@ -161,6 +161,29 @@ pub fn syncPlugin(
     return written;
 }
 
+/// True when the copied mirror at `frontend/plugins/<slug>` differs from the
+/// plugin's live `ui/` — missing entirely, missing files, extra files, or any
+/// byte-different file. A symlinked mirror never differs (it IS the live tree).
+pub fn mirrorDiffers(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8, p: UiPlugin) !bool {
+    if (p.linked) return false;
+    const cwd = Dir.cwd();
+    const dest = try std.fmt.allocPrint(allocator, "{s}/frontend/plugins/{s}", .{ util.trimSlash(projectRoot), p.slug });
+    if (!util.dirExists(cwd, io, dest)) return true;
+
+    var src_rels: std.ArrayList([]const u8) = .empty;
+    var dest_rels: std.ArrayList([]const u8) = .empty;
+    try collectFiles(allocator, io, p.uiDir, "", &src_rels);
+    try collectFiles(allocator, io, dest, "", &dest_rels);
+    if (src_rels.items.len != dest_rels.items.len) return true;
+
+    for (src_rels.items) |rel| {
+        const a = cwd.readFileAlloc(io, try std.fmt.allocPrint(allocator, "{s}/{s}", .{ p.uiDir, rel }), allocator, .limited(16 * 1024 * 1024)) catch continue;
+        const b = cwd.readFileAlloc(io, try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dest, rel }), allocator, .limited(16 * 1024 * 1024)) catch return true;
+        if (!std.mem.eql(u8, a, b)) return true;
+    }
+    return false;
+}
+
 /// Recursively collect files under `root`, skipping dotfiles, dev-only subtrees
 /// (node_modules/tests/dist/…) and non-shippable extensions (.pdf/.map).
 fn collectFiles(allocator: std.mem.Allocator, io: Io, root: []const u8, prefix: []const u8, out: *std.ArrayList([]const u8)) !void {

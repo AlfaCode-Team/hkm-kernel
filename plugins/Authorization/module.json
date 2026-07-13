@@ -4,7 +4,7 @@
     "solves": "authorization.policy",
     "type": "module",
 
-    "requires": ["database.query"],
+    "requires": ["database.management"],
     "exposes": ["Plugins\\Authorization\\API\\Contracts\\AuthorizationServiceContract"],
 
     "routes": [],

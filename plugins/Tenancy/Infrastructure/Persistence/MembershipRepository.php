@@ -21,7 +21,7 @@ use Plugins\Tenancy\Domain\ValueObjects\MembershipStatus;
 final class MembershipRepository implements MembershipReader, MembershipWriter
 {
     private const SELECT =
-        'SELECT ut.user_id, ut.tenant_id, ut.role, ut.status,
+        'SELECT ut.user_id, ut.tenant_id, ut.role, ut.joined_at, ut.status,
                 t.name, t.slug, t.status AS tenant_status
            FROM user_tenants ut
            JOIN tenants t ON t.tenant_id = ut.tenant_id AND t.deleted_at IS NULL';

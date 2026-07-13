@@ -70,17 +70,20 @@ pub fn publishAssets(
     }
 }
 
-/// Publish only assets that DO NOT yet exist in the project — used by `update`
-/// so new migrations/views/config land without clobbering files a user may have
-/// customised since the plugin was enabled. The NEW project-relative paths are
-/// appended to `out`. Pass `dry_run` to detect without writing.
-pub fn publishNewAssets(
+/// Analyse a plugin's publishable subtrees (config, database, resources)
+/// against the project's published copies, then bring the project in sync:
+/// files the plugin gained are published (appended to `new_out`) and files
+/// whose CONTENT drifted from the plugin's version are overwritten with the
+/// plugin copy (appended to `changed_out`) — the plugin is the source of
+/// truth on `update`. Pass `dry_run` to detect without writing.
+pub fn syncAssets(
     allocator: std.mem.Allocator,
     io: Io,
     pluginFolder: []const u8,
     projectRoot: []const u8,
     dry_run: bool,
-    out: *std.ArrayList([]const u8),
+    new_out: *std.ArrayList([]const u8),
+    changed_out: *std.ArrayList([]const u8),
 ) !void {
     const cwd = Dir.cwd();
     for (subtrees) |sub| {
@@ -92,15 +95,23 @@ pub fn publishNewAssets(
         for (rels.items) |rel| {
             const relDest = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ sub, rel });
             const dest = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ projectRoot, relDest });
-            if (util.fileExists(io, dest)) continue; // already published — leave it
+            const src = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srcDir, rel });
+            const bytes = cwd.readFileAlloc(io, src, allocator, .limited(16 * 1024 * 1024)) catch continue;
+
+            var kind: enum { new, changed } = .new;
+            if (cwd.readFileAlloc(io, dest, allocator, .limited(16 * 1024 * 1024)) catch null) |have| {
+                if (std.mem.eql(u8, have, bytes)) continue; // identical — in sync
+                kind = .changed;
+            }
 
             if (!dry_run) {
-                const src = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srcDir, rel });
-                const bytes = cwd.readFileAlloc(io, src, allocator, .limited(16 * 1024 * 1024)) catch continue;
                 if (util.parentOf(dest)) |parent| try cwd.createDirPath(io, parent);
                 try cwd.writeFile(io, .{ .sub_path = dest, .data = bytes });
             }
-            try out.append(allocator, relDest);
+            switch (kind) {
+                .new => try new_out.append(allocator, relDest),
+                .changed => try changed_out.append(allocator, relDest),
+            }
         }
     }
 }
@@ -143,6 +154,14 @@ fn collectFiles(allocator: std.mem.Allocator, io: Io, root: []const u8, prefix: 
 /// True if any published path is a migration (used to decide migrate:run).
 pub fn hasMigrations(paths: []const []const u8) bool {
     for (paths) |p| if (std.mem.startsWith(u8, p, "database/migrations/")) return true;
+    return false;
+}
+
+/// True if any path is a migration on EITHER surface — central
+/// (database/migrations) or tenant (database/tenant-template). Used by
+/// `update` to decide whether a migrate pass is needed at all.
+pub fn hasAnyMigrations(paths: []const []const u8) bool {
+    for (paths) |p| if (isMigrationPath(p)) return true;
     return false;
 }
 
@@ -497,8 +516,10 @@ fn scopedPluginConfig(
 }
 
 /// Run ONLY this plugin's migrations as its own batch: install + run on the
-/// CENTRAL database first, then `tenant:migrate --all` for every tenant of the
-/// project. Best-effort — a non-zero exit is surfaced as a warning, never fatal.
+/// CENTRAL database first, then `tenant:migrate` for every active tenant of
+/// the project. The two passes are independent — a plugin shipping only
+/// tenant-template migrations still gets its tenant pass, and vice versa.
+/// Best-effort — a non-zero exit is surfaced as a warning, never fatal.
 pub fn runPluginMigrations(
     allocator: std.mem.Allocator,
     io: Io,
@@ -508,34 +529,48 @@ pub fn runPluginMigrations(
     folder: []const u8,
     paths: []const []const u8,
 ) !void {
-    const scoped = (try scopedPluginConfig(allocator, io, projectRoot, folder, paths)) orelse return;
-    defer Dir.cwd().deleteTree(io, scoped.tmp_root) catch {};
-    const cfgArg = scoped.config_arg;
-
     // 1. Central database — migrate:run applies ONLY this plugin's pending
     //    migrations (paths are scoped to it) as a NEW batch in the shared
     //    tracking table. We do NOT refresh/drop: a clean enable has nothing
     //    applied yet (disable rolled it back), and dropping tables here would
     //    fail on cross-plugin foreign keys. We capture --json output to learn
     //    the batch number and record it in the plugin-assets manifest.
-    prompt.muted(try std.fmt.allocPrint(allocator, "    migrating {s} on central DB (own batch)…", .{folder}));
-    _ = try spawnCli(allocator, io, env, projectRoot, autoload, &.{ "migrate:install", "--force", cfgArg });
-    const central = try spawnCliCaptureBatch(allocator, io, env, projectRoot, autoload, &.{ "migrate:run", "--force", "--json", cfgArg });
-    if (!central.ran or central.code != 0) {
-        prompt.warn("Central migrate:run returned non-zero — check the DB state.");
-    } else if (central.applied > 0 and central.batch != null) {
-        try recordBatch(allocator, io, projectRoot, folder, central.batch.?);
-        prompt.ok(try std.fmt.allocPrint(allocator, "{s} migrated on central DB — {d} migration(s), batch {d}", .{ folder, central.applied, central.batch.? }));
-    } else {
-        prompt.muted(try std.fmt.allocPrint(allocator, "    {s}: no new migrations to apply on central DB.", .{folder}));
+    //    scopedPluginConfig is null when the plugin ships no central migrations.
+    const scoped = try scopedPluginConfig(allocator, io, projectRoot, folder, paths);
+    defer if (scoped) |s| Dir.cwd().deleteTree(io, s.tmp_root) catch {};
+
+    if (scoped) |s| {
+        prompt.muted(try std.fmt.allocPrint(allocator, "    migrating {s} on central DB (own batch)…", .{folder}));
+        _ = try spawnCli(allocator, io, env, projectRoot, autoload, &.{ "migrate:install", "--force", s.config_arg });
+        const central = try spawnCliCaptureBatch(allocator, io, env, projectRoot, autoload, &.{ "migrate:run", "--force", "--json", s.config_arg });
+        if (!central.ran or central.code != 0) {
+            prompt.warn("Central migrate:run returned non-zero — check the DB state.");
+        } else if (central.applied > 0 and central.batch != null) {
+            try recordBatch(allocator, io, projectRoot, folder, central.batch.?);
+            prompt.ok(try std.fmt.allocPrint(allocator, "{s} migrated on central DB — {d} migration(s), batch {d}", .{ folder, central.applied, central.batch.? }));
+        } else {
+            prompt.muted(try std.fmt.allocPrint(allocator, "    {s}: no new migrations to apply on central DB.", .{folder}));
+        }
     }
 
-    // 2. Every tenant database of this project — same, each tenant records the
-    //    plugin's migrations as its own batch in its own tracking table.
-    if (scoped.has_tenants) {
-        prompt.muted(try std.fmt.allocPrint(allocator, "    migrating {s} across all tenants (own batch each)…", .{folder}));
-        const code = try spawnCli(allocator, io, env, projectRoot, autoload, &.{ "tenant:migrate", "--all", cfgArg });
-        if (code != 0 and code != 255) prompt.warn("tenant:migrate returned non-zero — check tenant DBs.");
+    // 2. Tenant databases — tenant:migrate is registry-driven (Tenancy's
+    //    MigrateTenantsCommand): it applies the PROJECT's published
+    //    database/tenant-template against every active tenant, each with its
+    //    own tracking table, and skips tenants already up to date. Run it when
+    //    the plugin ships tenant-template migrations (regardless of central
+    //    ones) or the base let-migrate config declares a tenants resolver.
+    var ships_tenant_migs = false;
+    for (paths) |p| {
+        if (std.mem.startsWith(u8, p, "database/tenant-template/")) {
+            ships_tenant_migs = true;
+            break;
+        }
+    }
+    const has_tenants_cfg = if (scoped) |s| s.has_tenants else false;
+    if (ships_tenant_migs or has_tenants_cfg) {
+        prompt.muted(try std.fmt.allocPrint(allocator, "    migrating tenant template across all active tenants…", .{}));
+        const code = try spawnCli(allocator, io, env, projectRoot, autoload, &.{"tenant:migrate"});
+        if (code != 0 and code != 255) prompt.warn("tenant:migrate returned non-zero — check tenant DBs (is the Tenancy plugin enabled?).");
     }
 }
 

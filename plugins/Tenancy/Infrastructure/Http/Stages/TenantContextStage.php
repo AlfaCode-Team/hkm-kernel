@@ -68,9 +68,14 @@ final class TenantContextStage implements HttpStageContract
         $identifier = $this->identifier
             ?? ($container?->has(TenantIdentifier::class) ? $container->make(TenantIdentifier::class) : null);
 
-        // No container/identifier available — nothing to route.
-        if ($identifier === null || $container === null) {
-            return $next($request);
+        // No identifier bound means Tenancy is not in this request's dependency
+        // graph — fail loudly instead of silently skipping tenant resolution.
+        // (Register Tenancy as an essential module so it binds on every request.)
+        if ($identifier === null) {
+            throw new \RuntimeException(
+                'TenantContextStage: no TenantIdentifier is bound for this request. '
+                . 'Ensure the Tenancy module is loaded — register it as an essential module.'
+            );
         }
 
         $jar = $container->has(CookieJar::class) ? $container->make(CookieJar::class) : null;
@@ -84,6 +89,7 @@ final class TenantContextStage implements HttpStageContract
         $tenantId = $this->rememberedTenant($jar, $request);
 
 
+      
         if($tenantId === '') {
             $tenantId = $identifier->identify($request);
             $fromCookie = false;
@@ -95,12 +101,13 @@ final class TenantContextStage implements HttpStageContract
         // claim mode): no tenant to route — keep the central DatabasePort bound and
         // continue. Without this, resolver->for('') would throw UnknownTenant and
         // every control-plane/public request (login, OAuth2, marketing) would 404.
-        if ($tenantId === '') {
-            return $next($request);
-        }
+        // if ($tenantId === '') {
+        //     return $next($request);
+        // }
 
         $resolver = $this->resolver ?? $container->make(TenantConnectionResolverContract::class);
 
+       
         try {
             $db = $resolver->for($tenantId);
         } catch (UnknownTenantException) {
@@ -187,6 +194,7 @@ final class TenantContextStage implements HttpStageContract
         }
 
         $raw = $jar->read($request, self::COOKIE); // decrypted; null if absent/tampered
+        
         if ($raw === null) {
             return '';
         }

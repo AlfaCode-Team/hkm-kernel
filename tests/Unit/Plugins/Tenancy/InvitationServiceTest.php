@@ -6,7 +6,7 @@ namespace Tests\Unit\Plugins\Tenancy;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ValidationException;
 use PHPUnit\Framework\TestCase;
-use Plugins\Tenancy\Application\Ports\AuditSink;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Tenancy\Application\Ports\InvitationStore;
 use Plugins\Tenancy\Application\Ports\MembershipWriter;
 use Plugins\Tenancy\Application\Services\InvitationService;
@@ -65,9 +65,9 @@ final class InvitationServiceTest extends TestCase
         };
     }
 
-    private function audit(): AuditSink
+    private function audit(): AuditServiceContract
     {
-        return new class implements AuditSink {
+        return new class implements AuditServiceContract {
             /** @var list<string> */
             public array $actions = [];
             public function record(string $action, ?string $userId = null, ?string $tenantId = null, array $meta = [], ?string $ip = null): void

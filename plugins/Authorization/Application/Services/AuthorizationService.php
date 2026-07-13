@@ -63,6 +63,26 @@ final class AuthorizationService implements AuthorizationServiceContract
             : $this->enforcer->getRolesForUserInDomain($user, $domain);
     }
 
+    /** @return list<string> effective (own + role-inherited) "object:action" grants */
+    public function permissionsOf(string $user, ?string $domain = null): array
+    {
+        $rules = $domain === null
+            ? $this->enforcer->getImplicitPermissionsForUser($user)
+            : $this->enforcer->getImplicitPermissionsForUser($user, $domain);
+
+        $permissions = [];
+        foreach ($rules as $rule) {
+            // Rule shape: [sub, obj, act] (+ optional extras) — flatten to obj:act.
+            $object = (string) ($rule[1] ?? '');
+            $action = (string) ($rule[2] ?? '');
+            if ($object !== '' && $action !== '') {
+                $permissions[$object . ':' . $action] = true;
+            }
+        }
+
+        return array_keys($permissions);
+    }
+
     public function grant(string $subject, string $object, string $action, string ...$extra): bool
     {
         return $this->enforcer->addPolicy($subject, $object, $action, ...$extra);

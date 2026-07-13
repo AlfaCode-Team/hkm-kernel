@@ -14,7 +14,7 @@ use Plugins\User\API\DTOs\UpdatePreferencesDTO;
 use Plugins\User\API\DTOs\UpdatePrivacyDTO;
 use Plugins\User\API\DTOs\UpdateProfileDTO;
 use Plugins\User\Application\Services\UserSettingsService;
-use Plugins\User\Infrastructure\Audit\AuditLogger;
+use Plugins\Audit\Application\Services\AuditService;
 use Plugins\User\Infrastructure\Persistence\UserSettingsRepository;
 use Tests\Unit\Plugins\User\Support\InMemoryDatabasePort;
 
@@ -32,7 +32,7 @@ final class UserSettingsServiceTest extends TestCase
         return new UserSettingsService(
             new UserSettingsRepository(new InMemoryDatabasePort()),
             $identity,
-            new AuditLogger('actor', static fn(string $l) => null),
+            new AuditService(writer: null, sink: static fn(string $l) => null, actorId: 'actor'),
         );
     }
 

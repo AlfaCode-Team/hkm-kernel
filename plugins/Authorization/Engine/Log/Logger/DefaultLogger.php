@@ -49,7 +49,12 @@ class DefaultLogger implements Logger
 
             public function __construct()
             {
-                $this->path = app()->logsPath('casbin.log');
+                // GDA: no framework globals inside the engine. Resolve the log
+                // path from the kernel Paths helper, falling back to the system
+                // temp dir when it is unavailable (tests / standalone use).
+                $this->path = class_exists(\AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths::class)
+                    ? \AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths::logs('casbin.log')
+                    : sys_get_temp_dir() . '/casbin.log';
             }
 
             public function log($level, $message, array $context = []): void

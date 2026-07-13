@@ -7,7 +7,7 @@ namespace Plugins\Tenancy\Application\Services;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ValidationException;
 use Plugins\Tenancy\API\Contracts\InvitationServiceContract;
 use Plugins\Tenancy\API\DTOs\InvitationResult;
-use Plugins\Tenancy\Application\Ports\AuditSink;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Tenancy\Application\Ports\InvitationStore;
 use Plugins\Tenancy\Application\Ports\MembershipWriter;
 use Plugins\Tenancy\Domain\Exceptions\InvalidInvitationException;
@@ -28,7 +28,7 @@ final class InvitationService implements InvitationServiceContract
     public function __construct(
         private readonly InvitationStore $invitations,
         private readonly MembershipWriter $memberships,
-        private readonly AuditSink $audit,
+        private readonly AuditServiceContract $audit,
     ) {}
 
     public function invite(

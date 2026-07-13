@@ -18,6 +18,7 @@ final readonly class TenantSummary
         public string $slug,
         public string $role,
         public string $status,
+        public ?string $joinedAt = null,
     ) {}
 
     public static function fromMembership(Membership $m): self
@@ -28,6 +29,7 @@ final readonly class TenantSummary
             slug:     $m->tenantSlug,
             role:     $m->role,
             status:   strtolower($m->status->name),
+            joinedAt: $m->joinedAt()?->format(\DateTimeInterface::RFC3339),
         );
     }
 
@@ -40,6 +42,7 @@ final readonly class TenantSummary
             'slug'     => $this->slug,
             'role'     => $this->role,
             'status'   => $this->status,
+            'joinedAt' => $this->joinedAt,
         ];
     }
 }

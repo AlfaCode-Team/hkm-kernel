@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
 use Plugins\Feedback\API\DTOs\ListFeedbackQuery;
 use Plugins\Feedback\API\DTOs\SubmitFeedbackDTO;
 use Plugins\Feedback\Application\Services\FeedbackService;
-use Plugins\Feedback\Infrastructure\Audit\AuditLogger;
+use Plugins\Audit\Application\Services\AuditService;
 use Psr\Container\ContainerInterface;
 use Tests\Unit\Plugins\Feedback\Support\FakeFeedbackStore;
 use Tests\Unit\Plugins\User\FakeRequest;
@@ -34,7 +34,7 @@ final class FeedbackServiceTest extends TestCase
             repository: $this->store,
             eventBus:   new EventBus($this->emptyContainer()),
             identity:   $identity,
-            audit:      new AuditLogger('actor', static fn(string $l) => null),
+            audit:      new AuditService(writer: null, sink: static fn(string $l) => null, actorId: 'actor'),
         );
     }
 
