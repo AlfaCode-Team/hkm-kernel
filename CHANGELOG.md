@@ -6,6 +6,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-07-14
+
+### Added
+- **Display identity on the kernel `Identity`** — new best-effort fields
+  `username`, `email`, `fullName`, `avatarUrl`. `AuthService` fills
+  username/email from the central user store at issuance when the caller
+  doesn't supply them; they ride as OIDC claims (`preferred_username`,
+  `email`, `name`) on JWTs — rebuilt statelessly by `JwtAuthLayer` — and as
+  session keys (`auth.username/email/name/avatar`) for session logins,
+  remember-me resurrection and `GET /auth/me`. `fullName` comes from the
+  TENANT `user_profiles` table, so only tenant-scoped credentials carry it.
+- **Post-login "previous page" redirect.** The Session plugin's
+  `StartSessionStage` now records the last eligible page view (GET + 2xx,
+  HTML navigation or Pageflow page object; auth/OAuth/API/asset paths exempt —
+  extend with the new `SESSION_PREVIOUS_EXEMPT` env) under
+  `StartSessionStage::PREVIOUS_URL`. On successful `POST /auth/login` the
+  redirect target is: an explicit `redirectTo` on the request (query/body) →
+  the recorded page (pulled one-time) → `/`. Browser POSTs get a 302; AJAX
+  callers get `redirectTo` in the JSON payload. Every candidate passes an
+  open-redirect guard (relative paths only). SocialAuth's web callback honours
+  the same recorded page before `SOCIAL_AUTH_SUCCESS_REDIRECT`.
+- **User: published `TenantProfileReaderContract`** — tenant `user_profiles`
+  display reads (`fullName(userId, tenantId)`), implemented by
+  `TenantProfileProvisioner` in pinned-repository or per-call resolver mode;
+  best-effort, never throws. `UserDTO` gains `fullName`, `avatarUrl` and
+  `permissions`; `UserProfile::fullName()` composes first + last.
+- Base controllers (`ApiController`, `ViewController`) now compose
+  `InteractsWithSession`, as documented — `sessionGet/put/pull`, `flash`,
+  `csrfToken` and friends are available on every controller.
+
+### Changed
+- **Tenant selection decomposed (tenancy ≠ authentication).**
+  `MembershipService` is control plane only: `selectTenant()` re-verifies the
+  seat, audits, and returns the verified `TenantSummary` — it no longer mints
+  tokens and lost its Auth dependency. `TenantController` is the composition
+  point: it mints the `tnt` token via `AuthServiceContract` (with `roles` and
+  the `name` claim via `TenantProfileReaderContract`) and builds the
+  `TenantSelection` response. Response shape is unchanged.
+- **Tenant-scoped auth data now rides the per-request `DatabasePort`.** Auth's
+  personal-access-token + device-session repositories, Audit's `audit_log`,
+  OAuth2's server tables and SocialAuth's `social_identities` resolve the
+  request connection (tenant-rebound by `TenantContextStage`) instead of
+  pinning the central connection; their migrations moved to each plugin's
+  `database/tenant-template/`. User, Tenancy control plane and Auth refresh
+  tokens stay pinned to central.
+- `UserServiceContract::find()` gains `bool $isAuth = false` — issuance-time
+  lookups by Auth skip the self-or-permission check (the request Identity is
+  still guest during login).
+
+### Fixed
+- **Login hang (30s `max_execution_time`)** — a container resolution cycle
+  `AuthService → UserService → MembershipService → AuthService` recursed
+  forever. Fixed twice over: the Auth provider resolves the user store through
+  a lazy closure, and the selection refactor removes the cycle's closing edge.
+- Remember-me resurrection fataled when the user had no tenant (nullable
+  `tenantId` passed to `startSession()`).
+- `UserDTO` declared a readonly property with a default value (PHP fatal on
+  every load); `permissions` is now a promoted constructor parameter.
+
 ## [1.0.9] - 2026-07-13
 
 ### Added
