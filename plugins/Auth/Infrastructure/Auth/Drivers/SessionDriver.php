@@ -35,6 +35,7 @@ final class SessionDriver implements GuardDriver
             return null;
         }
 
+       
         $user = $context->provider->retrieveById($userId);
         if (!$user instanceof AuthUserProxy) {
             return $user;

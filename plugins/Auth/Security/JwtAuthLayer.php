@@ -122,6 +122,12 @@ final class JwtAuthLayer implements SecurityLayerContract
             roles:       array_values((array) ($claims['roles'] ?? [])),
             permissions: array_values((array) ($claims['permissions'] ?? [])),
             tokenType:   'jwt',
+            // Display-identity claims minted by AuthService::issueJwt() (OIDC
+            // names). `name` is first + last from the tenant user_profiles table,
+            // present only on tenant-scoped tokens.
+            username:    (string) ($claims['preferred_username'] ?? ''),
+            email:       (string) ($claims['email'] ?? ''),
+            fullName:    (string) ($claims['name'] ?? ''),
         );
 
         return SecurityVerdict::allow($request->withIdentity($identity));

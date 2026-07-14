@@ -53,7 +53,7 @@ final class Provider implements ModuleContract
     {
         // Write side: persistence seam behind the audit service (central conn).
         $container->bindInternal(AuditWriter::class, static fn (ModuleContainer $c): AuditWriter =>
-            new AuditTrail(self::central($c)));
+            new AuditTrail($c->make(DatabasePort::class)));
 
         // Published write contract — the ONE way any plugin records an action.
         // Auto-fills actor (Identity) and tenant (Tenancy's `tenant.current`
@@ -82,7 +82,7 @@ final class Provider implements ModuleContract
 
         // Published read/query contract for control-plane admin surfaces.
         $container->bind(AuditReaderContract::class, static fn (ModuleContainer $c): AuditReaderContract =>
-            new AuditLogRepository(self::central($c)));
+            new AuditLogRepository($c->make(DatabasePort::class)));
     }
 
     public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void
@@ -90,9 +90,5 @@ final class Provider implements ModuleContract
         // No pipeline hooks or subscriptions — a pure infrastructure domain.
     }
 
-    /** The CENTRAL connection (owns the shared `audit_log` table). */
-    private static function central(ModuleContainer $c): DatabasePort
-    {
-        return $c->make(DatabaseConnectionManagerContract::class)->default();
-    }
+  
 }

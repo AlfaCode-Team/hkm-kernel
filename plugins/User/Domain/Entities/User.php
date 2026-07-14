@@ -44,7 +44,8 @@ final class User extends Entity
     protected array $hidden = ['password_hash', 'remember_token', 'email_verification_token_hash'];
 
  
-    protected TenantSummary|null $membership = null;
+    protected ?TenantSummary $membership = null;
+    protected ?UserProfile $profile = null;
     
 
     /**
@@ -64,6 +65,25 @@ final class User extends Entity
     public function getMembership(): ?TenantSummary
     {
         return $this->membership;
+    }
+
+    /**
+     * Summary of setProfile
+     * @param mixed $profile
+     * @return void
+     */
+    public function setProfile(?UserProfile $profile): void
+    {
+        $this->profile = $profile;
+    }
+
+    /**
+     * Summary of getProfile
+     * @return UserProfile|null
+     */
+    public function getProfile(): ?UserProfile
+    {
+        return $this->profile;
     }
 
     /**

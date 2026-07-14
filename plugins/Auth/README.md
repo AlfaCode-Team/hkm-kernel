@@ -40,6 +40,10 @@ final readonly class Identity {
     public array  $roles;       // list<string>
     public array  $permissions; // list<string> (PAT abilities / OAuth scopes)
     public string $tokenType;   // 'jwt' | 'api_key' | 'session' | 'none'
+    public string $username;    // display identity — best-effort, '' when unknown
+    public string $email;
+    public string $fullName;    // tenant user_profiles; tenant-scoped credentials only
+    public ?string $avatarUrl;
     public function hasRole(string $r): bool;
     public function hasPermission(string $p): bool;   // honours '*'
     public function isGuest(): bool;
@@ -201,6 +205,23 @@ GET  /auth/me                                             → identity | 401
 With no live session, `SessionAuthStage` validates it by the token's SHA-256 hash
 (`UserServiceContract::findByRememberToken`), re-opens the session, and **rotates**
 the token + cookie (single-use window). Logout clears both.
+
+**Post-login redirect.** The Session plugin's `StartSessionStage` records the
+last eligible page view (GET + 2xx, HTML or Pageflow page object; auth/OAuth/
+API/asset paths exempt — extend with `SESSION_PREVIOUS_EXEMPT`) under
+`StartSessionStage::PREVIOUS_URL`. On successful login the redirect target is:
+an explicit `redirectTo` on the request (query/body) → the recorded previous
+page (pulled one-time) → `/`. Browser POSTs get a 302; AJAX callers get
+`redirectTo` in the JSON payload. Every candidate passes an open-redirect
+guard (relative `/…` paths only). SocialAuth's web callback honours the same
+recorded page.
+
+**Display identity.** `AuthService` fills `username`/`email` from the central
+user store at issuance when the caller didn't supply them; they ride as OIDC
+claims (`preferred_username`, `email`, `name`) on JWTs and as session keys, so
+verification layers rebuild a full `Identity` without a DB read. The user-store
+dependency is a lazy closure — never resolve `UserServiceContract` eagerly in
+the AuthService factory (container cycle).
 
 ## 7. Personal access tokens (self-service)
 

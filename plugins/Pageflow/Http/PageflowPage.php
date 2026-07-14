@@ -42,6 +42,7 @@ final readonly class PageflowPage
 
     public function toJson(): string
     {
+        
         return json_encode($this->toArray(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 

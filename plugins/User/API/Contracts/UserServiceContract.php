@@ -62,7 +62,7 @@ interface UserServiceContract
      */
     public function resendVerification(string $email): ?string;
 
-    public function find(string $id, bool $checkMembership = false): ?UserDTO;
+    public function find(string $id, bool $checkMembership = false, bool $isAuth = false): ?UserDTO;
 
     /** Look up a user by username OR email (no credential check). Null if absent. */
     public function findByIdentifier(string $identifier, bool $checkMembership = false): ?UserDTO;

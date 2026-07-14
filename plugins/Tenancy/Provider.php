@@ -189,16 +189,27 @@ final class Provider implements ModuleContract
         // Tenancy records through its published AuditServiceContract instead of
         // writing `audit_log` itself — see requires: ["audit.trail"].
 
+        // Control plane only — verifies seats + audits. No Auth dependency:
+        // token minting lives in TenantController, which keeps the container
+        // graph acyclic (AuthService → UserService → MembershipService).
         $container->bind(MembershipServiceContract::class, static fn($c): MembershipServiceContract =>
             new MembershipService(
                 memberships: $c->make(MembershipReader::class),
-                auth: $c->make(AuthServiceContract::class),
                 audit: $c->make(AuditServiceContract::class),
-                tokenTtl: self::intEnv('TENANCY_TOKEN_TTL', 3600),
             ));
 
+        // The HTTP boundary composes the verified seat with the Auth module
+        // (token mint) and User's tenant-profile reader (the `name` claim from
+        // the tenant user_profiles row — the User plugin owns that table's SQL).
         $container->bindInternal(TenantController::class, static fn($c): TenantController =>
-            new TenantController($c->make(MembershipServiceContract::class)));
+            new TenantController(
+                memberships: $c->make(MembershipServiceContract::class),
+                auth: $c->make(AuthServiceContract::class),
+                profiles: $c->has(\Plugins\User\API\Contracts\TenantProfileReaderContract::class)
+                    ? $c->make(\Plugins\User\API\Contracts\TenantProfileReaderContract::class)
+                    : null,
+                tokenTtl: self::intEnv('TENANCY_TOKEN_TTL', 3600),
+            ));
 
         // ── tenant administration (control-plane CRUD) ───────────────────────
         // Provisions/updates/de-provisions tenants over HTTP — the JSON twin of
@@ -268,7 +279,7 @@ final class Provider implements ModuleContract
         // stays OUTER of the cookie-flush stage so the remembered-tenant cookie it
         // queues is still written to the response. All after.load hooks run before
         // the dedicated RouteFilterStage regardless of priority.
-        $http->hook('after.load', TenantContextStage::class, priority: 23);
+        $http->hook('after.load', TenantContextStage::class, priority: 10);
 
         // Reusable declarative guard: a route that touches tenant-only tables
         // opts in with "filters": ["auth", "tenant"] to fail clean (409) when no

@@ -59,13 +59,17 @@ final class PersonalAccessTokenLayer implements SecurityLayerContract
 
         // Empty tenant = unscoped (central connection), consistent with the JWT
         // layer and TenantContextStage. A PAT is a control-plane credential; it
-        // does not silently bind to a tenant DB.
+        // does not silently bind to a tenant DB — so fullName stays empty (it
+        // lives in the tenant user_profiles table). The repository's findByHash
+        // joins the owner's username/email onto the record (all SQL stays there).
         $identity = new Identity(
             userId:      $record['user_id'],
             tenantId:    '',
             roles:       [],
             permissions: $record['abilities'],
             tokenType:   'api_key',
+            username:    (string) ($record['username'] ?? ''),
+            email:       (string) ($record['email'] ?? ''),
         );
 
         return SecurityVerdict::allow($request->withIdentity($identity));

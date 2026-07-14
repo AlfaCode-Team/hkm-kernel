@@ -65,11 +65,16 @@ POST /ajx/tenants/{tenantId}/select  → re-mint a tenant-scoped token
 ```
 
 `selectTenant()` **re-verifies** the membership against central `user_tenants`
-(never trusts a client-supplied tenant id), then mints a token via the Auth
-module with the `tnt` claim set, and audits `tenant.switch`:
+(never trusts a client-supplied tenant id), audits `tenant.switch`, and returns
+the verified seat (`TenantSummary`). Tenancy is control plane ONLY — it does
+NOT mint credentials: `TenantController` composes the seat with the Auth
+module (`AuthServiceContract::issueJwt`, `tnt` claim + `roles` + the `name`
+claim read via User's published `TenantProfileReaderContract`) and builds the
+response:
 
 ```php
-$selection = $memberships->selectTenant($identity->userId, $tenantId, $request->ip());
+$seat = $memberships->selectTenant($identity->userId, $tenantId, $request->ip());
+// controller: issueJwt(userId, ['tnt' => ..., 'roles' => [$seat->role], 'name' => ...])
 // → { token, tokenType: "Bearer", tenantId, role, expiresIn }
 ```
 

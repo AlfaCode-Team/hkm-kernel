@@ -89,15 +89,15 @@ final class Provider implements ModuleContract
     {
         // ── persistence (central connection — control plane) ──────────────────
         $container->bind(ClientStore::class, static fn(ModuleContainer $c) =>
-            new ClientRepository(self::central($c)));
+            new ClientRepository($c->make(DatabasePort::class)));
         $container->bindInternal(AuthCodeStore::class, static fn(ModuleContainer $c) =>
-            new AuthCodeRepository(self::central($c)));
+            new AuthCodeRepository($c->make(DatabasePort::class)));
         $container->bindInternal(RefreshTokenStore::class, static fn(ModuleContainer $c) =>
-            new RefreshTokenRepository(self::central($c)));
+            new RefreshTokenRepository($c->make(DatabasePort::class)));
         $container->bindInternal(ScopeStore::class, static fn(ModuleContainer $c) =>
-            new ScopeRepository(self::central($c)));
+            new ScopeRepository($c->make(DatabasePort::class   )));
         $container->bindInternal(DeviceCodeStore::class, static fn(ModuleContainer $c) =>
-            new DeviceCodeRepository(self::central($c)));
+            new DeviceCodeRepository($c->make(DatabasePort::class  )));
 
         $container->bindInternal(ScopeValidator::class, static fn(ModuleContainer $c) =>
             new ScopeValidator($c->make(ScopeStore::class)));

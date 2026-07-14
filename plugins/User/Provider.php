@@ -23,7 +23,9 @@ use Plugins\User\Infrastructure\Gateways\PwnedPasswordGateway;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
 use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
+use Plugins\User\API\Contracts\TenantProfileReaderContract;
 use Plugins\User\API\Contracts\UserServiceContract;
+use Plugins\User\Application\Services\TenantProfileProvisioner;
 use Plugins\User\Application\Services\OutboxRelayService;
 use Plugins\User\Application\Services\UserService;
 use Plugins\User\Application\Services\UserSettingsService;
@@ -74,11 +76,13 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function exposes(): array
     {
-        // Only UserServiceContract is consumed cross-module (Auth/Tenancy).
-        // Settings are internal to this plugin (their own controller), so they
-        // are NOT published — the controller depends on the concrete service.
+        // UserServiceContract is consumed cross-module (Auth/Tenancy);
+        // TenantProfileReaderContract lets Tenancy read the tenant user_profiles
+        // display data (full name) at selection without raw SQL. Settings stay
+        // internal to this plugin (their own controller) and are NOT published.
         return [
             UserServiceContract::class,
+            TenantProfileReaderContract::class,
         ];
     }
 
@@ -112,10 +116,19 @@ final class Provider implements ModuleContract
             );
         });
 
-        $container->bind(UserServiceContract::class, static fn(ModuleContainer $c) =>
-            
+        // Published tenant-profile read surface (Identity/UserDTO fullName).
+        // Resolver mode: the tenant connection is resolved per call from the
+        // tenantId, through Tenancy's published contract (optional — reads
+        // degrade to '' when Tenancy is absent).
+        $container->bind(TenantProfileReaderContract::class, static fn(ModuleContainer $c) =>
+            new TenantProfileProvisioner(
+                connections: $c->make(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class)
+                    ? $c->make(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class)
+                    : null,
+            ));
 
-        new UserService(
+        $container->bind(UserServiceContract::class, static fn(ModuleContainer $c) =>
+            new UserService(
                 repository:    $c->make(UserRepository::class),
                 transaction:   $c->make(TransactionManager::class),
                 collector:     $c->make(DomainEventCollector::class),
@@ -128,6 +141,7 @@ final class Provider implements ModuleContract
                 breachChecker: $c->make(BreachChecker::class),
                 tenantId:      $c->has('tenant.current') ? (string) $c->make('tenant.current') : null,
                 membership:    $c->has(MembershipServiceContract::class) ? $c->make(MembershipServiceContract::class) : null,
+                profiles:      $c->make(TenantProfileReaderContract::class),
             ));
 
         // Public/admin JSON controller. Bound explicitly so the OPTIONAL MailPort

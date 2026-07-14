@@ -10,6 +10,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HttpClientPort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SessionPort;
 use Plugins\Auth\API\Contracts\AuthServiceContract;
@@ -70,7 +71,7 @@ final class Provider implements ModuleContract
         // Provider-account → user links (central — control-plane table).
         $container->bindInternal(SocialIdentityRepository::class, static fn(ModuleContainer $c) =>
             new SocialIdentityRepository(
-                $c->make(DatabaseConnectionManagerContract::class)->default(),
+                $c->make(DatabasePort::class),
             )
         );
 

@@ -18,6 +18,7 @@ final class PersonalAccessTokenRepository
     public function __construct(
         private readonly DatabasePort $db,
         private readonly string $table = 'personal_access_tokens',
+        private readonly string $usersTable = 'users',
     ) {
     }
 
@@ -58,13 +59,22 @@ final class PersonalAccessTokenRepository
      * Look up an UNEXPIRED token by its hash. Expired tokens are treated as
      * absent so a stale credential can never authenticate.
      *
-     * @return array{id:string,user_id:string,abilities:list<string>}|null
+     * The owning user's display identity (username/email from the central
+     * `users` table) rides on the same query via a LEFT JOIN, so the security
+     * layer can build a full Identity without touching the DatabasePort itself.
+     * A missing user row degrades to '' — display data never gates auth.
+     *
+     * @return array{id:string,user_id:string,abilities:list<string>,username:string,email:string}|null
      */
     public function findByHash(string $tokenHash): ?array
     {
         try {
             $row = $this->db->queryOne(
-                "SELECT id, user_id, abilities, expires_at FROM {$this->table} WHERE token_hash = :hash",
+                "SELECT t.id, t.user_id, t.abilities, t.expires_at,
+                        u.username AS owner_username, u.email AS owner_email
+                 FROM {$this->table} t
+                 LEFT JOIN {$this->usersTable} u ON u.user_id = t.user_id
+                 WHERE t.token_hash = :hash",
                 ['hash' => $tokenHash]
             );
         } catch (\PDOException $e) {
@@ -74,6 +84,10 @@ final class PersonalAccessTokenRepository
         if ($row === null) {
             return null;
         }
+
+        $username = (string) ($row['owner_username'] ?? '');
+        $email    = (string) ($row['owner_email'] ?? '');
+        unset($row['owner_username'], $row['owner_email']);
 
         $token = PersonalAccessToken::reconstitute($row);
 
@@ -86,6 +100,8 @@ final class PersonalAccessTokenRepository
             'id'        => $token->id(),
             'user_id'   => $token->userId(),
             'abilities' => $token->abilities(),
+            'username'  => $username,
+            'email'     => $email,
         ];
     }
 

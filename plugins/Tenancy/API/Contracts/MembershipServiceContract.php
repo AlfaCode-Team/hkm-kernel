@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Plugins\Tenancy\API\Contracts;
 
-use Plugins\Tenancy\API\DTOs\TenantSelection;
 use Plugins\Tenancy\API\DTOs\TenantSummary;
 
 /**
@@ -14,6 +13,10 @@ use Plugins\Tenancy\API\DTOs\TenantSummary;
  * This is the authority the Auth flow consults to turn an authenticated (but
  * unscoped) user into a tenant-scoped session. It NEVER trusts a client-supplied
  * tenant id without confirming an active membership in the central database.
+ *
+ * Control plane ONLY: it verifies seats and audits — it never mints
+ * credentials. The caller (TenantController) takes the verified seat returned
+ * by selectTenant() and asks the Auth module to issue the tenant-scoped token.
  */
 interface MembershipServiceContract
 {
@@ -37,11 +40,11 @@ interface MembershipServiceContract
     public function activeMember(string $userId, string $tenantId): ?TenantSummary;
 
     /**
-     * Select a tenant: verify active membership + routable tenant, then mint a
-     * tenant-scoped access token (the `tnt` claim). Records `tenant.switch` in
-     * the audit log.
+     * Select a tenant: verify active membership + routable tenant and record
+     * `tenant.switch` in the audit log. Returns the verified seat; the caller
+     * mints the tenant-scoped token (`tnt` claim) from it via the Auth module.
      *
      * @throws \Plugins\Tenancy\Domain\Exceptions\NotAMemberException (→ 403)
      */
-    public function selectTenant(string $userId, string $tenantId, ?string $ip = null): TenantSelection;
+    public function selectTenant(string $userId, string $tenantId, ?string $ip = null): TenantSummary;
 }

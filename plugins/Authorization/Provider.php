@@ -10,6 +10,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use Plugins\Authorization\API\Contracts\AuthorizationServiceContract;
 use Plugins\Authorization\Application\Services\AuthorizationService;
 use Plugins\Authorization\Engine\Enforcer;
@@ -52,7 +53,7 @@ final class Provider implements ModuleContract
         // policies are visible to runtime enforcement.
         $container->bindInternal(DatabasePolicyAdapter::class, static fn(ModuleContainer $c) =>
             new DatabasePolicyAdapter(
-                $c->make(DatabaseConnectionManagerContract::class)->default(),
+                $c->make(DatabasePort::class),
                 env('AUTHZ_POLICY_TABLE') ?: 'casbin_rule',
             )
         );

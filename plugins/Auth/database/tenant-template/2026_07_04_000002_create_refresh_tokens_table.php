@@ -29,7 +29,8 @@ return new class implements MigrationInterface {
             $t->id();
             $t->char('token_id', 31);
             $t->char('family_id', 31)->comment('rotation lineage for reuse detection');
-            $t->char('user_id', 31);
+            $t->char('user_id', 31)
+                ->comment('Soft ref to central users.user_id (ULID) — no cross-DB FK');
             $t->char('token_hash', 64)->comment('SHA-256 of the refresh token — never store raw');
             $t->char('tenant_id', 31)->nullable()->comment('scope hint for the tnt claim; not re-verified');
             $t->string('device', 191)->nullable()->comment('UA / device label');
@@ -44,7 +45,6 @@ return new class implements MigrationInterface {
             $t->index(['user_id', 'revoked_at'], 'idx_user_active');
             $t->index(['family_id'], 'idx_family');
 
-            $t->foreign('user_id')->references('user_id')->on('users')->onDelete('cascade');
 
             $t->engine('InnoDB');
             $t->charset('utf8mb4');

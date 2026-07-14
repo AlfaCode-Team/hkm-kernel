@@ -39,7 +39,7 @@ final class GuardAccessor
         private readonly Request $request,
         private readonly ?StatefulGuard $stateful = null,
     ) {}
-
+ 
     /**
      * The WRITE-side guard (attempt/login/logout/…), when this guard is
      * stateful. Null for token-style guards.

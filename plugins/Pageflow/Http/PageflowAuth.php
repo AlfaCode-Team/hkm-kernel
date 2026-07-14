@@ -42,6 +42,7 @@ final class PageflowAuth
      */
     public static function resolve(?Identity $identity): array
     {
+        // dd($identity);
         if (self::$projector !== null) {
             return (self::$projector)($identity);
         }
