@@ -78,7 +78,7 @@ final class Provider implements ModuleContract
                 // Central connection — tokens belong to the control plane, not a
                 // tenant DB, so resolve the ConnectionManager default rather than
                 // the per-request (tenant-rebound) DatabasePort.
-                $c->make(DatabaseConnectionManagerContract::class)->default(),
+                $c->make(DatabasePort::class),
                 env('AUTH_PAT_TABLE') ?: 'personal_access_tokens',
             )
         );
@@ -87,7 +87,7 @@ final class Provider implements ModuleContract
         $container->bindInternal(\Plugins\Auth\Infrastructure\Persistence\DeviceSessionRepository::class,
             static fn(ModuleContainer $c) =>
                 new \Plugins\Auth\Infrastructure\Persistence\DeviceSessionRepository(
-                    $c->make(DatabaseConnectionManagerContract::class)->default(),
+                    $c->make(DatabasePort::class),
                 )
         );
 
@@ -129,6 +129,14 @@ final class Provider implements ModuleContract
                 jwtKid:        env('JWT_KID') ?: null,
                 roles:         $c->make(\Plugins\Auth\Application\Auth\RoleResolver::class),
                 transaction:   $c->make('auth.transaction'),
+                // Fills the display-identity claims (preferred_username/email)
+                // on issued credentials when the caller doesn't supply them.
+                // LAZY closure — an eager make() recurses: AuthService →
+                // UserService → MembershipService → AuthService (bind() has no
+                // cycle guard, so it loops until max_execution_time).
+                users:         $c->has(\Plugins\User\API\Contracts\UserServiceContract::class)
+                    ? static fn() => $c->make(\Plugins\User\API\Contracts\UserServiceContract::class)
+                    : null,
             )
         );
 

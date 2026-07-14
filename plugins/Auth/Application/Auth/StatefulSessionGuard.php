@@ -17,7 +17,7 @@ use Plugins\Auth\Domain\ValueObjects\Recaller;
 use Plugins\Auth\Infrastructure\Http\Stages\SessionAuthStage;
 use Plugins\Cookie\Infrastructure\CookieJar;
 use Plugins\User\API\Contracts\UserServiceContract;
-
+ 
 /**
  * StatefulSessionGuard — the interactive login/logout guard.
  *
@@ -106,7 +106,7 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
     public function attempt(array $credentials = [], bool $remember = false): bool
     {
         $user = $this->provider->retrieveByCredentials($credentials);
-        
+         
         $this->lastAttempted = $user;
 
         if ($user === null) {
@@ -171,6 +171,10 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
         $this->session->put(AuthService::SESSION_ROLES, $identity->roles);
         $this->session->put(AuthService::SESSION_PERMISSIONS, $identity->permissions);
         $this->session->put(AuthService::SESSION_TENANT, $identity->tenantId);
+        $this->session->put(AuthService::SESSION_USERNAME, $identity->username);
+        $this->session->put(AuthService::SESSION_EMAIL, $identity->email);
+        $this->session->put(AuthService::SESSION_NAME, $identity->fullName);
+        $this->session->put(AuthService::SESSION_AVATAR, $identity->avatarUrl);
 
         // Bind the session to this device: fingerprint + auth_sessions row.
         if ($this->devices !== null && $this->request !== null) {

@@ -11,6 +11,14 @@ final readonly class Identity
         public readonly array $roles,
         public readonly array $permissions,
         public readonly string $tokenType,
+        public readonly string $username = '',
+        public readonly string $email = '',
+        // First + last name from the TENANT user_profiles table — only present
+        // when the credential was minted with tenant context (empty otherwise).
+        public readonly string $fullName = '',
+        // Avatar URL from the TENANT user_profiles table — only present when the
+        // credential was minted with tenant context (empty otherwise).
+        public readonly ?string $avatarUrl = null,
     ) {}
 
     public function hasRole(string $role): bool
@@ -36,8 +44,12 @@ final readonly class Identity
         array $roles = ['user'],
         array $permissions = [],
         string $tokenType = 'jwt',
+        string $username = '',
+        string $email = '',
+        string $fullName = '',
+        ?string $avatarUrl = null,
     ): self {
-        return new self($userId, $tenantId, $roles, $permissions, $tokenType);
+        return new self($userId, $tenantId, $roles, $permissions, $tokenType, $username, $email, $fullName, $avatarUrl);
     }
 
     /** @param list<string> $permissions */

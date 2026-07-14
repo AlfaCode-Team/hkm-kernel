@@ -73,6 +73,9 @@ final class UserService implements UserServiceContract
         private readonly ?BreachChecker $breachChecker = null,
         private readonly ?string $tenantId = null,
         private readonly ?MembershipServiceContract $membership = null,
+        // Tenant user_profiles read surface — attaches UserDTO.fullName when a
+        // membership pins the tenant. Best-effort (the reader never throws).
+        private readonly ?\Plugins\User\API\Contracts\TenantProfileReaderContract $profiles = null,
     ) {
     }
 
@@ -273,9 +276,10 @@ final class UserService implements UserServiceContract
         return [UserDTO::fromEntity($user), $plainToken];
     }
 
-    public function find(string $id, bool $checkMembership = false): ?UserDTO
+    public function find(string $id, bool $checkMembership = false, bool $isAuth = false): ?UserDTO
     {
-        $this->requireSelfOrPermission($id, 'user:read-any');
+        if (!$isAuth)
+            $this->requireSelfOrPermission($id, 'user:read-any');
 
         $user = $this->repository->find($id);
         if ($checkMembership) {
@@ -290,7 +294,17 @@ final class UserService implements UserServiceContract
 
             $user?->setMembership($membership);
         }
-        return $user === null ? null : UserDTO::fromEntity($user);
+        if ($user === null) {
+            return null;
+        }
+
+        if ($this->profiles !== null) {
+            $user->setProfile($this->profiles->getProfile($user->id(), $this->tenantId));
+        }
+
+        $dto = UserDTO::fromEntity($user);
+
+        return $dto;
     }
 
     public function update(string $id, UpdateUserDTO $dto): ?UserDTO
@@ -408,6 +422,10 @@ final class UserService implements UserServiceContract
 
             $user?->setMembership($membership);
 
+            if ($this->profiles !== null) {
+                $user?->setProfile($this->profiles->getProfile($user?->id(), $this->tenantId));
+            }
+
             // 2. Timing-safe: run a hash comparison even when the user is unknown.
             $hash = $user?->passwordHash() ?? self::DECOY_HASH;
             $ok = $this->hasher->check($password, $hash);
@@ -461,6 +479,9 @@ final class UserService implements UserServiceContract
 
             $user?->setMembership($membership);
         }
+        if ($this->profiles !== null) {
+            $user?->setProfile($this->profiles->getProfile($user?->id(), $this->tenantId));
+        }
 
         return $user === null ? null : UserDTO::fromEntity($user);
     }
@@ -513,6 +534,10 @@ final class UserService implements UserServiceContract
             return null;
         }
 
+        if ($this->profiles !== null) {
+            $user->setProfile($this->profiles->getProfile($user->id(), $this->tenantId));
+        }
+
         return UserDTO::fromEntity($user);
     }
 
@@ -550,6 +575,9 @@ final class UserService implements UserServiceContract
             }
 
             $user?->setMembership($membership);
+        }
+        if ($this->profiles !== null) {
+            $user?->setProfile($this->profiles->getProfile($user?->id(), $this->tenantId));
         }
 
         $this->collector->beginCollection();

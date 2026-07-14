@@ -8,6 +8,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Contracts\RequestAware;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
 use Plugins\View\API\Contracts\ViewRendererContract;
 use Project\Http\Controllers\Concerns\InteractsWithCsrf;
+use Project\Http\Controllers\Concerns\InteractsWithSession;
 
 /**
  * Base controller for HTML / view endpoints.
@@ -33,6 +34,7 @@ use Project\Http\Controllers\Concerns\InteractsWithCsrf;
 abstract class ViewController implements RequestAware
 {
     use InteractsWithCsrf;
+    use InteractsWithSession;
     protected const API_BASE = null;
     public function __construct(
         protected readonly ViewRendererContract $renderer,

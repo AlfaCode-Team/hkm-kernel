@@ -29,6 +29,7 @@
         { "key": "SESSION_COOKIE_FINGERPRINT",        "type": "string", "required": false },
         { "key": "SESSION_COOKIE_MAX_BYTES",          "type": "int",    "required": false },
         { "key": "SESSION_COOKIE_REQUIRE_AUTH",       "type": "string", "required": false },
-        { "key": "SESSION_COOKIE_REQUIRE_ENCRYPTION", "type": "string", "required": false }
+        { "key": "SESSION_COOKIE_REQUIRE_ENCRYPTION", "type": "string", "required": false },
+        { "key": "SESSION_PREVIOUS_EXEMPT",           "type": "string", "required": false }
     ]
 }

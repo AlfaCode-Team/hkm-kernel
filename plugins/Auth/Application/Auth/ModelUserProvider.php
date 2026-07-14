@@ -48,7 +48,7 @@ final class ModelUserProvider implements UserProvider
             return null;
         }
 
-        return $this->proxy($this->users->find($id, true));
+        return $this->proxy($this->users->find($id, true,true));
     }
 
     public function retrieveByToken(string $rememberToken): ?Authenticatable

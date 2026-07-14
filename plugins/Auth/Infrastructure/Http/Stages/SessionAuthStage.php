@@ -47,16 +47,19 @@ final class SessionAuthStage implements HttpStageContract
     {
         // A token already authenticated this request — do not override it.
         $existing = $request->identity();
+
         if ($existing !== null && !$existing->isGuest()) {
             return $next($request);
         }
 
         $container = $request->container();
+
         if ($container === null || !$container->has(SessionPort::class)) {
             return $next($request);
         }
 
         $session = $container->make(SessionPort::class);
+
         if (!$session instanceof SessionPort) {
             return $next($request);
         }
@@ -72,6 +75,8 @@ final class SessionAuthStage implements HttpStageContract
             return $next($request);
         }
 
+
+      
         // Fingerprint + device-session validation (old __DEV__ semantics): a
         // request that can't reproduce the login fingerprint, or whose server-
         // side session row was revoked/expired, loses the session outright.
@@ -91,6 +96,10 @@ final class SessionAuthStage implements HttpStageContract
             roles:       $this->stringList($session->get(AuthService::SESSION_ROLES, [])),
             permissions: $this->stringList($session->get(AuthService::SESSION_PERMISSIONS, [])),
             tokenType:   'session',
+            username:    (string) $session->get(AuthService::SESSION_USERNAME, ''),
+            email:       (string) $session->get(AuthService::SESSION_EMAIL, ''),
+            fullName:    (string) $session->get(AuthService::SESSION_NAME, ''),
+            avatarUrl:   (string) $session->get(AuthService::SESSION_AVATAR, ''),
         );
 
         return $next($this->attach($request, $container, $identity));
@@ -158,9 +167,16 @@ final class SessionAuthStage implements HttpStageContract
         // the remember token + cookie so this recaller can't be replayed.
         $auth = $container->make(AuthServiceContract::class);
         if ($auth instanceof AuthServiceContract) {
-            $auth->startSession($session, $user->id);
+            $auth->startSession($session, $user->id, username: $user->username, email: $user->email, fullName: $user->fullName, avatarUrl: $user->avatarUrl, tenantId: $user->tenantId ?? '', roles: $user->roles, permissions: $user->permissions);
         } else {
             $session->put(AuthService::SESSION_USER, $user->id);
+            $session->put(AuthService::SESSION_USERNAME, $user->username);
+            $session->put(AuthService::SESSION_EMAIL, $user->email);
+            $session->put(AuthService::SESSION_AVATAR, $user->avatarUrl);
+            $session->put(AuthService::SESSION_NAME, $user->fullName);
+            $session->put(AuthService::SESSION_TENANT, $user->tenantId ?? '');
+            $session->put(AuthService::SESSION_ROLES, $user->roles);
+            $session->put(AuthService::SESSION_PERMISSIONS, $user->permissions);
         }
 
         $fresh = $users->cycleRememberToken($user->id);
@@ -172,10 +188,14 @@ final class SessionAuthStage implements HttpStageContract
 
         return $this->attach($request, $container, new Identity(
             userId:      $user->id,
-            tenantId:    '',
-            roles:       [],
-            permissions: [],
+            tenantId:    $user->tenantId ?? '',
+            roles:       $user->roles,
+            permissions: $user->permissions,
             tokenType:   'session',
+            username:    $user->username,
+            email:       $user->email,
+            fullName:    $user->fullName,
+            avatarUrl:   $user->avatarUrl,
         ));
     }
 

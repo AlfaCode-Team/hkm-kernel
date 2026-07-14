@@ -25,7 +25,8 @@ return new class implements MigrationInterface {
         $schema->create('auth_sessions', static function ($t) {
             $t->id();
             $t->char('session_id', 32)->comment('public id (list/revoke API) — not the token');
-            $t->char('user_id', 31);
+            $t->char('user_id', 31)
+                ->comment('Soft ref to central users.user_id (ULID) — no cross-DB FK');
             $t->char('token_hash', 64)->comment('SHA-256 of the session token — never store raw');
             $t->char('fingerprint', 64)->nullable()->comment('SHA-256 device fingerprint captured at login');
             $t->string('ip', 45)->nullable();
@@ -39,7 +40,6 @@ return new class implements MigrationInterface {
             $t->unique(['token_hash'], 'uniq_token_hash');
             $t->index(['user_id', 'revoked_at'], 'idx_user_active');
 
-            $t->foreign('user_id')->references('user_id')->on('users')->onDelete('cascade');
 
             $t->engine('InnoDB');
             $t->charset('utf8mb4');

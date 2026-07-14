@@ -7,6 +7,7 @@ namespace Plugins\Auth\Infrastructure\Http\Controllers;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
 use Plugins\Auth\Application\Ports\Authenticatable;
 use Plugins\Auth\Application\Services\DeviceSessionService;
+use Plugins\Session\Infrastructure\Http\StartSessionStage;
 use Project\Http\Controllers\ApiController;
 use Project\Http\Controllers\Concerns\InteractsWithAuthManager;
 
@@ -66,7 +67,42 @@ final class SessionAuthController extends ApiController
             return Response::unauthorized('Invalid credentials.');
         }
 
-        return $this->ok(['user' => $this->shape($guard->user())]);
+        // Where to send the user after sign-in, first match wins:
+        //   1. an explicit `redirectTo` on the login request itself (query or
+        //      body — e.g. /auth/login?redirectTo=/billing),
+        //   2. the previous page recorded by the Session plugin's
+        //      StartSessionStage — PULLED (one-time) either way, so the
+        //      fulfilled intent never goes stale,
+        //   3. '/'.
+        // Both candidates pass the same open-redirect guard.
+        $previous = $this->sessionPull(StartSessionStage::PREVIOUS_URL);
+        $redirect = $this->safeRedirect($request->input('redirectTo'))
+            ?? $this->safeRedirect($previous)
+            ?? '/';
+
+        // Browser form POST → real redirect; AJAX/SPA callers get the target in
+        // the payload and navigate client-side.
+        if (!$request->expectsJson()) {
+            return Response::redirect($redirect);
+        }
+
+        return $this->ok(['user' => $this->shape($guard->user()), 'redirectTo' => $redirect]);
+    }
+
+    /**
+     * Validate a redirect candidate into a safe INTERNAL target, or null when
+     * it is unusable. Accepts only a relative path ('/…'); rejects
+     * protocol-relative ('//…'), backslash tricks and absolute URLs — the
+     * open-redirect guard for both the request param and the session value.
+     */
+    private function safeRedirect(mixed $candidate): ?string
+    {
+        if (!is_string($candidate) || $candidate === '' || $candidate[0] !== '/'
+            || str_starts_with($candidate, '//') || str_starts_with($candidate, '/\\')) {
+            return null;
+        }
+
+        return $candidate;
     }
 
     public function logout(): Response
@@ -89,6 +125,9 @@ final class SessionAuthController extends ApiController
 
         return $this->ok([
             'userId'      => $identity->userId,
+            'username'    => $identity->username,
+            'email'       => $identity->email,
+            'fullName'    => $identity->fullName,
             'tenantId'    => $identity->tenantId,
             'roles'       => $identity->roles,
             'permissions' => $identity->permissions,

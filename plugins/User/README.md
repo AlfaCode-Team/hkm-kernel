@@ -535,3 +535,18 @@ the domain.
 
 *Part of the AlfacodeTeam PhpServicePlatform. See the root `CLAUDE.md` and
 `docs/ai-context/` for framework-wide architecture.*
+
+## Tenant profile reads — `TenantProfileReaderContract` (published)
+
+`TenantProfileProvisioner` implements the published
+`TenantProfileReaderContract` — `fullName(userId, tenantId): string` — in two
+construction modes: **pinned** (repository already built against the resolved
+tenant connection; the listener path) or **resolver** (container binding;
+resolves the tenant DB per call through Tenancy's
+`TenantConnectionResolverContract`). Reads are best-effort and never throw: a
+missing profile or unreachable tenant DB yields `''`. Consumers: Tenancy's
+tenant-selection flow (the JWT `name` claim) and `UserService::find()` (attaches
+`UserDTO.fullName` when a membership pins the tenant). `UserDTO` also carries
+`avatarUrl` and `permissions`. `UserServiceContract::find()` accepts
+`bool $isAuth = false` — issuance-time lookups by Auth skip the
+self-or-permission check (the request Identity is still guest during login).

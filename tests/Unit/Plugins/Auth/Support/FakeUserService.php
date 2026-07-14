@@ -39,7 +39,7 @@ final class FakeUserService implements UserServiceContract
     /** @var list<string> ids treated as having NO seat when membership is checked */
     public array $nonMembers = [];
 
-    public function find(string $id, bool $checkMembership = false): ?UserDTO
+    public function find(string $id, bool $checkMembership = false, bool $isAuth = false): ?UserDTO
     {
         $this->findCalls[] = [$id, $checkMembership];
         if ($checkMembership && \in_array($id, $this->nonMembers, true)) {

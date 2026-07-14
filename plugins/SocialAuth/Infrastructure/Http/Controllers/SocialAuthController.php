@@ -10,6 +10,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SessionPort;
 use Plugins\Auth\API\Contracts\AuthServiceContract;
 use Plugins\Auth\API\Contracts\RefreshTokenServiceContract;
+use Plugins\Session\Infrastructure\Http\StartSessionStage;
 use Plugins\SocialAuth\API\Contracts\SocialAuthServiceContract;
 use Plugins\SocialAuth\Application\Services\SocialLoginService;
 use Plugins\SocialAuth\Infrastructure\Gateways\ProviderTokenGateway;
@@ -71,10 +72,22 @@ final class SocialAuthController extends ApiController
             return $this->ok(['user' => $user->toArray(), 'tokens' => $this->issueTokenPair($user)]);
         }
 
-        // Web flow: open a platform session and send the browser on its way.
-        $this->auth->startSession($this->session, $user->id);
+        // Web flow: open a platform session and send the browser on its way —
+        // back to the page recorded by the Session plugin's StartSessionStage
+        // when there is one (validated: relative path only — open-redirect
+        // guard), else the configured default.
+        $this->auth->startSession($this->session, $user->id, username: $user->username, email: $user->email);
 
-        return Response::redirect($this->successRedirect);
+        $previous = $this->session->pull(StartSessionStage::PREVIOUS_URL);
+        $target   = is_string($previous)
+            && $previous !== ''
+            && $previous[0] === '/'
+            && !str_starts_with($previous, '//')
+            && !str_starts_with($previous, '/\\')
+                ? $previous
+                : $this->successRedirect;
+
+        return Response::redirect($target);
     }
 
     public function token(string $driver): Response
@@ -111,7 +124,12 @@ final class SocialAuthController extends ApiController
         );
 
         return [
-            'accessToken'      => $this->auth->issueJwt($user->id, [], $this->accessTtl),
+            // Display claims passed explicitly — the user record is already in
+            // hand, so AuthService skips its central-lookup enrichment.
+            'accessToken'      => $this->auth->issueJwt($user->id, [
+                'preferred_username' => $user->username,
+                'email'              => $user->email,
+            ], $this->accessTtl),
             'tokenType'        => 'Bearer',
             'expiresAt'        => time() + $this->accessTtl,
             'refreshToken'     => $refresh->token,
