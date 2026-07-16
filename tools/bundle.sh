@@ -12,7 +12,7 @@
 #   • the PHP CLI (bin/psp) installed AS bin/hkm so the launcher's default
 #     passthrough path (<kernel>/bin/hkm) resolves.
 #
-# End users still need PHP >= 8.4 on PATH — `hkm doctor` verifies it.
+# End users still need PHP 8.4 on PATH — `hkm doctor` verifies it.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -112,7 +112,7 @@ if [[ "$want" == all || "$want" == linux ]]; then
   # composer is a hard dependency now: the package ships SOURCE, not vendor/, and
   # resolves dependencies on the target in postinst. Network access is required
   # at install time. In MODULES=git mode, git is also required to fetch modules.
-  DEPS="php-cli (>= 8.4), php-mbstring, php-curl, php-xml, php-zip, composer, ca-certificates"
+  DEPS="php8.4-cli, php8.4-mbstring, php8.4-curl, php8.4-xml, php8.4-zip, composer, ca-certificates"
   [ "$MODULES" = git ] && DEPS="$DEPS, git"
   cat > "$P/DEBIAN/control" <<EOF
 Package: hkm-kernel
@@ -120,7 +120,7 @@ Version: ${VERSION}
 Architecture: amd64
 Maintainer: AlfacodeTeam <dev@hkm.local>
 Depends: ${DEPS}
-Recommends: php-mysql | php-pgsql | php-sqlite3, php-redis, php-intl
+Recommends: php8.4-mysql | php8.4-pgsql | php8.4-sqlite3, php8.4-redis, php8.4-intl
 Description: PhpServicePlatform (HKM) kernel and native launcher
  Installs the kernel PHP source (src, plugins, projects, modules) under
  /opt/hkm-kernel and a native hkm launcher in /usr/bin. PHP dependencies are
@@ -235,7 +235,7 @@ EOF
 HKM Kernel — Windows
 ====================
 1. Extract this folder to C:\hkm  (or any path).
-2. Install PHP >= 8.4 (winget install PHP.PHP) and Composer, open a new terminal.
+2. Install PHP 8.4 (winget install PHP.PHP) and Composer, open a new terminal.
 3. Resolve dependencies (vendor/ is NOT bundled):
        cd C:\hkm\hkm-kernel
        install.bat
