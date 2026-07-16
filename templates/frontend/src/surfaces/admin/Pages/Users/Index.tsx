@@ -1,4 +1,4 @@
-import { usePage, useForm, router, Head, Link } from "@pageflow/react";
+import { usePage, useForm, router, Link } from "@pageflow/react";
 import { Button } from "@ui/button";
 
 // ── Example ADMIN page ───────────────────────────────────────────────────────
@@ -40,7 +40,6 @@ export default function UsersIndex() {
 
   return (
     <>
-      <Head title="Users" />
       <main className="mx-auto max-w-5xl p-8">
         <header className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">Users</h1>

@@ -6,7 +6,7 @@ authenticated `Identity.tenantId` to an **isolated tenant database** and rebinds
 correct tenant DB. Built on top of `plugins/Database`'s `ConnectionManager`.
 
 - **solves:** `tenancy.routing`
-- **requires:** `database.management`, `auth.identity`
+- **requires:** `database.management` (stage path only — its routes carry `auth.identity`/`user.management`/`audit.trail` as route-level `requires[]`)
 - **exposes:** `TenantRegistryContract`, `TenantConnectionResolverContract`, `MembershipServiceContract`, `InvitationServiceContract`
 
 ## Two planes
@@ -23,17 +23,18 @@ correct tenant DB. Built on top of `plugins/Database`'s `ConnectionManager`.
    hkm migrate:run        # creates tenants, user_tenants (users lives in plugins/User)
    ```
 
-2. **Register as an ESSENTIAL module** so every request is routed. In
-   `projects/<name>/bootstrap/app.php`:
-   ```php
-   ->withEssentialModules([
-       \Plugins\Database\Provider::class,   // database.management (required dep)
-       \Plugins\Tenancy\Provider::class,    // tenancy.routing
-       // ... Crypto (EncryptionPort), RedisCache (CachePort) must also be available
-   ])
+2. **Register as an ESSENTIAL module** so every request is routed — declared by
+   the PROJECT in `proj.json` (the bootstrap wires
+   `->withEssentialModules(EntryHelpers::projectEssentials($projectRoot))`):
+   ```jsonc
+   // proj.json
+   "essentials": ["tenancy.routing"]
    ```
-   `EncryptionPort` (Crypto) and `CachePort` (RedisCache) are dependencies of the
-   resolver/registry — ensure both are wired.
+   The domain resolves to the provider at `build()` (unknown domain = boot
+   failure), and essentials load their transitive `requires[]` — so
+   `database.management` comes along automatically. `EncryptionPort` and
+   `CachePort` are core ports (bootstrap `withPorts`) used by the
+   resolver/registry — ensure both are bound.
 
 3. **Mint a tenant-scoped Identity** in your Auth layer. After the user selects a
    tenant, re-check `user_tenants` and put the tenant in the JWT `tnt` claim; the
@@ -110,8 +111,9 @@ identity store, never the request body):
 POST /ajx/invitations/accept   { "token": "…" }   → { "tenantId": "…" }
 ```
 
-This is why Tenancy `requires: ["user.management"]` — `InvitationController`
-resolves the caller's verified email via `UserServiceContract`.
+This is why the invitation route carries `"requires": ["user.management"]` in
+`module.json` — `InvitationController` resolves the caller's verified email via
+`UserServiceContract` (route-level, so it loads only when the endpoint is hit).
 
 ## Refresh tokens — moved to `Plugins\Auth`
 
@@ -195,12 +197,36 @@ it fleet-migrates every active tenant by default.
 
 | Env | Default | Meaning |
 |---|---|---|
-| `TENANCY_MODE` | `tenant` | `legacy` \| `dual-write` \| `tenant` (migration phases) |
+| `TENANCY_MODE` | `claim` | tenant identification: `claim` (Identity.tenantId) \| `domain` (Host sub-domain label) \| `host` (full Host via `tenant_hosts`) |
+| `TENANCY_BASE_DOMAINS` | — | domain mode: comma-separated base domains a tenant label hangs off |
+| `TENANCY_RESERVED_SUBDOMAINS` | `www,api,admin,…` | domain mode: labels that are never tenants (map to central) |
 | `TENANCY_REGISTRY_TTL` | `60` | registry cache TTL (s) |
 | `TENANCY_BREAKER_THRESHOLD` | `5` | connectivity failures before the breaker opens |
 | `TENANCY_BREAKER_WINDOW` | `60` | sliding window (s) failures must occur within |
 | `TENANCY_BREAKER_COOLDOWN` | `30` | breaker open window (s) |
 | `TENANCY_TEMPLATE_PATH` | bundled | tenant template migrations path |
+
+## Strict routing — every host is a tenant
+
+Routing is **strict**: every request must resolve to a tenant (remembered
+cookie hint first — principal-bound — then the `TENANCY_MODE` identifier). A
+request that cannot be scoped — an unknown host, or no tenant claim/cookie —
+**fails closed with 404**; there is no unscoped passthrough to the central
+connection. Register every served host (`tenant:host:add <host> --verified` in
+host mode). Control-plane code that needs central pins it explicitly via the
+`ConnectionManager` default.
+
+## Activation & per-request cost
+
+Tenancy must register on EVERY request — the project declares it in `proj.json`:
+`"essentials": ["tenancy.routing"]` (resolved by `Kernel::withEssentialModules()`;
+an unknown domain fails the boot). Module-level `requires` is just
+`["database.management"]` — the always-on stage path — so the every-request
+graph stays at two modules; the selection/admin/invitation/host routes pull
+`auth.identity` / `user.management` / `audit.trail` via route-level
+`requires[]` only when hit. A single-tenant project must leave Tenancy out of
+`withModules` entirely (not merely out of essentials) — the always-on stage
+fails loudly when the module never registered.
 
 ## Swoole connection pooling (optional optimization)
 

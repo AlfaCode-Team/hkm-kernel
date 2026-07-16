@@ -9,6 +9,10 @@ import usePage from './usePage'
 export interface PageflowAuth {
   userId: string
   tenantId: string
+  username: string
+  fullName: string
+  email: string
+  avatarUrl: string | null
   roles: string[]
   permissions: string[]
   authenticated: boolean
@@ -17,6 +21,10 @@ export interface PageflowAuth {
 const GUEST: PageflowAuth = {
   userId: '',
   tenantId: '',
+  username: '',
+  fullName: '',
+  email: '',
+  avatarUrl: null,
   roles: [],
   permissions: [],
   authenticated: false,

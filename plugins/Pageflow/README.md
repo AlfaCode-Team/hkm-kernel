@@ -71,8 +71,42 @@ createPageflowApp({
 | Realtime updates | `useReactiveProps` | `PageflowChannel::touch()` |
 | Permission-gated UI | `useAuth()` / `<Can>` | `pageflow_auth` (auto) |
 | Set page title | `<Head>` | — |
+| SEO head + tab title | automatic (`seoHead` prop) | `seoFor()` / `seoPrivate()` |
 | Offline | `registerPageflowSW()` | `render(..., cacheable: true)` |
 | Typed props | `usePage<T>()` | `hkm pageflow:types` |
+
+## SEO — the reserved `seoHead` prop
+
+A controller passes ONE reserved prop and the whole SEO surface is handled:
+
+```php
+return $this->pageflow->render($request, 'Shop/Product', 'project', props: [
+    'sku'     => $sku,
+    'seoHead' => $this->seoFor(          // Project\…\InteractsWithGraphSeo
+        title: $name, description: $desc, path: "/product/{$sku}",
+        image: "/img/p/{$sku}.jpg", type: 'product',
+    ),
+    // auth-gated / token pages: 'seoHead' => $this->seoPrivate('Your profile'),
+]);
+```
+
+How it flows — no other wiring needed:
+
+- **Full page load** → `seoHead` is the rendered SEO HTML block (title,
+  description, canonical, robots, hreflang, OG/Twitter, JSON-LD `@graph`). The
+  layout echoes it into `<head>` and STRIPS it from the client boot payload
+  (the block contains a literal `</script>`; it must never ride
+  `window.initialPage` / `data-page`).
+- **XHR navigation** (`X-Pageflow`) → the helpers skip ALL the OG/graph work and
+  return just the plain suffixed tab title (`"Product X · Site"`). The React
+  `App` syncs `document.title` from it on every navigation — pages do NOT need
+  `<Head title>` for titles; the server is the single source of truth. Values
+  containing markup are ignored client-side (plain text only).
+- Crawlers only ever take the full-load path, so SEO is complete without SSR.
+
+`<Head>` remains available for anything else a page wants to inject into the
+head (extra meta, links) — just don't use it for the title on pages that pass
+`seoHead`.
 
 ## Security invariants (do not regress)
 

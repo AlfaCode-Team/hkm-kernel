@@ -271,12 +271,12 @@ return Kernel::configure()
     // in. Use for capabilities only SOME routes need (views, outbound HTTP,
     // storage). A route opts in via its "requires" in proj.json / module.json.
     ->withModules([
-        // Crypto (solves: crypto) — provides the concrete AesEncrypter and
+        // Crypto (solves: crypto.services) — provides the concrete AesEncrypter and
         // PasswordHasher classes behind the Encryption/Hashing port factories,
         // plus crypto helpers other modules consume.
         CryptoProvider::class,
 
-        // I18n (solves: i18n) — translation/localisation: message catalogues,
+        // I18n (solves: i18n.translation) — translation/localisation: message catalogues,
         // locale negotiation, and the translator used by modules and views.
         I18nProvider::class,
 
@@ -286,12 +286,12 @@ return Kernel::configure()
         // AbstractDto; built-in rules work without this, the packs need it.
         ValidationProvider::class,
 
-        // Database (solves: database.query) — the multi-driver database stack:
+        // Database (solves: database.management) — the multi-driver database stack:
         // the DatabasePort adapter, the pooled adapter that borrows from the
         // ConnectionPool, and connection/schema management.
         DatabaseProvider::class,
 
-        // Commands (solves: commands) — registers this project's console
+        // Commands (solves: system.commands) — registers this project's console
         // commands into the CLI pipeline (run via `php app/cli/run.php`).
         CommandsProvider::class,
 
@@ -349,6 +349,22 @@ return Kernel::configure()
         // that declare "filters": ["hmac"], so this is safe to enable app-wide.
         SecurityFiltersModule::class,
     ])
+
+    // PROJECT-DECLARED essentials from proj.json ("essentials": [ ... ]) — each
+    // entry is a module DOMAIN (a plugin's solves value). This is the project's
+    // lever for which plugins are global WITHOUT editing this file: e.g. a
+    // multi-tenant project declares "tenancy.routing" here, a single-tenant one
+    // simply doesn't. The named module must be in withModules() above; the
+    // kernel resolves the domain at build() and an unknown domain FAILS the
+    // boot (never a silent no-op). Keep this list SHORT — every essential (and
+    // its requires[] graph) registers on every request.
+    //
+    // Session-cookie login: Auth's SessionAuthStage resolves the logged-in user
+    // on a route ONLY when auth.identity + user.management are in that request's
+    // graph (the stage self-guards otherwise). An app where users stay signed in
+    // across ALL pages therefore declares BOTH here; a JWT/PAT-only API needs
+    // neither (token layers run before any module loads).
+    ->withEssentialModules(EntryHelpers::projectEssentials($projectRoot))
 
     // Compile-only. Returns the Kernel to the entry point, which materializes it
     // on the first http()/cli() call.

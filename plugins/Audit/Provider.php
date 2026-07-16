@@ -40,7 +40,7 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [DatabaseConnectionManagerContract::class];
+        return ['database.management'];
     }
 
     /** @return list<class-string> */

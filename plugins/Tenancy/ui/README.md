@@ -46,6 +46,11 @@ plugins/Tenancy/ui/
 `/tenants/manage|create|{id}/edit` render through the **admin** surface; the
 tenant-facing `/tenants` and `/tenant/hosts` through the **site** surface.
 
+Every page here is private control-plane surface, so `TenantPageController`
+passes the reserved `seoHead` prop built with `seoPrivate()` (branded title +
+`noindex, nofollow`). Pages must NOT set `<Head title>` — the client syncs the
+tab title from `seoHead` on every navigation (see `plugins/Pageflow/README.md`).
+
 ## Data flow
 
 The page shells carry no data props (except `Tenant/Edit`, which gets

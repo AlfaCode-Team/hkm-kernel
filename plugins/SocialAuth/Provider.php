@@ -45,12 +45,7 @@ final class Provider implements ModuleContract
         // profiles onto central users and issues platform credentials via the
         // Auth plugin's published contracts; token sign-in verifies against the
         // provider over HttpClientPort.
-        return [
-            DatabaseConnectionManagerContract::class,
-            UserServiceContract::class,
-            AuthServiceContract::class,
-            HttpClientPort::class,
-        ];
+        return ['database.management', 'user.management', 'auth.identity', 'http.client'];
     }
 
     /** @return list<class-string> */

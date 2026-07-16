@@ -1,4 +1,4 @@
-import { useForm, Head } from "@pageflow/react";
+import { useForm } from "@pageflow/react";
 import { Button } from "@ui/button";
 
 // Pageflow form: useForm posts through the router; server validation errors come
@@ -13,7 +13,6 @@ export default function Login() {
 
   return (
     <>
-      <Head title="Sign in" />
       <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center p-8">
         <h1 className="mb-6 text-xl font-semibold">Sign in</h1>
         <form onSubmit={submit} className="space-y-4">

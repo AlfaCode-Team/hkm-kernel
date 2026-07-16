@@ -45,7 +45,7 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [];
+        return ['vite.manifest'];
     }
 
     /** @return list<class-string> */

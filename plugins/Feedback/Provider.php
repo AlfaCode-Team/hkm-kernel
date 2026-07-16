@@ -38,10 +38,7 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [
-            DatabaseConnectionManagerContract::class,
-            AuditServiceContract::class,
-        ];
+        return ['database.management', 'audit.trail'];
     }
 
     /** @return list<class-string> */

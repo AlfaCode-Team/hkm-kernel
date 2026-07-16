@@ -80,7 +80,7 @@ renders it.
 **1. Create the page** — `src/surfaces/admin/Pages/Reports/Sales.tsx`:
 
 ```tsx
-import { usePage, Head } from "@pageflow/react";
+import { usePage } from "@pageflow/react";
 import { Button } from "@ui/button";           // shared shadcn kit
 
 interface SalesProps { total: number; rows: { day: string; amount: number }[] }
@@ -88,17 +88,18 @@ interface SalesProps { total: number; rows: { day: string; amount: number }[] }
 export default function Sales() {
   const { props } = usePage<SalesProps>();
   return (
-    <>
-      <Head title="Sales" />
-      <main className="mx-auto max-w-3xl p-8">
-        <h1 className="text-2xl font-semibold">Sales — ${props.total}</h1>
-        {/* … render props.rows … */}
-        <Button className="mt-4">Export</Button>
-      </main>
-    </>
+    <main className="mx-auto max-w-3xl p-8">
+      <h1 className="text-2xl font-semibold">Sales — ${props.total}</h1>
+      {/* … render props.rows … */}
+      <Button className="mt-4">Export</Button>
+    </main>
   );
 }
 ```
+
+The page does NOT set its own title — the tab title and the SEO head come from
+the server (the `seoHead` prop in step 3) and sync automatically on every
+navigation.
 
 The file name decides the key: `Pages/Reports/Sales.tsx` → **`Reports/Sales`**.
 
@@ -119,8 +120,11 @@ with `requires: ["http.pageflow"]`:
 public function sales(): Response
 {
     return $this->pageflow->render($this->request, 'Reports/Sales', [
-        'total' => 1234,
-        'rows'  => [['day' => 'Mon', 'amount' => 200]],
+        'total'   => 1234,
+        'rows'    => [['day' => 'Mon', 'amount' => 200]],
+        // Reserved SEO prop — admin pages get a branded <title> + noindex; on
+        // SPA navigations the client syncs the tab title from the same prop.
+        'seoHead' => $this->seoPrivate('Sales'),   // InteractsWithGraphSeo
     ]);
 }
 ```
@@ -133,7 +137,7 @@ Identical pattern, different `Pages/` tree. **1.** Create
 `src/surfaces/project/Pages/Pricing.tsx`:
 
 ```tsx
-import { usePage, Head, Link } from "@pageflow/react";
+import { usePage, Link } from "@pageflow/react";
 
 interface PricingProps { plans: { name: string; price: number }[] }
 
@@ -141,7 +145,6 @@ export default function Pricing() {
   const { props } = usePage<PricingProps>();
   return (
     <>
-      <Head title="Pricing" />
       <main className="mx-auto max-w-4xl px-4 py-16">
         <h1 className="text-3xl font-bold">Pricing</h1>
         <div className="mt-8 grid gap-6 sm:grid-cols-3">
@@ -175,10 +178,24 @@ File name `Pages/Pricing.tsx` → component **`Pricing`**.
 public function pricing(): Response
 {
     return $this->pageflow->render($this->request, 'Pricing', [
-        'plans' => [['name' => 'Starter', 'price' => 9], ['name' => 'Pro', 'price' => 29]],
+        'plans'   => [['name' => 'Starter', 'price' => 9], ['name' => 'Pro', 'price' => 29]],
+        // Public page → the FULL SEO head: title, description, canonical,
+        // robots, OG/Twitter card and the JSON-LD @graph, in one call.
+        'seoHead' => $this->seoFor(
+            title:       'Pricing',
+            description: 'Simple plans that scale with you.',
+            path:        '/pricing',
+        ),
     ]);
 }
 ```
+
+`seoFor()` / `seoPrivate()` come from `Project\Http\Controllers\Concerns\
+InteractsWithGraphSeo` (`use` it on the controller). On full page loads the
+HTML shell renders the block into `<head>`; on Pageflow XHR navigations the
+same prop carries just the tab title, which the client applies to
+`document.title` automatically. Full reference:
+`plugins/Pageflow/README.md` → "SEO — the reserved seoHead prop".
 
 ### Which surface serves a route?
 
@@ -233,7 +250,7 @@ See `plugins/User/ui/README.md` for a complete worked example (admin list/detail
 | Import | From | Use |
 |---|---|---|
 | `usePage<T>()` | `@pageflow/react` | read `{ props, url, component }` the server sent |
-| `Head` | `@pageflow/react` | `<title>` + meta (SEO) |
+| `Head` | `@pageflow/react` | EXTRA head tags only — titles + SEO come from the server `seoHead` prop (`seoFor()`/`seoPrivate()`), synced automatically |
 | `Link` | `@pageflow/react` | in-app navigation (no full reload); `only`, `as`, `preserveScroll` |
 | `useForm` | `@pageflow/react` | forms with CSRF, `processing`, `errors` |
 | `router` | `@pageflow/react` | imperative visits / partial reloads (`only: [...]`) |

@@ -6,6 +6,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **proj.json `"essentials"` — project-declared global modules.**
+  `Kernel::withEssentialModules()` now accepts module DOMAINS as well as
+  provider class-strings; domains resolve to providers at `build()` and an
+  unknown domain fails the boot. `EntryHelpers::projectEssentials()` reads the
+  new key and the scaffold bootstrap appends it — which plugins are global is
+  now a per-project deployment decision, not a code edit. Session-cookie apps
+  declare `auth.identity` + `user.management` here so `SessionAuthStage`
+  resolves logins on every page.
+- **Boot-time `requires[]` validation.** `CompileServiceManifestStage` now
+  FAILS the boot on any module.json `requires` entry that matches no registered
+  module's `solves` (previously dropped silently — a typo or a plugin missing
+  from `withModules` surfaced only as an unbound-contract error at request
+  time). Port/contract class names no longer belong in `requires[]`.
+- **let-migrate tenant resolver support classes** (ported to scaffolded
+  projects): `DatabaseTenantResolver` + `CentralTenantRegistry` + `Dsn` read
+  the tenant fleet from the central `tenants` table — `tenant:status` /
+  `tenant:migrate` and request routing share ONE registry.
+- **Display identity in the `pageflow_auth` prop.** `PageflowAuth::resolve()`
+  now shares the non-sensitive display fields off the `Identity` — `username`,
+  `fullName`, `email`, `avatarUrl` — so the browser `useAuth()` renders the
+  real name/email/avatar instead of the raw user id. The `PageflowAuth` TS
+  type + guest default gain the fields.
+
+### Changed
+- **STRICT tenant routing — no unscoped passthrough (BREAKING).**
+  `TenantContextStage` now 404s any request that resolves no tenant (cookie
+  hint first — principal-bound, guests included — then the `TENANCY_MODE`
+  identifier). Every served host must be assigned to a tenant
+  (`tenant:host:add`); control-plane code pins the central connection
+  explicitly. The remembered-tenant cookie's user binding is now actually
+  enforced (no cross-user replay).
+- **Essential modules load their transitive `requires[]`.** Essential domains
+  are seeded into every request's dependency graph (previously an essential
+  registered alone and its dependencies were silently missing). Each module
+  still registers exactly once per request.
+- **Tenancy module `requires` trimmed to `["database.management"]`** — the
+  always-on stage path. Its selection/admin/invitation/host routes now carry
+  `auth.identity` / `user.management` / `audit.trail` as route-level
+  `requires[]`, cutting the every-request graph from 13 modules (~135µs) to 2
+  (~15µs) in a Tenancy-essential project.
+- **One `Provider::requires()` convention.** All plugin providers now mirror
+  module.json domains (the single source of truth the kernel reads); the
+  `ModuleContract` docblock documents the convention.
+- **Per-worker loading caches**: `LoadStage` memoizes resolved dependency
+  graphs; `OnDemandLoader` caches provider instances (providers are stateless
+  by contract).
+- **Auth-required browser navigations redirect to login.** `RequireAuthStage`
+  now sends a full page load OR a Pageflow SPA navigation (detected via the
+  `X-Pageflow` header) to `/login?redirectTo=…` instead of a raw JSON 401;
+  genuine API/fetch callers (JSON expected, no `X-Pageflow`) still get the
+  machine-readable 401. The original path rides along as `redirectTo`.
+- **MySQL sessions pinned to UTC.** `MySQLConfiguration` sets
+  `time_zone = '+00:00'` (via `MYSQL_ATTR_INIT_COMMAND` + `initStatements`, so
+  it survives auto-reconnect) — `NOW()` / `CURRENT_TIMESTAMP` and `TIMESTAMP`
+  read-back are now unambiguously UTC, matching the PHP-side UTC clock.
+
+### Fixed
+- **Settings plugin required the non-existent `database.query` domain** (now
+  `database.management`) — the Database module was silently absent from its
+  graph; caught by the new boot-time validation.
+- Scaffold template comments taught wrong `solves` values
+  (`database.query`, `crypto`, `i18n`, `commands`).
+
+### Security
+- **SiteSEO JSON-LD stored XSS.** `Schema.php` now encodes structured data with
+  `JSON_HEX_TAG` so a `</script>` in user-controlled content can't break out of
+  the `<script type="application/ld+json">` block.
+
+
 ## [1.0.10] - 2026-07-14
 
 ### Added

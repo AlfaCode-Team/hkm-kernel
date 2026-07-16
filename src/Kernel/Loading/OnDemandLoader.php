@@ -41,6 +41,16 @@ final class OnDemandLoader
      *   an app-lifetime CoreContainer port. Their boot() hooks must already be
      *   registered (i.e. they are also in withModules()).
      */
+    /**
+     * Provider instances cached per worker. Providers are stateless by contract
+     * (all state lives in the bindings they register into the request-scoped
+     * container), so one instance can safely serve every request — this only
+     * skips the per-request `new $providerClass()`.
+     *
+     * @var array<class-string, ModuleContract>
+     */
+    private array $providers = [];
+
     public function __construct(
         private readonly CoreContainer $core,
         private readonly array $essentialModules = [],
@@ -101,8 +111,7 @@ final class OnDemandLoader
                 );
             }
 
-            /** @var ModuleContract $provider */
-            $provider = new $providerClass();
+            $provider = $this->providers[$providerClass] ??= new $providerClass();
             $container->setScope($domain);
             $provider->register($container);
             $registered[$providerClass] = true;
@@ -115,8 +124,7 @@ final class OnDemandLoader
             if (isset($registered[$providerClass]) || !class_exists($providerClass)) {
                 continue;
             }
-            /** @var ModuleContract $provider */
-            $provider = new $providerClass();
+            $provider = $this->providers[$providerClass] ??= new $providerClass();
             $container->setScope($provider->solves());
             $provider->register($container);
             $registered[$providerClass] = true;

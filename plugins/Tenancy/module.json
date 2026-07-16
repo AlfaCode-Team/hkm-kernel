@@ -5,13 +5,7 @@
     "type": "module",
     "description": "Multi-tenant control plane: tenant registry + per-tenant database routing. Identifies the tenant by TENANCY_MODE \u2014 'claim' (default: authenticated Identity.tenantId, the SaaS/JWT model) or 'domain' (the Host sub-domain, the anonymous storefront model) \u2014 then rebinds an isolated tenant DatabasePort into the request container so every repository talks to the correct tenant database. Database-per-tenant isolation (MySQL/PostgreSQL/SQLite) on top of plugins/Database ConnectionManager.",
     "requires": [
-        "tenant.settings",
-        "database.management",
-        "auth.identity",
-        "user.management",
-        "view.rendering",
-        "validation.rules",
-        "audit.trail"
+        "database.management"
     ],
     "views": "resources/views",
     "exposes": [
@@ -110,6 +104,11 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantController@mine",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "auth.identity",
+                "user.management",
+                "audit.trail"
             ]
         },
         {
@@ -118,6 +117,11 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantController@select",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "auth.identity",
+                "user.management",
+                "audit.trail"
             ]
         },
         {
@@ -126,6 +130,10 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\InvitationController@accept",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "user.management",
+                "audit.trail"
             ]
         },
         {
@@ -134,6 +142,9 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@index",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "audit.trail"
             ]
         },
         {
@@ -142,6 +153,9 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@store",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "audit.trail"
             ]
         },
         {
@@ -150,6 +164,9 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@instructions",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "audit.trail"
             ]
         },
         {
@@ -158,6 +175,9 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@verify",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "audit.trail"
             ]
         },
         {
@@ -166,6 +186,9 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@makePrimary",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "audit.trail"
             ]
         },
         {
@@ -174,6 +197,9 @@
             "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@destroy",
             "filters": [
                 "auth"
+            ],
+            "requires": [
+                "audit.trail"
             ]
         }
     ],

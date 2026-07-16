@@ -45,6 +45,25 @@ final class RequireAuthStage implements HttpStageContract
 
         $identity = $request->identity();
         if ($identity === null || $identity->isGuest()) {
+            // A browser navigating to a protected PAGE should land on the login
+            // page (the natural "page" for an auth-required error), not a raw
+            // JSON body. This covers BOTH a full page load and a Pageflow SPA
+            // navigation: Pageflow requests carry the X-Pageflow header and,
+            // though they are XHR (so expectsJson() is true), the Pageflow
+            // client follows a 302 as a client-side visit — so we must redirect
+            // them, not answer with JSON. Only a genuine API/fetch caller (JSON
+            // expected AND no X-Pageflow header) keeps the machine-readable 401.
+            // The originally-requested path rides along as ?redirectTo so login
+            // can bounce the user back (Auth guards it — same-origin/relative).
+            $isPageflow = (string) ($request->header('X-Pageflow') ?? '') !== '';
+
+            if ($isPageflow || !$request->expectsJson()) {
+                $query  = $request->uri()->getQuery();
+                $target = $request->path() . ($query !== '' ? '?' . $query : '');
+
+                return Response::redirect('/login?redirectTo=' . rawurlencode($target));
+            }
+
             return Response::unauthorized('Authentication is required to access this resource.');
         }
 

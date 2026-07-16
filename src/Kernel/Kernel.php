@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace AlfacodeTeam\PhpServicePlatform\Kernel;
 
-use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\BootPipeline;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, BootPipeline, ManifestReader};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Container\CoreContainer;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Contracts\ModuleContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Error\ErrorPipeline;
@@ -137,17 +137,27 @@ final class Kernel
      * regardless of the route's dependency graph, so their request-scoped
      * services (sessions, cookies, …) are available app-wide.
      *
-     * Use sparingly — this opts those modules out of on-demand loading and adds
-     * their register() cost to every request. Each essential module is also
-     * added to withModules() so its boot() hooks are registered.
+     * Accepts provider CLASS-STRINGS and/or module DOMAINS (a plugin's solves
+     * value — the shape proj.json "essentials" uses, read by
+     * EntryHelpers::projectEssentials()). A class entry is auto-added to
+     * withModules(); a domain entry must name a module ALREADY registered via
+     * withModules() and is resolved to its provider at build() — an unknown
+     * domain fails the boot with a descriptive message, never silently.
      *
-     * @param list<class-string<ModuleContract>> $modules
+     * Use sparingly — this opts those modules out of on-demand loading and adds
+     * their register() cost (plus their requires[] graph) to every request.
+     *
+     * @param list<string> $modules provider class-strings or solves domains
      */
     public function withEssentialModules(array $modules): self
     {
         $this->essentialModules = array_values(array_unique(array_merge($this->essentialModules, $modules)));
-        // Essentials must also be wired (boot) like any other module.
-        $this->withModules($modules);
+        // Class entries must also be wired (boot) like any other module. Domain
+        // entries reference modules already in withModules(); build() resolves them.
+        $classes = array_values(array_filter($modules, static fn($m): bool => str_contains((string) $m, '\\')));
+        if ($classes !== []) {
+            $this->withModules($classes);
+        }
         return $this;
     }
 
@@ -252,8 +262,60 @@ final class Kernel
             array_values($this->disabledRoutes),
         ))->run();
 
+        // Resolve essential DOMAIN entries (proj.json "essentials") to their
+        // provider classes now that the module list is final. Fails the boot on
+        // an unknown domain — never a silent no-op essential.
+        $this->essentialModules = $this->resolveEssentialModules();
+
         $this->built = true;
         return $this;
+    }
+
+    /**
+     * Resolve the essential-module list to provider classes. Entries containing
+     * a namespace separator are class-strings and pass through; anything else is
+     * a module DOMAIN (a solves value, e.g. 'tenancy.routing' from proj.json
+     * "essentials") resolved against the modules registered in withModules().
+     *
+     * @return list<class-string<ModuleContract>>
+     * @throws BootException when a domain matches no registered module
+     */
+    private function resolveEssentialModules(): array
+    {
+        if ($this->essentialModules === []) {
+            return [];
+        }
+
+        $byDomain = [];
+        $reader = new ManifestReader();
+        foreach ($this->moduleClasses as $class) {
+            $m = $reader->read($class);
+            if (isset($m['solves']) && is_string($m['solves'])) {
+                $byDomain[$m['solves']] = $class;
+            }
+        }
+
+        $resolved = [];
+        $unknown = [];
+        foreach ($this->essentialModules as $entry) {
+            if (str_contains($entry, '\\')) {
+                $resolved[$entry] = true;
+            } elseif (isset($byDomain[$entry])) {
+                $resolved[$byDomain[$entry]] = true;
+            } else {
+                $unknown[] = $entry;
+            }
+        }
+
+        if ($unknown !== []) {
+            throw new BootException(
+                "Unknown essential module domain(s): '" . implode("', '", $unknown) . "'."
+                . " Each must be the solves domain of a module registered in withModules([...])."
+                . " Registered domains: " . implode(', ', array_keys($byDomain))
+            );
+        }
+
+        return array_keys($resolved);
     }
 
     /**
