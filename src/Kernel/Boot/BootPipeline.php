@@ -38,12 +38,16 @@ final class BootPipeline
      * @param list<array{method: string, path: string, handler: string}> $projectRoutes
      *   Project-layer routes (declared via Kernel::withRoutes), compiled into the
      *   route manifest under the synthetic '__project__' scope with no module graph.
+     * @param list<string> $disabledRoutes
+     *   Project route-disable policy (Kernel::withRoutePolicy). "METHOD /path" or a
+     *   module domain; applied to plugin routes before project routes are compiled.
      */
     public function __construct(
         private readonly array $moduleClasses,
         private readonly CoreContainer $core,
         array $securityLayers = [],
         array $projectRoutes = [],
+        array $disabledRoutes = [],
     ) {
         // Single reader shared across every manifest-reading stage: each module.json
         // (the single source of truth) is read + JSON-decoded ONCE and cached, instead
@@ -56,7 +60,7 @@ final class BootPipeline
             new DetectConflictsStage($moduleClasses, reader: $reader),        // 2. no two modules share solves()
             new DetectCyclesStage($moduleClasses, reader: $reader),           // 3. no circular requires[] chains
             new CompileServiceManifestStage($moduleClasses, projectRoutes: $projectRoutes, reader: $reader), // 4. dep graph → service-manifest.php
-            new CompileRouteManifestStage($moduleClasses, projectRoutes: $projectRoutes, reader: $reader),   // 5. routes[] → route-manifest.php
+            new CompileRouteManifestStage($moduleClasses, projectRoutes: $projectRoutes, disabledRoutes: $disabledRoutes, reader: $reader),   // 5. routes[] → route-manifest.php
             new CompileViewManifestStage($moduleClasses, reader: $reader),    // 6. views[] → view-manifest.php (project-first cascade)
             new CompileJobManifestStage($moduleClasses, reader: $reader),     // 7. jobs[] → job-manifest.php
             new CompileCommandManifestStage($moduleClasses, reader: $reader), // 8. commands[] → command-manifest.php

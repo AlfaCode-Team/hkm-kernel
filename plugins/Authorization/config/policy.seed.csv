@@ -1,0 +1,175 @@
+# =============================================
+# SUPER ROLE - Full access
+# =============================================
+p, super, *, *
+
+# =============================================
+# OWNER ROLE - Full access except system-level super controls
+# =============================================
+p, owner, *, *
+
+# =============================================
+# ADMIN ROLE - Module-level full access
+# =============================================
+p, admin, users, *
+p, admin, roles, *
+p, admin, permissions, *
+p, admin, products, *
+p, admin, inventory, *
+p, admin, orders, *
+p, admin, customers, *
+p, admin, suppliers, *
+p, admin, payments, *
+p, admin, refunds, *
+p, admin, reports, *
+p, admin, settings, *
+p, admin, discounts, *
+p, admin, giftcards, *
+p, admin, tax, *
+p, admin, branches, *
+p, admin, integrations, *
+p, admin, webhooks, *
+p, admin, pos_terminal, *
+p, admin, dashboard, read
+p, admin, audit_logs, read
+
+# =============================================
+# MANAGER ROLE - Day-to-day operations
+# =============================================
+p, manager, products, *
+p, manager, inventory, *
+p, manager, orders, *
+p, manager, customers, *
+p, manager, refunds, *
+p, manager, discounts, *
+p, manager, giftcards, *
+p, manager, pos_terminal, *
+p, manager, reports, read
+p, manager, dashboard, read
+
+# =============================================
+# SUPERVISOR ROLE - Limited operations
+# =============================================
+p, supervisor, products, read
+p, supervisor, inventory, *
+p, supervisor, orders, read
+p, supervisor, refunds, create
+p, supervisor, pos_terminal, *
+p, supervisor, reports, read
+p, supervisor, dashboard, read
+
+# =============================================
+# CASHIER ROLE - POS operations
+# =============================================
+p, cashier, pos_terminal, *
+p, cashier, orders, create
+p, cashier, orders, checkout
+p, cashier, orders, read
+p, cashier, refunds, create
+p, cashier, customers, create
+p, cashier, customers, read
+p, cashier, payments, create
+p, cashier, products, read
+p, cashier, dashboard, read
+
+# =============================================
+# INVENTORY CLERK ROLE - Stock management
+# =============================================
+p, inventory_clerk, products, read
+p, inventory_clerk, inventory, *
+p, inventory_clerk, suppliers, read
+p, inventory_clerk, reports, read
+
+# =============================================
+# ACCOUNTANT ROLE - Finance and auditing
+# =============================================
+p, accountant, payments, *
+p, accountant, refunds, *
+p, accountant, reports, *
+p, accountant, tax, *
+p, accountant, audit_logs, read
+p, accountant, dashboard, read
+
+# =============================================
+# SUPPORT ROLE - Customer support
+# =============================================
+p, support, customers, read
+p, support, orders, read
+p, support, refunds, read
+p, support, audit_logs, read
+p, support, dashboard, read
+
+# =============================================
+# VIEWER ROLE - Read-only access
+# =============================================
+p, viewer, dashboard, read
+p, viewer, reports, read
+p, viewer, products, read
+p, viewer, inventory, read
+p, viewer, orders, read
+p, viewer, customers, read
+
+# =============================================
+# HKMRENTAL — GUEST
+# Unauthenticated visitors; read-only public listing surface.
+# =============================================
+p, guest, rental.listings, read
+
+# =============================================
+# HKMRENTAL — TENANT
+# Registered user looking to rent a property.
+# - Browse and search listings
+# - Manage own wishlist, bookings, and inquiries
+# - View own payment history
+# - Full account self-management (profile, notifications, security, etc.)
+# - Messaging with landlords and brokers
+# =============================================
+p, tenant, rental.listings, read
+p, tenant, rental.account,  *
+p, tenant, rental.chat,     *
+p, tenant, rental.wishlist, *
+p, tenant, rental.booking,  *
+p, tenant, rental.inquiry,  write
+p, tenant, rental.payment,  read
+
+# =============================================
+# HKMRENTAL — LANDLORD
+# Property owner; manages their own units, tenants, and rent collection.
+# - All tenant-facing browsing rights (market awareness)
+# - Full landlord module: dashboard, properties, tenants, schedules,
+#   receipts, payments, profile, pulse heartbeat
+# - Full account self-management
+# - Messaging
+# =============================================
+p, landlord, rental.listings,  read
+p, landlord, rental.account,   *
+p, landlord, rental.chat,      *
+p, landlord, rental.landlord,  *
+
+# =============================================
+# HKMRENTAL — BROKER
+# Licensed agent; manages listings, showings, and client relationships.
+# - Public listing browsing (market awareness)
+# - Full broker module: dashboard, listings, showings, clients,
+#   commission, landlord search & connection, profile
+# - Full account self-management
+# - Messaging
+# =============================================
+p, broker, rental.listings, read
+p, broker, rental.account,  *
+p, broker, rental.chat,     *
+p, broker, rental.broker,   *
+
+# =============================================
+# HKMRENTAL — PROPERTY_MANAGER
+# Company managing multiple landlords' portfolios.
+# - Public listing browsing (market awareness)
+# - Full company module: dashboard, landlords, properties,
+#   maintenance queue, financial summaries, reports
+# - Full account self-management
+# - Messaging
+# =============================================
+p, property_manager, rental.listings, read
+p, property_manager, rental.account,  *
+p, property_manager, rental.chat,     *
+p, property_manager, rental.company,  *

@@ -134,6 +134,77 @@ final class EntryHelpers
         return $routes;
     }
 
+    /**
+     * Read the project's GLOBAL (essential) modules from <projectPath>/proj.json
+     * under "essentials": [ ... ]. Each entry is a module DOMAIN (a plugin's
+     * solves value, e.g. "tenancy.routing") — the project's declaration of which
+     * plugins must register on EVERY request. Passed to
+     * Kernel::withEssentialModules(); the kernel resolves each domain to its
+     * provider at build() and FAILS the boot on an unknown domain, so a typo or
+     * a plugin missing from withModules() never becomes a silent no-op.
+     * Non-string / malformed entries are dropped here.
+     *
+     * @return list<string>
+     */
+    public static function projectEssentials(string $projectPath): array
+    {
+        $file = rtrim($projectPath, '/') . '/proj.json';
+        if (!is_file($file)) {
+            return [];
+        }
+
+        $data = json_decode((string) file_get_contents($file), true);
+        if (!is_array($data) || !is_array($data['essentials'] ?? null)) {
+            return [];
+        }
+
+        $domains = [];
+        foreach ($data['essentials'] as $domain) {
+            if (is_string($domain) && trim($domain) !== '') {
+                $domains[] = trim($domain);
+            }
+        }
+
+        return $domains;
+    }
+
+    /**
+     * Read the project's route-disable policy from <projectPath>/proj.json under
+     * "routePolicy": { "disable": [ ... ] } (a bare "disable": [...] top-level key
+     * is also accepted). Each entry is a "METHOD /path" spec or a module domain,
+     * passed straight to Kernel::withRoutePolicy(); the route-manifest compiler
+     * validates them at boot (an unmatched spec fails with a descriptive error).
+     * Non-string / malformed entries are dropped here.
+     *
+     * @return list<string>
+     */
+    public static function projectRoutePolicy(string $projectPath): array
+    {
+        $file = rtrim($projectPath, '/') . '/proj.json';
+        if (!is_file($file)) {
+            return [];
+        }
+
+        $data = json_decode((string) file_get_contents($file), true);
+        if (!is_array($data)) {
+            return [];
+        }
+
+        $disable = $data['routePolicy']['disable'] ?? $data['disable'] ?? null;
+        if (!is_array($disable)) {
+            return [];
+        }
+
+        $specs = [];
+        foreach ($disable as $spec) {
+            if (is_string($spec) && trim($spec) !== '') {
+                $specs[] = trim($spec);
+            }
+        }
+
+        return $specs;
+    }
+
     private static function sanitiseProject(string $project): string
     {
         $project = trim($project);

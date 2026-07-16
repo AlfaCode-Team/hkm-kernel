@@ -48,6 +48,48 @@ zig build --release=small  # ~230KB, smallest (no safety checks)
 
 Binaries land in `zig-out/bin/{hkm,hkm-config}`.
 
+## Dev environment — stable install + dev checkout side by side (`--dev`)
+
+A contributor typically has TWO kernels on the machine:
+
+| Kernel | Where | Used when |
+| --- | --- | --- |
+| **Stable** (installed) | `/opt/hkm-kernel` (from the `.deb` / release bundle) | everyday `hkm …` — real projects keep working |
+| **Dev** (checkout) | the cloned monorepo, e.g. `~/Documents/HKMCODE` | `hkm <command> --dev` — testing framework changes |
+
+`hkm` always targets the stable install (via `HKM_KERNEL_HOME` in
+`~/.config/hkm/config.env`). Appending `--dev` to ANY command pins that ONE
+invocation to the dev checkout instead — it exports `HKM_KERNEL_HOME` +
+`HKM_CLI_PATH` for the child process only, so nothing persistent changes and
+the flag never leaks into downstream arg parsing.
+
+### One-time contributor setup
+
+```sh
+git clone <repo> ~/Documents/HKMCODE
+cd ~/Documents/HKMCODE && composer install        # dev kernel needs its vendor/
+hkm-config set-dev-home ~/Documents/HKMCODE      # register the checkout (validated)
+```
+
+### Daily use
+
+```sh
+hkm run my-shop            # stable kernel — production behaviour
+hkm run my-shop --dev      # SAME project, but on your patched dev kernel
+hkm doctor --dev           # confirm which kernel --dev resolves to
+```
+
+`--dev` resolves the dev kernel in this order:
+
+1. **`HKM_DEV_HOME`** (set once via `hkm-config set-dev-home`) — works from
+   anywhere, including the installed `/usr/bin/hkm`.
+2. **Self-location** — when you run a repo-built launcher
+   (`tools/zig-out/bin/hkm`), it walks UP from its own executable to the nearest
+   ancestor holding `composer.json`. No config needed inside the checkout.
+
+If neither resolves, `--dev` fails loudly (it never silently falls back to the
+stable kernel — a "dev" run must never accidentally test production code).
+
 ## Adding a command
 
 1. Create `src/commands/<name>.zig` with the standard `run(...)` signature.

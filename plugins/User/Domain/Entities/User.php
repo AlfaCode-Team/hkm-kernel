@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Plugins\User\Domain\Entities;
 
+use Plugins\Tenancy\API\DTOs\TenantSummary;
+use Plugins\User\API\IntegrationEvents\UserRegisteredIntegrationEvent;
 use Plugins\User\Domain\Events\UserDeletedDomainEvent;
 use Plugins\User\Domain\Events\UserRegisteredDomainEvent;
 use Plugins\User\Domain\Events\UserUpdatedDomainEvent;
@@ -33,13 +35,56 @@ final class User extends Entity
         // cast is correct here — a '?datetime' would leak a 'nullable' param into
         // DatetimeCast and be misread as a literal date format.
         'email_verified_at' => 'datetime',
+        'email_verification_expires_at' => 'datetime',
         'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
-    /** Credentials never cross the serialization boundary. */
-    protected array $hidden = ['password_hash', 'remember_token'];
+    /** Credentials + the verification token hash never cross the serialization boundary. */
+    protected array $hidden = ['password_hash', 'remember_token', 'email_verification_token_hash'];
 
  
+    protected ?TenantSummary $membership = null;
+    protected ?UserProfile $profile = null;
+    
+
+    /**
+     * Summary of setMembership
+     * @param mixed $membership
+     * @return void
+     */
+    public function setMembership(?TenantSummary $membership): void
+    {
+        $this->membership = $membership;
+    }
+
+    /**
+     * Summary of getMembership
+     * @return TenantSummary|null
+     */
+    public function getMembership(): ?TenantSummary
+    {
+        return $this->membership;
+    }
+
+    /**
+     * Summary of setProfile
+     * @param mixed $profile
+     * @return void
+     */
+    public function setProfile(?UserProfile $profile): void
+    {
+        $this->profile = $profile;
+    }
+
+    /**
+     * Summary of getProfile
+     * @return UserProfile|null
+     */
+    public function getProfile(): ?UserProfile
+    {
+        return $this->profile;
+    }
 
     /**
      * Register a brand-new user. $passwordHash MUST already be a bcrypt hash
@@ -63,6 +108,8 @@ final class User extends Entity
             'remember_token' => null,
             'version' => 1,
             'email_verified_at' => null,
+            'email_verification_token_hash' => null,
+            'email_verification_expires_at' => null,
             'created_at' => $createdAt,
         ]);
         $user->syncOriginal();
@@ -73,6 +120,7 @@ final class User extends Entity
             email: $email,
             occurredAt: $createdAt,
         ));
+       
 
         return $user;
     }
@@ -115,6 +163,35 @@ final class User extends Entity
             return;
         }
         $this->email_verified_at = new \DateTimeImmutable();
+        // The token hash + expiry are deliberately KEPT (not nulled): once the
+        // account is verified, email_verified_at is the authoritative gate, so a
+        // second click of the SAME (still-unexpired) link resolves to the same
+        // user and is reported as "already verified" instead of a confusing
+        // "invalid link". It confers no new power — verifyEmail() short-circuits
+        // above, so the token can never re-verify or mutate state — and it self-
+        // expires at its original TTL. Do NOT re-null these here.
+    }
+
+    /**
+     * Arm a pending email-verification token. Stores only the SHA-256 HASH of
+     * the emailed token (the raw token lives only in the email) plus a hard
+     * expiry. Re-arming replaces any previous pending token.
+     */
+    public function startEmailVerification(string $tokenHash, \DateTimeImmutable $expiresAt): void
+    {
+        $this->email_verification_token_hash = $tokenHash;
+        $this->email_verification_expires_at = $expiresAt;
+    }
+
+    public function emailVerificationTokenHash(): ?string
+    {
+        $v = $this->getRawAttribute('email_verification_token_hash');
+        return $v === null ? null : (string) $v;
+    }
+
+    public function emailVerificationExpiresAt(): ?\DateTimeImmutable
+    {
+        return $this->getDate('email_verification_expires_at');
     }
 
     /**

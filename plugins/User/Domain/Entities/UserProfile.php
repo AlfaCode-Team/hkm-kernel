@@ -116,6 +116,12 @@ final class UserProfile extends Entity
     public function locale(): string     { return $this->getString('locale'); }
     public function phone(): string      { return $this->getString('phone'); }
 
+    public function fullName(): string
+    {
+        $first = trim((string) $this->firstName());
+        $last  = trim((string) $this->lastName());
+        return trim("{$first} {$last}");
+    }
     private function nullable(string $key): ?string
     {
         $v = $this->getRawAttribute($key);

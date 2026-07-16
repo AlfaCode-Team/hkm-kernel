@@ -1,0 +1,55 @@
+# Example Apache virtual host for a PhpServicePlatform project.
+# Copy to your Apache sites (e.g. /etc/apache2/sites-available/{{PROJECT_NAME}}.conf),
+# adjust ServerName / paths / PHP handler, then: a2ensite … && systemctl reload apache2
+# Per-directory rules also ship as app/public/.htaccess (used when AllowOverride is on).
+#
+# Requires: mod_rewrite, mod_headers  (a2enmod rewrite headers)
+
+<VirtualHost *:80>
+    ServerName example.com
+
+    # DocumentRoot is app/public ONLY — never the project root (keeps .env,
+    # config, src, vendor OUT of the web-served tree).
+    DocumentRoot /var/www/{{PROJECT_NAME}}/app/public
+
+    <Directory /var/www/{{PROJECT_NAME}}/app/public>
+        # Front-controller rewrite + hardening live in the shipped .htaccess.
+        # Set AllowOverride All to honour it, or inline those rules here and
+        # keep AllowOverride None for a small performance win.
+        AllowOverride All
+        Require all granted
+        Options -Indexes +FollowSymLinks
+    </Directory>
+
+    # Deny all dotfiles (.env, .git, .htaccess, …) anywhere under the vhost.
+    <DirectoryMatch "/\.">
+        Require all denied
+    </DirectoryMatch>
+
+    # Only index.php may be executed as PHP (defence against dropped scripts).
+    <FilesMatch "\.php$">
+        Require all denied
+    </FilesMatch>
+    <Files "index.php">
+        Require all granted
+    </Files>
+
+    # Environment for the app (match your deployment).
+    SetEnv APP_ENV production
+    # SetEnv HKM_USERDATA_DIR /var/lib/hkm
+
+    # Baseline security headers (SecurityFilters plugin also sets these at runtime).
+    <IfModule mod_headers.c>
+        Header always unset X-Powered-By
+        Header always set X-Content-Type-Options "nosniff"
+        Header always set X-Frame-Options "SAMEORIGIN"
+        Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    </IfModule>
+    ServerTokens Prod
+    ServerSignature Off
+
+    LimitRequestBody 26214400
+
+    ErrorLog  ${APACHE_LOG_DIR}/{{PROJECT_NAME}}-error.log
+    CustomLog ${APACHE_LOG_DIR}/{{PROJECT_NAME}}-access.log combined
+</VirtualHost>

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Never commit developer-local project registrations: force
+# projects/projects.json to an empty registry in the commit (the working copy
+# is left untouched, so your local `hkm` registrations keep working).
+f="projects/projects.json"
+if git diff --cached --name-only -- "$f" | grep -q .; then
+    staged="$(git show ":$f" 2>/dev/null | tr -d ' \t\r\n')"
+    if [ "$staged" != "{}" ]; then
+        blob="$(printf '{}\n' | git hash-object -w --stdin)"
+        git update-index --cacheinfo "100644,$blob,$f"
+        echo "pre-commit: reset $f to an empty registry (dev entries not committed)"
+    fi
+fi
+exit 0

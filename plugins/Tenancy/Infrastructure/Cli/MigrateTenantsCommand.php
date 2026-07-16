@@ -7,6 +7,7 @@ namespace Plugins\Tenancy\Infrastructure\Cli;
 use AlfaCode\LetMigrate\MigrationServiceFactory;
 use AlfacodeTeam\PhpIoCli\AbstractCommand;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\EncryptionPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Tenancy\API\Contracts\TenantRegistryContract;
 use Plugins\Tenancy\Domain\Entities\Tenant;
@@ -135,11 +136,20 @@ final class MigrateTenantsCommand extends AbstractCommand
 
     private function defaultTemplatePath(): string
     {
+        // Env override: an absolute path is honoured as-is; a relative one is
+        // resolved under the active project root.
         $custom = env('TENANCY_TEMPLATE_PATH');
         if (is_string($custom) && $custom !== '') {
-            return $custom;
+            return $this->isAbsolutePath($custom) ? $custom : Paths::project($custom);
         }
 
-        return dirname(__DIR__, 2) . '/database/tenant-template';
+        // Project-relative by default: projects/<name>/database/tenant-template.
+        return Paths::project('database/tenant-template');
+    }
+
+    /** Unix (/…) or Windows (C:\… / \\…) absolute path. */
+    private function isAbsolutePath(string $path): bool
+    {
+        return $path[0] === '/' || (bool) preg_match('#^[A-Za-z]:[\\\\/]|^\\\\\\\\#', $path);
     }
 }

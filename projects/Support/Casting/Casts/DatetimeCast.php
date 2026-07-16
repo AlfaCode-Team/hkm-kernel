@@ -39,7 +39,7 @@ final class DatetimeCast extends BaseCast
         if ($date === false) {
             // Fall back to lenient parsing for non-canonical strings.
             try {
-                return new DateTimeImmutable($value);
+                return new DateTimeImmutable(datetime: $value);
             } catch (\Exception $e) {
                 throw new InvalidArgumentException("Unparsable datetime value: {$value}", 0, $e);
             }

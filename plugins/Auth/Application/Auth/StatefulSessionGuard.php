@@ -12,11 +12,12 @@ use Plugins\Auth\Application\Ports\StatefulGuard;
 use Plugins\Auth\Application\Ports\SupportsBasicAuth;
 use Plugins\Auth\Application\Ports\UserProvider;
 use Plugins\Auth\Application\Services\AuthService;
+use Plugins\Auth\Application\Services\DeviceSessionService;
 use Plugins\Auth\Domain\ValueObjects\Recaller;
 use Plugins\Auth\Infrastructure\Http\Stages\SessionAuthStage;
 use Plugins\Cookie\Infrastructure\CookieJar;
 use Plugins\User\API\Contracts\UserServiceContract;
-
+ 
 /**
  * StatefulSessionGuard — the interactive login/logout guard.
  *
@@ -44,6 +45,7 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
         private readonly ?CookieJar $cookies = null,
         private readonly string $recallerCookie = SessionAuthStage::RECALLER_COOKIE,
         private readonly int $rememberTtl = SessionAuthStage::RECALLER_TTL,
+        private readonly ?DeviceSessionService $devices = null,
     ) {
         $this->provider = $provider;
     }
@@ -69,10 +71,20 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
     {
         if ($this->user !== null) {
             return $this->user;
-        }
+        } 
 
         $userId = (string) $this->session->get(AuthService::SESSION_USER, '');
         if ($userId !== '') {
+            // Fingerprint + server-side device-session validation (old __DEV__
+            // semantics): a hijacked or revoked session dies here, immediately.
+            if ($this->devices !== null && $this->request !== null
+                && !$this->devices->verify($this->session, $this->request)) {
+                $this->devices->teardown($this->session);
+                $this->session->invalidate();
+
+                return null;
+            }
+
             $base = $this->provider->retrieveById($userId);
             if ($base instanceof AuthUserProxy) {
                 $base = $base->withSecurity(
@@ -94,6 +106,7 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
     public function attempt(array $credentials = [], bool $remember = false): bool
     {
         $user = $this->provider->retrieveByCredentials($credentials);
+         
         $this->lastAttempted = $user;
 
         if ($user === null) {
@@ -158,6 +171,15 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
         $this->session->put(AuthService::SESSION_ROLES, $identity->roles);
         $this->session->put(AuthService::SESSION_PERMISSIONS, $identity->permissions);
         $this->session->put(AuthService::SESSION_TENANT, $identity->tenantId);
+        $this->session->put(AuthService::SESSION_USERNAME, $identity->username);
+        $this->session->put(AuthService::SESSION_EMAIL, $identity->email);
+        $this->session->put(AuthService::SESSION_NAME, $identity->fullName);
+        $this->session->put(AuthService::SESSION_AVATAR, $identity->avatarUrl);
+
+        // Bind the session to this device: fingerprint + auth_sessions row.
+        if ($this->devices !== null && $this->request !== null) {
+            $this->devices->establish($this->session, $this->request, $identity->userId);
+        }
 
         if ($remember) {
             $this->queueRecaller($identity->userId);
@@ -176,6 +198,7 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
             $this->users->clearRememberToken($userId);
         }
         $this->cookies?->forget($this->recallerCookie);
+        $this->devices?->teardown($this->session);
         $this->session->invalidate();
         $this->forgetUser();
         $this->viaRemember = false;
@@ -198,8 +221,14 @@ final class StatefulSessionGuard implements StatefulGuard, SupportsBasicAuth
             return null;
         }
 
-        $this->users->cycleRememberToken($user->getAuthIdentifier());
-        $this->queueRecaller($user->getAuthIdentifier()); // reissue for THIS device
+        // Kill every OTHER device's server-side session (old semantics), then
+        // rotate the remember token so outstanding recaller cookies die too
+        // (queueRecaller cycles the token before issuing this device's cookie).
+        if ($this->devices !== null && $this->request !== null) {
+            $this->devices->revokeOthers($this->session, $this->request, $user->getAuthIdentifier());
+        }
+
+        $this->queueRecaller($user->getAuthIdentifier()); // rotates + reissues for THIS device
 
         return $user;
     }

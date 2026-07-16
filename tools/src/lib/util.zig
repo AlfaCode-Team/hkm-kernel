@@ -7,6 +7,15 @@ const Dir = std.Io.Dir;
 const Io = std.Io;
 const EnvMap = std.process.Environ.Map;
 
+/// Restrict a file to owner-only (chmod 0600). No-op on Windows. Best-effort —
+/// used for secret-bearing files like a project's .env.
+pub fn chmod600(io: Io, path: []const u8) void {
+    if (@import("builtin").os.tag == .windows) return;
+    const f = Dir.cwd().openFile(io, path, .{}) catch return;
+    defer f.close(io);
+    f.setPermissions(io, @enumFromInt(0o600)) catch {};
+}
+
 // ── path strings ────────────────────────────────────────────────────────────
 
 /// Trim trailing path separators (keeps a lone "/").

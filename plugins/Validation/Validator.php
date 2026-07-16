@@ -28,13 +28,38 @@ use Plugins\I18n\Translator;
  *
  * Supported rules:
  *   required, nullable, string, integer, numeric, boolean, array, email, url,
- *   min:n, max:n, between:a,b, in:a,b,c, regex:/.../, same:field, different:field,
- *   confirmed
+ *   http_url, timezone, min:n, max:n, between:a,b, in:a,b,c, regex:/.../,
+ *   same:field, different:field, confirmed
+ *
+ * Custom rules — register once at bootstrap:
+ *   Validator::extend('kebab',
+ *       fn($v) => is_string($v) && preg_match('/^[a-z0-9-]+$/', $v) === 1,
+ *       'The :field must be kebab-case.');
+ *   // then: 'slug' => 'required|kebab'
  */
 final class Validator
 {
     /** @var array<string,list<string>> */
     private array $errors = [];
+
+    /**
+     * Custom rules registered via extend(). Process-wide (static) so a rule is
+     * available to EVERY validator instance without re-registering.
+     *
+     * @var array<string, callable(mixed $value, ?string $param, array<string,mixed> $data): bool>
+     */
+    private static array $extensions = [];
+
+    /** Default messages for custom rules, keyed by rule name. @var array<string,string> */
+    private static array $extensionMessages = [];
+
+    /**
+     * Named rule GROUPS (CodeIgniter-style): a reusable {rules, messages} set
+     * addressed by name via group(). Populated from config/validation.php.
+     *
+     * @var array<string, array{rules: array<string,string|list<string>>, messages: array<string,string>}>
+     */
+    private static array $groups = [];
 
     /** Built-in English defaults; :field and rule params are interpolated. */
     private const DEFAULTS = [
@@ -46,6 +71,9 @@ final class Validator
         'array'     => 'The :field field must be an array.',
         'email'     => 'The :field field must be a valid email address.',
         'url'       => 'The :field field must be a valid URL.',
+        'http_url'  => 'The :field field must be a valid http(s) URL.',
+        'timezone'  => 'The :field field must be a valid timezone.',
+        'enum'      => 'The selected :field is invalid.',
         'min'       => 'The :field field must be at least :min.',
         'max'       => 'The :field field must not be greater than :max.',
         'between'   => 'The :field field must be between :min and :max.',
@@ -77,6 +105,88 @@ final class Validator
     public static function make(array $data, array $rules, array $messages = [], ?Translator $translator = null): self
     {
         return new self($data, $rules, $messages, $translator);
+    }
+
+    /**
+     * Register a CUSTOM rule.
+     *
+     * The callback receives the field value, the optional `:param` (e.g. the
+     * `5` in `starts_with:5`), and the full input map (for cross-field rules).
+     * Return true to pass, false to fail. Use it like any built-in rule:
+     * `'slug' => 'required|kebab'`.
+     *
+     * Call this ONCE at bootstrap (a Provider::boot / project bootstrap) — the
+     * registry is static and process-wide, so registering per-request is both
+     * wasteful and unsafe under OpenSwoole. Registration is idempotent (same
+     * name overwrites).
+     *
+     * @param callable(mixed $value, ?string $param, array<string,mixed> $data): bool $validator
+     * @param string|null $message Default message; supports :field and :param.
+     */
+    public static function extend(string $rule, callable $validator, ?string $message = null): void
+    {
+        self::$extensions[$rule] = $validator;
+        if ($message !== null) {
+            self::$extensionMessages[$rule] = $message;
+        }
+    }
+
+    /**
+     * Register a RULE-SET class (CodeIgniter-style): every public method on the
+     * class becomes a rule named after the method. Each method has the signature
+     * `(mixed $value, ?string $param, array<string,mixed> $data): bool`. An
+     * optional `messages(): array<string,string>` method supplies per-rule
+     * default messages. Register once at bootstrap.
+     *
+     * @param object|class-string $ruleSet instance or class-string to construct
+     */
+    public static function extendWith(object|string $ruleSet): void
+    {
+        $instance = is_string($ruleSet) ? new $ruleSet() : $ruleSet;
+
+        $messages = method_exists($instance, 'messages') ? $instance->messages() : [];
+
+        foreach ((new \ReflectionClass($instance))->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+            $name = $method->getName();
+            // Skip framework hooks + magic methods — only rule methods register.
+            if ($name === 'messages' || str_starts_with($name, '__')) {
+                continue;
+            }
+            self::extend($name, $instance->{$name}(...), $messages[$name] ?? null);
+        }
+    }
+
+    /**
+     * Define a reusable named rule GROUP (CodeIgniter rule groups). Address it
+     * later with group(). Typically populated from config/validation.php.
+     *
+     * @param array<string,string|list<string>> $rules
+     * @param array<string,string> $messages
+     */
+    public static function defineGroup(string $name, array $rules, array $messages = []): void
+    {
+        self::$groups[$name] = ['rules' => $rules, 'messages' => $messages];
+    }
+
+    /**
+     * Build a validator from a previously defined named group.
+     *
+     * @param array<string,mixed> $data
+     */
+    public static function group(string $name, array $data, ?Translator $translator = null): self
+    {
+        $group = self::$groups[$name]
+            ?? throw new \InvalidArgumentException("Unknown validation group [{$name}].");
+
+        return new self($data, $group['rules'], $group['messages'], $translator);
+    }
+
+    /** Drop all custom rules + groups — test helper; never needed on the hot path. */
+    public static function flushExtensions(): void
+    {
+        self::$extensions = [];
+        self::$extensionMessages = [];
+        self::$groups = [];
     }
 
     public function fails(): bool
@@ -166,6 +276,9 @@ final class Validator
             'array'     => is_array($value),
             'email'     => filter_var($value, FILTER_VALIDATE_EMAIL) !== false,
             'url'       => filter_var($value, FILTER_VALIDATE_URL) !== false,
+            'http_url'  => self::isHttpUrl($value),
+            'timezone'  => is_string($value) && in_array($value, timezone_identifiers_list(), true),
+            'enum'      => self::isEnumValue($value, $param),
             'min'       => $this->size($value) >= (float) $param,
             'max'       => $this->size($value) <= (float) $param,
             'between'   => $this->between($value, $param),
@@ -174,7 +287,7 @@ final class Validator
             'same'      => $value === ($this->data[$param] ?? null),
             'different' => $value !== ($this->data[$param] ?? null),
             'confirmed' => $value === ($this->data[$field . '_confirmation'] ?? null),
-            default     => true, // unknown rule — pass rather than fail hard
+            default     => $this->runExtension($rule, $value, $param),
         };
 
         return $ok ? null : $this->replacements($rule, $param);
@@ -203,6 +316,43 @@ final class Validator
                 break;
         }
         return $replace;
+    }
+
+    /** Dispatch a rule not known built-in to a registered custom rule (unknown → pass). */
+    private function runExtension(string $rule, mixed $value, ?string $param): bool
+    {
+        $ext = self::$extensions[$rule] ?? null;
+
+        // Unknown rule: pass rather than fail hard (a typo shouldn't 422 the world).
+        return $ext === null ? true : $ext($value, $param, $this->data);
+    }
+
+    /** True when $value is a valid case of the (backed or pure) enum named in $param. */
+    private static function isEnumValue(mixed $value, ?string $enum): bool
+    {
+        if ($enum === null || enum_exists($enum) === false) {
+            return false;
+        }
+        if (method_exists($enum, 'tryFrom')) {                 // backed enum
+            return (is_string($value) || is_int($value)) && $enum::tryFrom($value) !== null;
+        }
+        foreach ($enum::cases() as $case) {                    // pure enum → match name
+            if ($case->name === $value) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True for a syntactically valid absolute http/https URL. */
+    private static function isHttpUrl(mixed $value): bool
+    {
+        if (!is_string($value) || filter_var($value, FILTER_VALIDATE_URL) === false) {
+            return false;
+        }
+        $scheme = strtolower((string) parse_url($value, PHP_URL_SCHEME));
+
+        return $scheme === 'http' || $scheme === 'https';
     }
 
     private function present(mixed $value): bool
@@ -250,7 +400,11 @@ final class Validator
             return $this->translator->get("validation.{$rule}", $replace);
         }
 
-        return $this->interpolate(self::DEFAULTS[$rule] ?? "The {$field} field is invalid.", $replace);
+        $default = self::DEFAULTS[$rule]
+            ?? self::$extensionMessages[$rule]
+            ?? "The {$field} field is invalid.";
+
+        return $this->interpolate($default, $replace);
     }
 
     /** @param array<string,string|int|float> $replace */

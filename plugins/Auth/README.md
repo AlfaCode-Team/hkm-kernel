@@ -6,7 +6,7 @@ It does **not** do authorization policy (that's your service layer) and it is
 **not** the multi-tenant control plane (that's `Plugins\Tenancy`).
 
 > 📄 A full typeset walkthrough ships alongside this file: [`AUTH_GUIDE.pdf`](AUTH_GUIDE.pdf).
-> Deep-dive reference: [`docs/ai-context/25_AUTH.md`](../../docs/ai-context/25_AUTH.md).
+> Deep-dive reference: see the Auth design notes in this README below.
 
 ## The one split to remember
 
@@ -40,6 +40,10 @@ final readonly class Identity {
     public array  $roles;       // list<string>
     public array  $permissions; // list<string> (PAT abilities / OAuth scopes)
     public string $tokenType;   // 'jwt' | 'api_key' | 'session' | 'none'
+    public string $username;    // display identity — best-effort, '' when unknown
+    public string $email;
+    public string $fullName;    // tenant user_profiles; tenant-scoped credentials only
+    public ?string $avatarUrl;
     public function hasRole(string $r): bool;
     public function hasPermission(string $p): bool;   // honours '*'
     public function isGuest(): bool;
@@ -139,14 +143,36 @@ return [
 ```
 
 ```php
+// READ
 $manager->guard('api')->user();      // ?Authenticatable (AuthUserProxy)
 $manager->guard('jwt')->identity();  // kernel Identity
 $manager->provider('users');
 $manager->extend('sso', fn($req,$name,$cfg) => new GuardAccessor(...));
 $manager->extendProvider('ldap', fn($name) => new LdapUserProvider(...));
 $manager->forgetGuards();            // Swoole: clear per-request cache
-$manager->issueToken('u1', ['roles' => ['user']], 3600);
+
+// WRITE — the old front-door ergonomic (session guard):
+$manager->guard('web')->attempt(['email' => …, 'password' => …], remember: true);
+$manager->guard('web')->logout();
+$manager->guard('web')->logoutOtherDevices($password);
+// (a stateless guard throws on a write — attempt/logout need a session driver)
+
+// ISSUE — stateless credentials, one call, no reaching into AuthService:
+$manager->issueToken('u1', ['roles' => ['user']], 3600);        // access JWT
+$manager->issueTokenPair('u1', device: $ua, ip: $ip);          // { accessToken, refreshToken, … }
 ```
+
+**AuthManager is the single front door.** The Auth plugin's own controllers
+route through it — `SessionAuthController` drives `$this->auth('web')->attempt()`
+/ `->logout()` / `->logoutOtherDevices()`; `MobileAuthController` issues via
+`$this->authManager()->issueTokenPair()` / `->issueToken()` (parity with the old
+`AuthManager::issueToken('mobile', …)`). Controllers never touch
+`AuthService`/`RefreshTokenService` directly. The one thing AuthManager does NOT
+own is verifying an INCOMING token on a protected request — that runs in the
+kernel SecurityGateway (`JwtAuthLayer`/`PersonalAccessTokenLayer`) *before* any
+module loads, which is a GDA requirement, not a choice. Other PLUGINS still cross
+the boundary through the published `AuthServiceContract` (AuthManager is
+Auth-internal, deliberately not exposed).
 
 - **`ModelUserProvider`** — resolves users from `UserServiceContract` (no ORM);
   `retrieveByCredentials` does the full timing-safe verify.
@@ -179,6 +205,23 @@ GET  /auth/me                                             → identity | 401
 With no live session, `SessionAuthStage` validates it by the token's SHA-256 hash
 (`UserServiceContract::findByRememberToken`), re-opens the session, and **rotates**
 the token + cookie (single-use window). Logout clears both.
+
+**Post-login redirect.** The Session plugin's `StartSessionStage` records the
+last eligible page view (GET + 2xx, HTML or Pageflow page object; auth/OAuth/
+API/asset paths exempt — extend with `SESSION_PREVIOUS_EXEMPT`) under
+`StartSessionStage::PREVIOUS_URL`. On successful login the redirect target is:
+an explicit `redirectTo` on the request (query/body) → the recorded previous
+page (pulled one-time) → `/`. Browser POSTs get a 302; AJAX callers get
+`redirectTo` in the JSON payload. Every candidate passes an open-redirect
+guard (relative `/…` paths only). SocialAuth's web callback honours the same
+recorded page.
+
+**Display identity.** `AuthService` fills `username`/`email` from the central
+user store at issuance when the caller didn't supply them; they ride as OIDC
+claims (`preferred_username`, `email`, `name`) on JWTs and as session keys, so
+verification layers rebuild a full `Identity` without a DB read. The user-store
+dependency is a lazy closure — never resolve `UserServiceContract` eagerly in
+the AuthService factory (container cycle).
 
 ## 7. Personal access tokens (self-service)
 
@@ -308,5 +351,66 @@ unserialize a recaller · confuse `personal_access_tokens` (user keys) with
 
 ---
 
-*OAuth 2.1 / OIDC authorization-server flows live in `Plugins\OAuth2`
-([`docs/ai-context/26_OAUTH2.md`](../../docs/ai-context/26_OAUTH2.md)).*
+*OAuth 2.1 / OIDC authorization-server flows live in the `Plugins\OAuth2` plugin.*
+
+---
+
+## Restored HKMCode flows (device sessions · mobile · OTP · social · RBAC)
+
+The full old-framework auth flow is available. New pieces and how to use them:
+
+### Web session security — fingerprint + device registry
+Every stateful login is bound to a device **fingerprint** (`X-Client-Fingerprint`
+header, else `sha256(ip|user-agent)`) and registered in the central
+`auth_sessions` table. A request that can't reproduce the fingerprint, or whose
+server-side row was revoked/expired, loses the session immediately — even if the
+cookie is still live. Rolling refresh slides the expiry forward on activity.
+`DeviceSessionService` orchestrates it; `config/auth.php` `session` block tunes
+`ttl_days` / `refresh_days` / `client_fingerprint_header`.
+
+- `GET  /auth/sessions` — list this user's active devices (current flagged).
+- `DELETE /auth/sessions/{id}` — sign out one device.
+- `POST /auth/logout-other-devices` `{ password }` — revoke every OTHER device
+  (re-verifies the password first).
+
+Run the `auth_sessions` migration (central).
+
+### Mobile JWT flow (`/auth/mobile/*`)
+- `POST /auth/mobile/login` `{ email|identifier, password }` → `{ user, tokens }`
+  (access JWT + refresh). Add `client_id` + PKCE params (`redirect_uri`, `scope`,
+  `state`, `code_challenge`, `code_challenge_method`) to switch to the **PKCE**
+  shape → `{ code, state }`, exchanged at `POST /oauth/token` with the
+  `code_verifier`. PKCE needs the route to also require `oauth.server`.
+- `POST /auth/mobile/register` → same two shapes; auto-verifies the email
+  (`AUTH_MOBILE_AUTOVERIFY=0` to disable).
+- `POST /auth/mobile/logout` (Bearer) → blocklists the access token's `jti`.
+- Refresh stays at `POST /auth/refresh` (DB-backed rotation + family reuse
+  detection).
+
+### OTP password reset (`/auth/password/*`)
+`POST /auth/password/forgot` `{ email }` → always 200 (enumeration-safe), emails a
+6-digit OTP via the OPTIONAL `MailPort` · `POST /auth/password/verify-otp`
+`{ email, otp }` → `{ resetToken }` (single-use) · `POST /auth/password/reset`
+`{ email, token, password }`. Needs `CachePort`.
+
+### Social sign-in (`Plugins\SocialAuth`, solves `auth.social`)
+- `GET /auth/social/{driver}` → provider redirect · `GET /auth/social/{driver}/callback`
+  → session login + redirect (web), or `?mode=token` → `{ user, tokens }`.
+- `POST /auth/social/{driver}/token` — native-SDK sign-in: verifies a Google
+  `access_token`/`id_token` or an Apple `identity_token` (against Apple's JWKS)
+  before find-or-create. Links live in central `social_identities`.
+
+### RBAC via Casbin (`Plugins\Authorization`, solves `authorization.policy`)
+When loaded, a user's roles + effective permissions are read from the policy
+store and stamped into the session and JWT claims at login/issuance
+(`RoleResolver`). Protect a route declaratively:
+
+```jsonc
+{ "method": "PUT", "path": "/api/users/{id}", "handler": "…",
+  "filters": ["auth", "can:users,edit"], "requires": ["authorization.policy"] }
+```
+
+Seed the shipped role hierarchy (super/owner/admin/…): `hkm authz:seed`
+(imports `plugins/Authorization/config/policy.seed.csv`; the wildcard model in
+`rbac_model.conf` treats `*` object/action as full access). Policy rules are
+control-plane → central connection.

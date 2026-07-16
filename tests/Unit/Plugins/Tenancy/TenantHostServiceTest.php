@@ -6,7 +6,7 @@ namespace Tests\Unit\Plugins\Tenancy;
 
 use PHPUnit\Framework\TestCase;
 use Plugins\Tenancy\API\Contracts\TenantHostRegistryContract;
-use Plugins\Tenancy\Application\Ports\AuditSink;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Tenancy\Application\Ports\DnsResolver;
 use Plugins\Tenancy\Application\Ports\TenantHostStore;
 use Plugins\Tenancy\Application\Services\TenantHostService;
@@ -113,9 +113,9 @@ final class TenantHostServiceTest extends TestCase
         };
     }
 
-    private function audit(\ArrayObject $log): AuditSink
+    private function audit(\ArrayObject $log): AuditServiceContract
     {
-        return new class($log) implements AuditSink {
+        return new class($log) implements AuditServiceContract {
             public function __construct(private \ArrayObject $log) {}
             public function record(string $action, ?string $userId = null, ?string $tenantId = null, array $meta = [], ?string $ip = null): void
             {

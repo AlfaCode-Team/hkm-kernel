@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const util = @import("util.zig");
+const kernel = @import("kernel.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -28,11 +29,23 @@ pub const Entry = struct {
 ///   3. walk up from PWD for an existing `projects/projects.json` (dev: the
 ///      kernel monorepo root)
 pub fn resolvePath(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !?[]const u8 {
+    // HKM_USERDATA_DIR holds the persistent registry (projects.json + platform.json)
+    // OUTSIDE the kernel install, so a kernel update never overwrites it.
+    if (env.get("HKM_USERDATA_DIR")) |d| {
+        if (d.len > 0) return try std.fmt.allocPrint(allocator, "{s}/projects.json", .{trimSlash(d)});
+    }
     if (env.get("PSP_PROJECTS_DIR")) |d| {
         if (d.len > 0) return try std.fmt.allocPrint(allocator, "{s}/projects.json", .{trimSlash(d)});
     }
     if (env.get("HKM_KERNEL_HOME")) |h| {
         if (h.len > 0) return try std.fmt.allocPrint(allocator, "{s}/projects/projects.json", .{trimSlash(h)});
+    }
+    // Self-locate the kernel relative to THIS executable (installed .deb/.app/zip
+    // or the dev monorepo). This is what makes `hkm run --pick` work on a packaged
+    // install with no env vars set — the registry lives at <kernel>/projects/.
+    if (try kernel.resolveHome(allocator, io, env)) |home| {
+        const p = try std.fmt.allocPrint(allocator, "{s}/projects/projects.json", .{home});
+        if (Dir.cwd().access(io, p, .{})) |_| return p else |_| {}
     }
     if (env.get("PWD")) |pwd| {
         if (pwd.len > 0) return findUpwards(allocator, io, pwd);

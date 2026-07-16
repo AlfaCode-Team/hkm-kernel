@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Plugins\Auth\Application\Services;
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\ServiceException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
@@ -30,6 +31,10 @@ final class AuthService implements AuthServiceContract
     public const SESSION_ROLES       = 'auth.roles';
     public const SESSION_PERMISSIONS = 'auth.permissions';
     public const SESSION_TENANT      = 'auth.tenant';
+    public const SESSION_USERNAME    = 'auth.username';
+    public const SESSION_EMAIL       = 'auth.email';
+    public const SESSION_NAME        = 'auth.name';
+    public const SESSION_AVATAR        = 'auth.avatar';
 
     /**
      * @param string      $jwtSecret     HMAC secret (HS*). Required for symmetric algos.
@@ -48,6 +53,13 @@ final class AuthService implements AuthServiceContract
         private readonly ?CachePort $cache = null,
         private readonly ?string $jwtPrivateKey = null,
         private readonly ?string $jwtKid = null,
+        private readonly ?\Plugins\Auth\Application\Auth\RoleResolver $roles = null,
+        private readonly ?TransactionManager $transaction = null, // central-connection tx
+        // Central user store — fills username/email display claims at issuance
+        // so the stateless verification layers can rebuild a full Identity.
+        // LAZY (fn(): UserServiceContract): resolving it eagerly recurses —
+        // AuthService → UserService → MembershipService → AuthService.
+        private readonly ?\Closure $users = null,
     ) {
     }
 
@@ -70,10 +82,33 @@ final class AuthService implements AuthServiceContract
         // the user selects a tenant and membership is verified against the
         // central `user_tenants` table; an access token issued at login carries
         // no tenant (empty) so it routes to the central connection only.
+        // RBAC enrichment: when the caller didn't supply roles/permissions and
+        // the Authorization plugin is loaded, resolve them from the policy store
+        // so the access token carries the user's effective grants.
+        $tenant = (string) ($claims['tnt'] ?? $claims['tenant'] ?? '');
+        if (!isset($claims['roles']) && !isset($claims['permissions']) && $this->roles !== null) {
+            $resolved            = $this->roles->forUser($userId, $tenant);
+            $claims['roles']       = $resolved['roles'];
+            $claims['permissions'] = $resolved['permissions'];
+        }
+
+        // Display-identity claims (OIDC names) — ride on the signed token so the
+        // stateless JwtAuthLayer can rebuild a full Identity without a DB read.
+        // username/email come from the central user record when the caller did
+        // not supply them; `name` (first + last) lives in the TENANT
+        // user_profiles table, so only a tenant-aware caller (tenant selection)
+        // can mint it — best-effort, never blocks issuance.
+        [$username, $email] = $this->displayIdentity(
+            $userId,
+            (string) ($claims['preferred_username'] ?? ''),
+            (string) ($claims['email'] ?? ''),
+        );
+        $fullName = (string) ($claims['name'] ?? '');
+
         $now = time();
         $payload = [
             'sub'         => $userId,
-            'tnt'         => $claims['tnt'] ?? $claims['tenant'] ?? '',
+            'tnt'         => $tenant,
             'roles'       => array_values($claims['roles'] ?? []),
             'permissions' => array_values($claims['permissions'] ?? []),
             'iat'         => $now,
@@ -82,6 +117,16 @@ final class AuthService implements AuthServiceContract
             // Unique token id — enables targeted revocation / replay tracking.
             'jti'         => bin2hex(random_bytes(16)),
         ];
+
+        if ($username !== '') {
+            $payload['preferred_username'] = $username;
+        }
+        if ($email !== '') {
+            $payload['email'] = $email;
+        }
+        if ($fullName !== '') {
+            $payload['name'] = $fullName;
+        }
 
         // Registered claims for issuer/audience binding (verified by JwtAuthLayer).
         if ($this->jwtIssuer !== null && $this->jwtIssuer !== '') {
@@ -123,14 +168,14 @@ final class AuthService implements AuthServiceContract
             ? (new \DateTimeImmutable())->add(new \DateInterval('PT' . $ttlSeconds . 'S'))
             : null;
 
-        $this->tokens->store($id, $userId, $name, $hash, $abilities, $expiresAt);
+        $this->transactional(fn () => $this->tokens->store($id, $userId, $name, $hash, $abilities, $expiresAt));
 
         return ['id' => $id, 'token' => $plaintext];
     }
 
     public function revokePersonalAccessToken(string $id): void
     {
-        $this->tokens->delete($id);
+        $this->transactional(fn () => $this->tokens->delete($id));
     }
 
     public function startSession(
@@ -139,7 +184,24 @@ final class AuthService implements AuthServiceContract
         array $roles = [],
         array $permissions = [],
         string $tenantId = '',
+        string $username = '',
+        string $email = '',
+        string $fullName = '',
+        ?string $avatarUrl = null,
     ): void {
+        // RBAC enrichment: when the caller passes no explicit roles/permissions
+        // and Authorization is loaded, resolve the user's effective grants so the
+        // session Identity carries them (parity with issueJwt()).
+        if ($roles === [] && $permissions === [] && $this->roles !== null) {
+            $resolved    = $this->roles->forUser($userId, $tenantId);
+            $roles       = $resolved['roles'];
+            $permissions = $resolved['permissions'];
+        }
+
+        // Display-identity enrichment — same policy as issueJwt(): fill
+        // username/email from the central record when not supplied.
+        [$username, $email] = $this->displayIdentity($userId, $username, $email);
+
         // Session-fixation defence: rotate the id whenever the privilege level
         // changes (anonymous → authenticated). Existing flash data is preserved.
         $session->regenerate();
@@ -148,6 +210,10 @@ final class AuthService implements AuthServiceContract
         $session->put(self::SESSION_ROLES, array_values($roles));
         $session->put(self::SESSION_PERMISSIONS, array_values($permissions));
         $session->put(self::SESSION_TENANT, $tenantId);
+        $session->put(self::SESSION_USERNAME, $username);
+        $session->put(self::SESSION_EMAIL, $email);
+        $session->put(self::SESSION_NAME, $fullName);
+        $session->put(self::SESSION_AVATAR, $avatarUrl);
     }
 
     public function endSession(SessionPort $session): void
@@ -175,5 +241,61 @@ final class AuthService implements AuthServiceContract
     public function verifyPassword(string $plain, string $hash): bool
     {
         return $this->hasher->check($plain, $hash);
+    }
+
+    /**
+     * Fill username/email from the central user record when the caller did not
+     * supply them. Best-effort: a lookup failure never blocks credential
+     * issuance — the credential simply carries no display claims.
+     *
+     * @return array{0:string,1:string} [username, email]
+     */
+    private function displayIdentity(string $userId, string $username, string $email): array
+    {
+        if (($username !== '' && $email !== '') || $this->users === null || $userId === '') {
+            return [$username, $email];
+        }
+
+        try {
+            /** @var ?\Plugins\User\API\Contracts\UserServiceContract $service */
+            $service = ($this->users)();
+            // isAuth: issuance happens while the request Identity is still
+            // guest — the self-or-permission check would reject the lookup.
+            $user = $service?->find($userId, false, true);
+        } catch (\Throwable) {
+            return [$username, $email];
+        }
+
+        if ($user === null) {
+            return [$username, $email];
+        }
+
+        return [
+            $username !== '' ? $username : $user->username,
+            $email !== '' ? $email : $user->email,
+        ];
+    }
+
+    /**
+     * Bracket a unit of work in a transaction on the central auth connection.
+     * Nesting-aware (TransactionManager), and a straight pass-through when no
+     * manager was injected (unit tests with in-memory stores).
+     */
+    private function transactional(callable $work): mixed
+    {
+        if ($this->transaction === null) {
+            return $work();
+        }
+
+        $this->transaction->begin();
+        try {
+            $result = $work();
+            $this->transaction->commit();
+
+            return $result;
+        } catch (\Throwable $e) {
+            $this->transaction->rollback();
+            throw $e;
+        }
     }
 }

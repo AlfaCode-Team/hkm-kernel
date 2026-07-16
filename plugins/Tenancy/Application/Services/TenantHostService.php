@@ -8,7 +8,7 @@ use Plugins\Tenancy\API\Contracts\TenantHostRegistryContract;
 use Plugins\Tenancy\API\Contracts\TenantHostServiceContract;
 use Plugins\Tenancy\API\DTOs\HostVerificationInstructions;
 use Plugins\Tenancy\API\DTOs\HostVerificationResult;
-use Plugins\Tenancy\Application\Ports\AuditSink;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Tenancy\Application\Ports\DnsResolver;
 use Plugins\Tenancy\Application\Ports\TenantHostStore;
 use Plugins\Tenancy\Domain\Entities\TenantHost;
@@ -41,7 +41,7 @@ final class TenantHostService implements TenantHostServiceContract
     public function __construct(
         private readonly TenantHostStore $hosts,
         private readonly DnsResolver $dns,
-        private readonly AuditSink $audit,
+        private readonly AuditServiceContract $audit,
         private readonly TenantHostRegistryContract $registry,
         /** DNS label the challenge TXT is published under, e.g. "_psp-verify". */
         private readonly string $challengePrefix = '_psp-verify',

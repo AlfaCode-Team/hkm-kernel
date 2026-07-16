@@ -69,6 +69,7 @@
             "src/Kernel/Support/helpers.php",
             "plugins/I18n/Support/helpers.php",
             "plugins/Auth/Support/helpers.php",
+            "plugins/Authorization/Engine/functions.php",
             "plugins/Cookie/Support/helpers.php",
             "plugins/Pageflow/Support/helpers.php"
         ],

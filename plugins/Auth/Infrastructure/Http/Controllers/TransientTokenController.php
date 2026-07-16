@@ -43,6 +43,11 @@ final class TransientTokenController extends ApiController
                 'roles'       => $identity->roles,
                 'permissions' => $identity->permissions,
                 'tnt'         => $identity->tenantId,
+                // Carry the session's display identity onto the minted JWT so
+                // the SPA's Bearer requests keep username/email/fullName.
+                'preferred_username' => $identity->username,
+                'email'              => $identity->email,
+                'name'               => $identity->fullName,
             ],
             self::TTL_SECONDS,
         );

@@ -14,6 +14,8 @@ $e = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES, 'UTF-8');
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <?php /* Consent screens are transactional auth surfaces — never indexable. */ ?>
+    <meta name="robots" content="noindex, nofollow">
     <title>Authorize <?= $e($clientName) ?></title>
     <style>
         body { font-family: system-ui, sans-serif; background: #f5f5f7; margin: 0; padding: 2rem; }

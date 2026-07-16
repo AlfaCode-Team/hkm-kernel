@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Plugins\Auth\Application\Services;
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager;
 use Plugins\Auth\API\Contracts\AuthServiceContract;
 use Plugins\Auth\API\Contracts\RefreshTokenServiceContract;
 use Plugins\Auth\API\DTOs\RefreshRotation;
@@ -34,6 +35,7 @@ final class RefreshTokenService implements RefreshTokenServiceContract
         private readonly AuthServiceContract $auth,
         private readonly int $refreshTtl = 2592000, // 30 days
         private readonly int $accessTtl = 900,      // 15 minutes
+        private readonly ?TransactionManager $transaction = null, // central-connection tx
     ) {}
 
     public function issue(
@@ -47,7 +49,8 @@ final class RefreshTokenService implements RefreshTokenServiceContract
         $expiresAt = $this->expiry($this->refreshTtl);
 
         // A freshly-issued token is the ROOT of its own rotation family.
-        $this->tokens->store($tokenId, $tokenId, $userId, Token::hash($rawToken), $tenantId, $device, $ip, $expiresAt);
+        $this->transactional(fn () =>
+            $this->tokens->store($tokenId, $tokenId, $userId, Token::hash($rawToken), $tenantId, $device, $ip, $expiresAt));
 
         return new RefreshTokenIssued($tokenId, $rawToken, $expiresAt->format(\DateTimeInterface::RFC3339));
     }
@@ -60,27 +63,40 @@ final class RefreshTokenService implements RefreshTokenServiceContract
         }
 
         // Reuse detection: a known-but-already-revoked token is a replay of a
-        // token that was rotated away (or stolen). Burn the whole family.
+        // token that was rotated away (or stolen). Burn the whole family. The
+        // burn runs in its OWN transaction, committed BEFORE the throw — it must
+        // persist, never be rolled back with the failed rotation.
         if ($record->revoked) {
-            $this->tokens->revokeFamily($record->familyId);
+            $this->transactional(fn () => $this->tokens->revokeFamily($record->familyId));
             throw InvalidRefreshTokenException::reuseDetected();
         }
 
-        // One-time use, atomically: only the request that wins the conditional
-        // revoke may proceed. A concurrent rotation loses the race (0 rows) and
-        // is treated as reuse — burn the family.
-        if (!$this->tokens->revokeIfActive($record->tokenId)) {
-            $this->tokens->revokeFamily($record->familyId);
+        $newRawToken = Token::random();
+        $newTokenId  = Token::ulid();
+        $refreshExp  = $this->expiry($this->refreshTtl);
+
+        // One-time-use rotation is ATOMIC: the conditional revoke of the
+        // presented token and the insert of its replacement commit or fail
+        // together — a crash between them can no longer strand the user with
+        // no valid refresh token. Only the request that wins the conditional
+        // revoke may proceed; a concurrent rotation loses the race (0 rows).
+        $won = $this->transactional(function () use ($record, $newTokenId, $newRawToken, $refreshExp, $ip): bool {
+            if (!$this->tokens->revokeIfActive($record->tokenId)) {
+                return false;
+            }
+
+            $this->tokens->store($newTokenId, $record->familyId, $record->userId, Token::hash($newRawToken), $record->tenantId, null, $ip, $refreshExp);
+
+            return true;
+        });
+
+        // Lost the race — treat as reuse: burn the family (own committed tx).
+        if (!$won) {
+            $this->transactional(fn () => $this->tokens->revokeFamily($record->familyId));
             throw InvalidRefreshTokenException::reuseDetected();
         }
 
         $tenantId = $record->tenantId;
-
-        // Issue the replacement refresh token (same scope, same family).
-        $newRawToken = Token::random();
-        $newTokenId  = Token::ulid();
-        $refreshExp  = $this->expiry($this->refreshTtl);
-        $this->tokens->store($newTokenId, $record->familyId, $record->userId, Token::hash($newRawToken), $tenantId, null, $ip, $refreshExp);
 
         // Mint the paired access token (tnt is a passthrough hint, not re-verified).
         $accessToken = $this->auth->issueJwt(
@@ -104,16 +120,39 @@ final class RefreshTokenService implements RefreshTokenServiceContract
         if ($record === null) {
             return;
         }
-        $this->tokens->revoke($record->tokenId);
+        $this->transactional(fn () => $this->tokens->revoke($record->tokenId));
     }
 
     public function revokeAllForUser(string $userId): int
     {
-        return $this->tokens->revokeAllForUser($userId);
+        return $this->transactional(fn (): int => $this->tokens->revokeAllForUser($userId));
     }
 
     private function expiry(int $ttlSeconds): \DateTimeImmutable
     {
         return (new \DateTimeImmutable())->add(new \DateInterval('PT' . max(60, $ttlSeconds) . 'S'));
+    }
+
+    /**
+     * Bracket a unit of work in a transaction on the central auth connection.
+     * Nesting-aware (TransactionManager), and a straight pass-through when no
+     * manager was injected (unit tests with in-memory stores).
+     */
+    private function transactional(callable $work): mixed
+    {
+        if ($this->transaction === null) {
+            return $work();
+        }
+
+        $this->transaction->begin();
+        try {
+            $result = $work();
+            $this->transaction->commit();
+
+            return $result;
+        } catch (\Throwable $e) {
+            $this->transaction->rollback();
+            throw $e;
+        }
     }
 }

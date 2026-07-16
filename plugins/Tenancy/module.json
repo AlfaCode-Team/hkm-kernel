@@ -1,99 +1,268 @@
 {
-  "name": "tenancy",
-  "version": "1.0.0",
-  "solves": "tenancy.routing",
-  "type": "module",
-  "description": "Multi-tenant control plane: tenant registry + per-tenant database routing. Identifies the tenant by TENANCY_MODE — 'claim' (default: authenticated Identity.tenantId, the SaaS/JWT model) or 'domain' (the Host sub-domain, the anonymous storefront model) — then rebinds an isolated tenant DatabasePort into the request container so every repository talks to the correct tenant database. Database-per-tenant isolation (MySQL/PostgreSQL/SQLite) on top of plugins/Database ConnectionManager.",
-
-  "requires": ["tenant.settings","database.management", "auth.identity", "user.management", "view.rendering"],
-
-  "views": "resources/views",
-
-  "exposes": [
-    "TenantRegistryContract",
-    "TenantHostRegistryContract",
-    "TenantHostServiceContract",
-    "TenantConnectionResolverContract",
-    "MembershipServiceContract",
-    "InvitationServiceContract",
-    "TenantAdminServiceContract"
-  ],
-
-  "routes": [
-    { "method": "GET",  "path": "/tenants",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@index",
-      "requires": ["http.pageflow"] },
-    { "method": "GET",  "path": "/tenants/manage",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@manage",
-      "requires": ["http.pageflow"] },
-    { "method": "GET",  "path": "/tenants/create",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@create",
-      "requires": ["http.pageflow"] },
-    { "method": "GET",  "path": "/tenants/{tenantId}/edit",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@edit",
-      "requires": ["http.pageflow"] },
-    { "method": "GET",  "path": "/tenant/hosts",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@hosts",
-      "requires": ["http.pageflow"] },
-
-    { "method": "GET",    "path": "/ajx/admin/tenants",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@index",
-      "filters": ["auth"] },
-    { "method": "POST",   "path": "/ajx/admin/tenants",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@store",
-      "filters": ["auth"] },
-    { "method": "GET",    "path": "/ajx/admin/tenants/{tenantId}",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@show",
-      "filters": ["auth"] },
-    { "method": "PUT",    "path": "/ajx/admin/tenants/{tenantId}",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@update",
-      "filters": ["auth"] },
-    { "method": "DELETE", "path": "/ajx/admin/tenants/{tenantId}",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@destroy",
-      "filters": ["auth"] },
-
-    { "method": "GET",  "path": "/ajx/me/tenants",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantController@mine",
-      "filters": ["auth"] },
-    { "method": "POST", "path": "/ajx/tenants/{tenantId}/select",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantController@select",
-      "filters": ["auth"] },
-    { "method": "POST", "path": "/ajx/invitations/accept",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\InvitationController@accept",
-      "filters": ["auth"] },
-
-    { "method": "GET",  "path": "/ajx/tenant/hosts",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@index",
-      "filters": ["auth"] },
-    { "method": "POST", "path": "/ajx/tenant/hosts",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@store",
-      "filters": ["auth"] },
-    { "method": "GET",  "path": "/ajx/tenant/hosts/{hostId}/instructions",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@instructions",
-      "filters": ["auth"] },
-    { "method": "POST", "path": "/ajx/tenant/hosts/{hostId}/verify",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@verify",
-      "filters": ["auth"] },
-    { "method": "POST", "path": "/ajx/tenant/hosts/{hostId}/primary",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@makePrimary",
-      "filters": ["auth"] },
-    { "method": "DELETE", "path": "/ajx/tenant/hosts/{hostId}",
-      "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@destroy",
-      "filters": ["auth"] }
-  ],
-
-  "config": [
-    { "key": "TENANCY_MODE", "type": "string", "required": false },
-    { "key": "TENANCY_DNS_CHALLENGE_PREFIX", "type": "string", "required": false },
-    { "key": "TENANCY_DNS_VALUE_PREFIX", "type": "string", "required": false },
-    { "key": "TENANCY_MAX_HOSTS_PER_TENANT", "type": "int", "required": false },
-    { "key": "TENANCY_BASE_DOMAINS", "type": "string", "required": false },
-    { "key": "TENANCY_RESERVED_SUBDOMAINS", "type": "string", "required": false },
-    { "key": "TENANCY_REGISTRY_TTL", "type": "int", "required": false },
-    { "key": "TENANCY_BREAKER_THRESHOLD", "type": "int", "required": false },
-    { "key": "TENANCY_BREAKER_COOLDOWN", "type": "int", "required": false },
-    { "key": "TENANCY_BREAKER_WINDOW", "type": "int", "required": false },
-    { "key": "TENANCY_TEMPLATE_PATH", "type": "string", "required": false },
-    { "key": "TENANCY_TOKEN_TTL", "type": "int", "required": false }
-  ]
+    "name": "tenancy",
+    "version": "1.0.0",
+    "solves": "tenancy.routing",
+    "type": "module",
+    "description": "Multi-tenant control plane: tenant registry + per-tenant database routing. Identifies the tenant by TENANCY_MODE \u2014 'claim' (default: authenticated Identity.tenantId, the SaaS/JWT model) or 'domain' (the Host sub-domain, the anonymous storefront model) \u2014 then rebinds an isolated tenant DatabasePort into the request container so every repository talks to the correct tenant database. Database-per-tenant isolation (MySQL/PostgreSQL/SQLite) on top of plugins/Database ConnectionManager.",
+    "requires": [
+        "database.management"
+    ],
+    "views": "resources/views",
+    "exposes": [
+        "TenantRegistryContract",
+        "TenantHostRegistryContract",
+        "TenantHostServiceContract",
+        "TenantConnectionResolverContract",
+        "MembershipServiceContract",
+        "InvitationServiceContract",
+        "TenantAdminServiceContract"
+    ],
+    "routes": [
+        {
+            "method": "GET",
+            "path": "/tenants",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@index",
+            "requires": [
+                "http.pageflow"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/tenants/manage",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@manage",
+            "requires": [
+                "http.pageflow"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/tenants/create",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@create",
+            "requires": [
+                "http.pageflow"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/tenants/{tenantId}/edit",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@edit",
+            "requires": [
+                "http.pageflow"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/tenant/hosts",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantPageController@hosts",
+            "requires": [
+                "http.pageflow"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/ajx/admin/tenants",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@index",
+            "filters": [
+                "auth"
+            ]
+        },
+        {
+            "method": "POST",
+            "path": "/ajx/admin/tenants",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@store",
+            "filters": [
+                "auth"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/ajx/admin/tenants/{tenantId}",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@show",
+            "filters": [
+                "auth"
+            ]
+        },
+        {
+            "method": "PUT",
+            "path": "/ajx/admin/tenants/{tenantId}",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@update",
+            "filters": [
+                "auth"
+            ]
+        },
+        {
+            "method": "DELETE",
+            "path": "/ajx/admin/tenants/{tenantId}",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantAdminController@destroy",
+            "filters": [
+                "auth"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/ajx/me/tenants",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantController@mine",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "auth.identity",
+                "user.management",
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "POST",
+            "path": "/ajx/tenants/{tenantId}/select",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantController@select",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "auth.identity",
+                "user.management",
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "POST",
+            "path": "/ajx/invitations/accept",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\InvitationController@accept",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "user.management",
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/ajx/tenant/hosts",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@index",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "POST",
+            "path": "/ajx/tenant/hosts",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@store",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "GET",
+            "path": "/ajx/tenant/hosts/{hostId}/instructions",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@instructions",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "POST",
+            "path": "/ajx/tenant/hosts/{hostId}/verify",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@verify",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "POST",
+            "path": "/ajx/tenant/hosts/{hostId}/primary",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@makePrimary",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "audit.trail"
+            ]
+        },
+        {
+            "method": "DELETE",
+            "path": "/ajx/tenant/hosts/{hostId}",
+            "handler": "Plugins\\Tenancy\\Infrastructure\\Http\\Controllers\\TenantHostController@destroy",
+            "filters": [
+                "auth"
+            ],
+            "requires": [
+                "audit.trail"
+            ]
+        }
+    ],
+    "config": [
+        {
+            "key": "TENANCY_MODE",
+            "type": "string",
+            "required": false
+        },
+        {
+            "key": "TENANCY_DNS_CHALLENGE_PREFIX",
+            "type": "string",
+            "required": false
+        },
+        {
+            "key": "TENANCY_DNS_VALUE_PREFIX",
+            "type": "string",
+            "required": false
+        },
+        {
+            "key": "TENANCY_MAX_HOSTS_PER_TENANT",
+            "type": "int",
+            "required": false
+        },
+        {
+            "key": "TENANCY_BASE_DOMAINS",
+            "type": "string",
+            "required": false
+        },
+        {
+            "key": "TENANCY_RESERVED_SUBDOMAINS",
+            "type": "string",
+            "required": false
+        },
+        {
+            "key": "TENANCY_REGISTRY_TTL",
+            "type": "int",
+            "required": false
+        },
+        {
+            "key": "TENANCY_BREAKER_THRESHOLD",
+            "type": "int",
+            "required": false
+        },
+        {
+            "key": "TENANCY_BREAKER_COOLDOWN",
+            "type": "int",
+            "required": false
+        },
+        {
+            "key": "TENANCY_BREAKER_WINDOW",
+            "type": "int",
+            "required": false
+        },
+        {
+            "key": "TENANCY_TEMPLATE_PATH",
+            "type": "string",
+            "required": false
+        },
+        {
+            "key": "TENANCY_TOKEN_TTL",
+            "type": "int",
+            "required": false
+        }
+    ]
 }

@@ -154,11 +154,92 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         return 0;
     }
 
-    // Packaged install (.deb/.app/zip): guide the reinstall from the release.
-    prompt.section("Update a packaged install");
-    prompt.item("download", try std.fmt.allocPrint(allocator, "https://github.com/{s}/releases/latest", .{banner.repo()}));
-    prompt.item("Linux (.deb)", "sudo apt install ./hkm-kernel_<version>_amd64.deb");
-    prompt.item("macOS/Windows", "extract the archive, then run install.sh / install.bat");
-    prompt.item("note", "packaged installs are replaced by reinstalling the newer artifact");
+    // Packaged install: detect OS, download the matching artifact, install it.
+    return performPackagedUpgrade(allocator, io, env, latest);
+}
+
+/// Download the release artifact for THIS OS and install it. The binary is built
+/// per-OS, so builtin.os.tag / cpu.arch are comptime — only this platform's path
+/// is compiled in.
+fn performPackagedUpgrade(allocator: std.mem.Allocator, io: Io, env: *EnvMap, latest: []const u8) !u8 {
+    const os = @import("builtin").os.tag;
+    const arch = @import("builtin").cpu.arch;
+    const ver = if (latest.len > 0 and (latest[0] == 'v' or latest[0] == 'V')) latest[1..] else latest; // "1.0.1"
+
+    const asset: []const u8 = switch (os) {
+        .linux => try std.fmt.allocPrint(allocator, "hkm-kernel_{s}_amd64.deb", .{ver}),
+        .macos => try std.fmt.allocPrint(allocator, "hkm-kernel-{s}-macos-universal.tar.gz", .{ver}),
+        .windows => try std.fmt.allocPrint(allocator, "hkm-kernel-{s}-windows-x86_64.zip", .{ver}),
+        else => return errUnsupported(),
+    };
+    if (os == .linux and arch != .x86_64) {
+        prompt.err("only an amd64 .deb is published; your architecture has no prebuilt package.");
+        return 1;
+    }
+
+    const url = try std.fmt.allocPrint(
+        allocator,
+        "https://github.com/{s}/releases/download/{s}/{s}",
+        .{ banner.repo(), latest, asset },
+    );
+    const tmp = try std.fs.path.join(allocator, &.{ "/tmp", asset });
+
+    prompt.section("Downloading update");
+    prompt.item("asset", asset);
+    prompt.item("from", url);
+    if (!download(io, env, url, tmp)) {
+        prompt.err("download failed — check your connection and try again.");
+        return 1;
+    }
+
+    prompt.section("Installing");
+    switch (os) {
+        .linux => {
+            // apt handles the local .deb + its dependencies; needs root.
+            var argv = [_][]const u8{ "sudo", "apt-get", "install", "-y", tmp };
+            const code = run_cmd.spawnWait(io, env, &argv) catch 1;
+            if (code != 0) {
+                // Fallback: dpkg then fix deps.
+                var dpkg = [_][]const u8{ "sudo", "dpkg", "-i", tmp };
+                _ = run_cmd.spawnWait(io, env, &dpkg) catch {};
+                var fix = [_][]const u8{ "sudo", "apt-get", "-f", "install", "-y" };
+                _ = run_cmd.spawnWait(io, env, &fix) catch {};
+            }
+        },
+        .macos => {
+            // Replace the kernel resources in place, then re-resolve composer.
+            const root = kernelRoot(allocator, io, env) orelse "/Applications/HKM.app/Contents/Resources/opt/hkm-kernel";
+            const app_root = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(root) orelse root) orelse root) orelse root;
+            var untar = [_][]const u8{ "tar", "-xzf", tmp, "-C", app_root, "--strip-components=0" };
+            _ = run_cmd.spawnWait(io, env, &untar) catch {};
+            const installer = try std.fs.path.join(allocator, &.{ root, "install.sh" });
+            if (util.fileExists(io, installer)) {
+                var sh = [_][]const u8{ "sh", installer };
+                _ = run_cmd.spawnWait(io, env, &sh) catch {};
+            }
+        },
+        .windows => {
+            prompt.warn("downloaded — extract the zip and run install.bat to finish (Windows self-replace is unsafe while running).");
+            prompt.item("saved to", tmp);
+            return 0;
+        },
+        else => return errUnsupported(),
+    }
+
+    prompt.blank();
+    prompt.ok("updated. Verify with: hkm doctor");
     return 0;
+}
+
+fn errUnsupported() u8 {
+    prompt.err("automatic upgrade is not supported on this platform — download from the releases page.");
+    return 1;
+}
+
+/// Download url → dest with curl (fallback wget), stdio inherited for a progress bar.
+fn download(io: Io, env: *EnvMap, url: []const u8, dest: []const u8) bool {
+    var curl = [_][]const u8{ "curl", "-fSL", "--progress-bar", "-o", dest, url };
+    if ((run_cmd.spawnWait(io, env, &curl) catch 1) == 0) return true;
+    var wget = [_][]const u8{ "wget", "-O", dest, url };
+    return (run_cmd.spawnWait(io, env, &wget) catch 1) == 0;
 }

@@ -15,7 +15,7 @@ use Plugins\User\Domain\Entities\UserNotificationPreferences;
 use Plugins\User\Domain\Entities\UserPreferences;
 use Plugins\User\Domain\Entities\UserPrivacySettings;
 use Plugins\User\Domain\Entities\UserProfile;
-use Plugins\User\Infrastructure\Audit\AuditLogger;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\User\Infrastructure\Persistence\UserSettingsRepository;
 
 /**
@@ -33,7 +33,7 @@ final class UserSettingsService
     public function __construct(
         private readonly UserSettingsRepository $repository,
         private readonly Identity $identity,
-        private readonly AuditLogger $audit,
+        private readonly AuditServiceContract $audit,
     ) {}
 
     // ── profile ───────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ final class UserSettingsService
         }
 
         $this->repository->saveProfile($profile);
-        $this->audit->record('user.profile.updated', ['userId' => $userId]);
+        $this->audit->record('user.profile.updated', userId: $userId);
 
         return $profile;
     }
@@ -98,7 +98,7 @@ final class UserSettingsService
         }
 
         $this->repository->savePreferences($prefs);
-        $this->audit->record('user.preferences.updated', ['userId' => $userId]);
+        $this->audit->record('user.preferences.updated', userId: $userId);
 
         return $prefs;
     }
@@ -127,8 +127,7 @@ final class UserSettingsService
 
         $this->repository->savePrivacy($settings);
         // Privacy/marketing toggles are compliance-relevant — record the change.
-        $this->audit->record('user.privacy.updated', [
-            'userId'         => $userId,
+        $this->audit->record('user.privacy.updated', userId: $userId, meta: [
             'marketingOptIn' => $dto->marketingOptIn,
             'analyticsOptIn' => $dto->analyticsOptIn,
         ]);
@@ -160,7 +159,7 @@ final class UserSettingsService
         }
 
         $this->repository->saveNotifications($prefs);
-        $this->audit->record('user.notification_preferences.updated', ['userId' => $userId]);
+        $this->audit->record('user.notification_preferences.updated', userId: $userId);
 
         return $prefs;
     }

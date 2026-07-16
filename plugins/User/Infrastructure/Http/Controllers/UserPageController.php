@@ -6,7 +6,7 @@ namespace Plugins\User\Infrastructure\Http\Controllers;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\{Request, Response};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Layers\CsrfTokenLayer;
-use Project\Http\Controllers\Concerns\HasRequest;
+use Project\Http\Controllers\Concerns\InteractsWithGraphSeo;
 use Project\Http\Controllers\ViewController;
 
 /**
@@ -21,6 +21,8 @@ use Project\Http\Controllers\ViewController;
  */
 final class UserPageController extends ViewController
 {
+    use InteractsWithGraphSeo;
+
     protected const API_BASE = '/ajx/users';
 
     public function index(): Response
@@ -43,6 +45,19 @@ final class UserPageController extends ViewController
         return $this->page('user::users/edit', ['title' => 'Edit user', 'userId' => $id]);
     }
 
+    /**
+     * Email-verification landing page. The link emailed on public signup points
+     * here (`GET /verify-email?token=...`); the page prefills the token from the
+     * query string (if present) and POSTs it to `/ajx/users/verify`. Also usable
+     * as a manual "paste your token" form when the link was not followed.
+     */
+    public function verify(): Response
+    {
+        $token = (string) $this->resolveRequest()->query('token', '');
+
+        return $this->page('user::account/verify', ['title' => 'Verify email', 'token' => $token]);
+    }
+
     /** Account settings demo — read/update CRUD for the 4 settings resources. */
     public function settings(): Response
     {
@@ -50,17 +65,17 @@ final class UserPageController extends ViewController
         return $this->page('user::account/settings', ['title' => 'Account settings'], '/ajx');
     }
 
-    /** Feedback demo — create / list / view / update-status CRUD. */
-    public function feedback(): Response
-    {
-        return $this->page('user::account/feedback', ['title' => 'Feedback'], '/ajx');
-    }
-
     /** @param array<string,mixed> $data */
     private function page(string $view, array $data, string $apiBase = self::API_BASE): Response
     {
         // The JSON endpoints live under /ajx/...; hand the base to the layout
         // so the AJAX UI calls the real routes instead of the view's default.
-        return $this->view($view, $data + ['apiBase' => $apiBase], 'user::layouts/app');
+        // Every page here is a private app shell (admin CRUD, token landing,
+        // account settings), so the layout gets a seoPrivate() head: a branded
+        // <title> plus noindex,nofollow — these URLs must never be indexed.
+        return $this->view($view, $data + [
+            'apiBase' => $apiBase,
+            'seoHead' => $this->seoPrivate((string) ($data['title'] ?? 'Users')),
+        ], 'user::layouts/app');
     }
 }

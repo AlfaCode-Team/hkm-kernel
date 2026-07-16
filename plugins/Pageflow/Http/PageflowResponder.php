@@ -290,10 +290,32 @@ final class PageflowResponder
             ? '<meta name="csrf-token" content="' . htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') . '">'
             : '';
 
+        // Reserved `seoHead` prop (see the stock layout): render it into <head>
+        // and STRIP it from the client payload — it is server-only HTML, and
+        // shipping it in data-page would only bloat the boot JSON. A plain-text
+        // value (the XHR tab-title string) renders as an escaped <title>.
+        $seoHead = (string) ($page->props['seoHead'] ?? '');
+        if ($seoHead !== '') {
+            $page = new PageflowPage(
+                component:      $page->component,
+                props:          array_diff_key($page->props, ['seoHead' => true]),
+                url:            $page->url,
+                version:        $page->version,
+                clearHistory:   $page->clearHistory,
+                encryptHistory: $page->encryptHistory,
+            );
+        }
+        $seoBlock = match (true) {
+            $seoHead === ''                => '',
+            str_contains($seoHead, '<')    => $seoHead,
+            default                        => '<title>' . htmlspecialchars($seoHead, ENT_QUOTES, 'UTF-8') . '</title>',
+        };
+
         return '<!DOCTYPE html>' . "\n"
             . '<html><head><meta charset="utf-8">'
             . '<meta name="viewport" content="width=device-width, initial-scale=1">'
             . $csrfMeta
+            . $seoBlock
             . '</head><body>' . $page->mount($this->appId) . '</body></html>';
     }
 }

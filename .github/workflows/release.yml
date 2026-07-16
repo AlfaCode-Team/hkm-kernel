@@ -19,7 +19,7 @@ jobs:
     name: Test (PHPUnit)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }   # path-repo modules must be present
       - uses: shivammathur/setup-php@v2
         with:
@@ -41,7 +41,7 @@ jobs:
     needs: test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
       - name: Setup Zig
         run: ./tools/ci/setup-zig.sh
@@ -50,7 +50,7 @@ jobs:
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (linux)
         run: VERSION="${GITHUB_REF_NAME#v}" ./tools/bundle.sh linux
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: linux-deb, path: dist/*.deb }
 
   # ── Windows: .zip (x86_64, cross-compiled) ────────────────────────────────
@@ -59,7 +59,7 @@ jobs:
     needs: test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
       - name: Setup Zig
         run: ./tools/ci/setup-zig.sh
@@ -68,7 +68,7 @@ jobs:
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (windows)
         run: VERSION="${GITHUB_REF_NAME#v}" ./tools/bundle.sh windows
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: windows-zip, path: dist/*.zip }
 
   # ── macOS: universal .app tarball (arm64 + x86_64), built ON LINUX ─────────
@@ -77,7 +77,7 @@ jobs:
     needs: test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
       - name: Install llvm-lipo (for the universal Mach-O)
         run: sudo apt-get update && sudo apt-get install -y llvm
@@ -88,7 +88,7 @@ jobs:
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (macos)
         run: VERSION="${GITHUB_REF_NAME#v}" ./tools/bundle.sh macos
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: macos-app, path: dist/*.tar.gz }
 
   # ── Publish GitHub Release with all artifacts ─────────────────────────────
@@ -97,14 +97,33 @@ jobs:
     needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5      # need CHANGELOG.md at the tagged commit
+      - uses: actions/download-artifact@v5
         with: { path: artifacts/ }
+      - name: Extract CHANGELOG section for this version
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Pull the block between "## [VERSION]" and the next "## [" heading.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" {grab=1; next}
+            grab && /^## \[/ {exit}
+            grab {print}
+          ' CHANGELOG.md > release-body.md
+          if [ -s release-body.md ]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No CHANGELOG entry for $VERSION — using auto-generated notes only."
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/linux-deb/*.deb
             artifacts/windows-zip/*.zip
             artifacts/macos-app/*.tar.gz
+          # Curated section (if present) goes first; GitHub appends the
+          # auto-generated "What's Changed" / contributors below it.
+          body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release-body.md' || '' }}
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

@@ -13,9 +13,21 @@ final class FakeOutbox implements OutboxPort
     /** @var list<IntegrationEventContract> */
     public array $events = [];
 
-    public function write(IntegrationEventContract $event): void
+    /** @var list<int> ids marked dispatched by the service after commit */
+    public array $dispatched = [];
+
+    private int $nextId = 0;
+
+    public function write(IntegrationEventContract $event): int
     {
         $this->events[] = $event;
+
+        return ++$this->nextId;
+    }
+
+    public function markDispatched(int $id): void
+    {
+        $this->dispatched[] = $id;
     }
 
     /** @return list<string> */

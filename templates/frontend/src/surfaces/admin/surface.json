@@ -1,0 +1,7 @@
+{
+  "name": "admin",
+  "entry": "index.tsx",
+  "style": "styles/index.css",
+  "base": "/build/",
+  "description": "Admin dashboard surface. Copy this folder to add another surface (e.g. storefront, pos) — vite discovers it automatically; no config edit needed."
+}

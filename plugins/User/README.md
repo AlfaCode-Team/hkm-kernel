@@ -39,16 +39,22 @@ adapters behind ports, and a published API contract that other modules consume.
 
 | Capability | Entry point | Notes |
 |---|---|---|
-| Register a user | `POST /ajx/users` | Public, rate-limited; emits `user.registered` |
+| Register (public) | `POST /ajx/users` | Public self-signup, rate-limited. Returns `202 {status:"pending_verification"}` — **no identity data**. Queues a verification email (optional `MailPort`). May submit a profile block → tenant `user_profiles`. Emits `user.registered` |
+| Register (admin) | `POST /ajx/admin/users` | `auth` + `user:create`. Returns the FULL created record for the admin table |
+| Verify email (public) | `POST /ajx/users/verify` | **Unauthenticated**, token-based: SHA-256-stored, one-time, 24h expiry. Sets `email_verified_at` |
+| Verify email (self/admin) | `POST /ajx/users/{id}/verify-email` | Authenticated variant (self or `user:update-any`) |
 | List users | `GET /ajx/users` | Admin-only; keyset paginated |
 | Show a user | `GET /ajx/users/{id}` | Self or `user:read-any` |
 | Update (partial) | `PUT/PATCH /ajx/users/{id}` | Self or `user:update-any`; optimistic-locked; emits `user.updated` |
-| Verify email | `POST /ajx/users/{id}/verify-email` | Sets `email_verified_at` (the login gate); emits `user.updated` |
 | Soft-delete | `DELETE /ajx/users/{id}` | Self or `user:delete-any`; emits `user.deleted` |
 | Verify credentials | `UserServiceContract::verifyCredentials()` | Timing-safe, lockout, rehash-on-login; requires a verified email |
-| **Feedback** | `POST/GET/PATCH /ajx/feedback[...]` | TENANT-scoped; submit (any user) + admin triage. See [Tenant-scoped sub-resources](#tenant-scoped-sub-resources-feedback--settings) |
 | **Settings** | `GET/PUT /ajx/{profile,preferences,privacy,notification-preferences}` | TENANT-scoped, self-only; one consolidated service |
-| HTML UI | `GET /users[...]`, `/account/settings`, `/account/feedback` | AJAX-driven, cookie auth, CSRF on every form |
+| HTML UI | `GET /users[...]`, `/account/settings` | AJAX-driven, cookie auth, CSRF on every form |
+
+> **Recent changes**
+> - **Feedback moved out** into its own [`Plugins\Feedback`](../Feedback/README.md) plugin (one plugin, one domain). The `/ajx/feedback` routes + `user_feedback` table now live there.
+> - **Registration split** into public (`registerPublic` → token only) vs admin (`register` → full record); public **email verification is token-based** (hashed, one-time, 24h) via `verifyEmailByToken`.
+> - **Input DTOs** now extend `Plugins\Validation\AbstractDto` and declare `rules()` instead of hand-rolled validation.
 
 ---
 
@@ -529,3 +535,18 @@ the domain.
 
 *Part of the AlfacodeTeam PhpServicePlatform. See the root `CLAUDE.md` and
 `docs/ai-context/` for framework-wide architecture.*
+
+## Tenant profile reads — `TenantProfileReaderContract` (published)
+
+`TenantProfileProvisioner` implements the published
+`TenantProfileReaderContract` — `fullName(userId, tenantId): string` — in two
+construction modes: **pinned** (repository already built against the resolved
+tenant connection; the listener path) or **resolver** (container binding;
+resolves the tenant DB per call through Tenancy's
+`TenantConnectionResolverContract`). Reads are best-effort and never throw: a
+missing profile or unreachable tenant DB yields `''`. Consumers: Tenancy's
+tenant-selection flow (the JWT `name` claim) and `UserService::find()` (attaches
+`UserDTO.fullName` when a membership pins the tenant). `UserDTO` also carries
+`avatarUrl` and `permissions`. `UserServiceContract::find()` accepts
+`bool $isAuth = false` — issuance-time lookups by Auth skip the
+self-or-permission check (the request Identity is still guest during login).

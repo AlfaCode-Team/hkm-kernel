@@ -13,16 +13,15 @@ use Plugins\Tenancy\API\Contracts\TenantHostRegistryContract;
  *
  *     acme.example.com   ->  tenant that registered & verified 'acme.example.com'
  *     shop.acme.io       ->  tenant that registered & verified 'shop.acme.io'
- *     unknown.host       ->  ''  (no verified host -> central; downstream 404s
- *                                  only if the route requires a tenant)
+ *     unknown.host       ->  ''  (no verified host — TenantContextStage answers
+ *                                  404: every host must be assigned to a tenant)
  *
  * Unlike {@see DomainTenantIdentifier}, this does NOT derive the id from the
  * host string — it maps the FULL hostname to a tenant_id through a verified row,
  * so tenants can bring their own apex/sub domains (not just labels under one
  * configured base domain). No auth is involved: it works for anonymous traffic.
  *
- * An unknown or unverified host yields '' — the request keeps the central
- * DatabasePort. The registry already restricts matches to status = verified.
+ * The registry already restricts matches to status = verified.
  */
 final class HostTenantIdentifier implements TenantIdentifier
 {
@@ -32,7 +31,7 @@ final class HostTenantIdentifier implements TenantIdentifier
 
     public function identify(Request $request): string
     {
-        $host = $this->normaliseHost($request->host()); 
+        $host = $this->normaliseHost($request->host());
         if ($host === '') {
             return '';
         }

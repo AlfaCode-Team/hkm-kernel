@@ -106,6 +106,9 @@ hkm worker [args...]            run app/worker/run.php in ./
 hkm cli                         # interactive command picker
 hkm cli list                    # forward `list` to the project console
 hkm cli make:migration          # interactive prompt
+hkm cli route:list              # dump the compiled route manifest
+hkm cli route:list --method=GET --path=/api   # filter by verb + path prefix
+hkm cli route:list --json       # machine-readable output
 hkm cli -p shop migrate:run     # target a registered project by name
 hkm worker
 hkm worker -p shop --queue=emails
@@ -142,6 +145,8 @@ When a plugin of the same name exists in both, you are prompted to choose.
 hkm plugins [path|name]                    analyse a project's enabled plugins
 hkm plugins enable  <plugin> [proj]        wire a plugin into the bootstrap
 hkm plugins disable <plugin> [proj]        remove a plugin from the bootstrap
+hkm plugins update  [plugin] [proj]        publish NEW assets of enabled plugin(s) + migrate them
+hkm plugins upgrade [proj]                 full upgrade after plugins changed (deps + assets + SPLIT reconcile)
 hkm plugins create  <name>   [proj]        scaffold a new plugin
 hkm plugins delete  <name>   [proj]        delete a plugin folder from disk
 hkm plugins make:migration <plugin> <name> add a migration INTO a plugin
@@ -164,6 +169,8 @@ hkm plugins make:factory   <plugin> <name> add a factory into a plugin
 ```
 enable          = add | on
 disable         = remove | off
+update          = sync
+upgrade         = reconcile | migrate
 create          = new | scaffold
 delete          = del | destroy | rm
 make:migration  = make-migration | migration
@@ -180,6 +187,8 @@ hkm plugins --all                    # also show available, disabled plugins
 hkm plugins enable billing           # wire + publish + migrate
 hkm plugins enable redis-cache -e    # into withEssentialModules()
 hkm plugins disable billing          # un-wire (then asks to unpublish)
+hkm plugins upgrade                   # after upgrading plugins: heal deps, publish/migrate, reconcile splits
+hkm plugins upgrade shop --dry-run    # preview the whole upgrade for a project
 hkm plugins create loyalty           # scaffold a project plugin
 hkm plugins create http2 --kernel    # scaffold a kernel plugin (contributors)
 hkm plugins delete loyalty           # delete a plugin folder (confirms first)
@@ -276,11 +285,31 @@ publish on the next enable. Migrations get a UTC timestamp prefix
 HKM_PHP_BIN            override the php binary           (default: php)
 HKM_CLI_PATH           override the target php CLI script
 HKM_KERNEL_HOME        kernel root (registry at <root>/projects/projects.json)
+HKM_DEV_HOME           development kernel checkout used by --dev (hkm-config set-dev-home)
 HKM_GLOBAL_AUTOLOAD    override the kernel vendor/autoload.php
 PSP_GLOBAL_AUTOLOAD    explicit kernel autoload (exported to child PHP)
 PSP_PROJECTS_DIR       dir holding the kernel projects.json registry
 HKM_TEMPLATES_DIR      override the scaffolding templates directory
 ```
+
+## --dev — target the development kernel
+
+Every command accepts `--dev` (anywhere in the args; stripped before command
+parsing). It pins that ONE invocation to the DEVELOPMENT kernel instead of the
+installed stable copy — for contributors keeping both side by side:
+
+```bash
+hkm-config set-dev-home ~/code/php-service-platform   # one-time (validated)
+hkm run my-shop            # stable kernel (/opt/hkm-kernel)
+hkm run my-shop --dev      # SAME project on the dev checkout
+hkm doctor --dev           # confirm what --dev resolves to
+```
+
+Resolution order: `HKM_DEV_HOME` (works from the installed binary, anywhere) →
+walk UP from a repo-built launcher to the nearest `composer.json`. It exports
+`HKM_KERNEL_HOME` + `HKM_CLI_PATH` for the child process only — nothing
+persistent changes. When no dev kernel is found, `--dev` fails loudly; it never
+silently falls back to the stable kernel.
 
 **Resolution order**
 

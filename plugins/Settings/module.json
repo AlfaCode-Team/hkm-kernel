@@ -4,7 +4,7 @@
     "solves": "tenant.settings",
     "type": "module",
 
-    "requires": ["database.query"],
+    "requires": ["database.management", "validation.rules"],
     "exposes": ["Plugins\\Settings\\API\\Contracts\\SettingsServiceContract"],
 
     "routes": [

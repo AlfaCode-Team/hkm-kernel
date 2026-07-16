@@ -25,7 +25,7 @@ jobs:
       matrix:
         php: ["8.4"]   # real floor: Symfony 8 + PHPUnit require PHP >= 8.4.1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }   # path-repo modules must be present
       - uses: shivammathur/setup-php@v2
         with:
@@ -48,7 +48,7 @@ jobs:
     name: Zig build (all targets)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Zig (self-hosted pinned toolchain)
         run: ./tools/ci/setup-zig.sh
         env:

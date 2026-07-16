@@ -9,16 +9,16 @@
 //! project with NO PHP / Composer present — only `composer install` is needed
 //! afterwards to pull the kernel + plugins.
 //!
-//! The generated files are kept as real templates under `tools/src/templates/`
+//! The generated files are kept as real templates under `templates/`
 //! and read from a templates DIRECTORY at runtime — they are NOT embedded in the
 //! binary, so they can be edited without recompiling. Resolution order for the
 //! directory (first hit wins):
 //!
 //!   1. HKM_TEMPLATES_DIR                         (explicit override)
-//!   2. HKM_KERNEL_HOME/tools/src/templates       (dev / installed kernel)
+//!   2. HKM_KERNEL_HOME/templates       (dev / installed kernel)
 //!   3. <exe_dir>/templates                       (packaged alongside binary)
 //!   4. <exe_dir>/../share/hkm/templates          (packaged FHS layout)
-//!   5. <kernel_root>/tools/src/templates         (inferred from the registry)
+//!   5. <kernel_root>/templates         (inferred from the registry)
 //!
 //! If none can be found, `new` fails with a clear message — there is no
 //! compiled-in fallback. Templates use three tokens substituted per project:
@@ -44,7 +44,7 @@ const Template = struct {
 };
 
 /// Every file the scaffolder writes. `src` is read from the resolved templates
-/// dir at runtime (relative to tools/src/templates/).
+/// dir at runtime (relative to the templates dir).
 const templates = [_]Template{
     .{ .dest = "proj.json", .src = "proj.json" },
     .{ .dest = "composer.json", .src = "composer.json" },
@@ -55,6 +55,9 @@ const templates = [_]Template{
     .{ .dest = "app/bootstrap/kernel-autoload.php", .src = "app/bootstrap/kernel-autoload.php" },
     .{ .dest = "app/bootstrap/app.php", .src = "app/bootstrap/app.php" },
     .{ .dest = "app/public/index.php", .src = "app/public/index.php" },
+    .{ .dest = "app/public/.htaccess", .src = "app/public/.htaccess" },
+    .{ .dest = "app/nginx.conf.example", .src = "app/nginx.conf.example" },
+    .{ .dest = "app/apache.conf.example", .src = "app/apache.conf.example" },
     .{ .dest = "app/swoole/index.php", .src = "app/swoole/index.php" },
     .{ .dest = "app/cli/run.php", .src = "app/cli/run.php" },
     .{ .dest = "app/worker/run.php", .src = "app/worker/run.php" },
@@ -333,7 +336,11 @@ fn generateAppKey(allocator: std.mem.Allocator, io: Io, opts: Options) !void {
     }
 
     try Dir.cwd().writeFile(io, .{ .sub_path = env_path, .data = out.items });
-    prompt.ok("Generated APP_KEY in .env");
+
+    // The .env now holds the freshly generated APP_KEY (and will hold DB creds,
+    // JWT secrets, …). Lock it down to owner-only so it is never world-readable.
+    util.chmod600(io, env_path);
+    prompt.ok("Generated APP_KEY in .env (chmod 600)");
 }
 
 /// Run `composer install` inside the new project. Inherits stdio so the user

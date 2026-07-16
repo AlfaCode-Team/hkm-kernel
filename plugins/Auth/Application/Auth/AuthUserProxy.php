@@ -37,8 +37,11 @@ final readonly class AuthUserProxy implements Authenticatable
         private array $permissions,
         private string $tenantId,
         private string $tokenType,
+        private string $joinedAt,
         private ?AuthServiceContract $tokensService = null,
         private ?TokenDTO $accessToken = null,
+        private string $fullName = '',
+        private ?string $avatarUrl = null,
     ) {}
 
     /**
@@ -50,9 +53,7 @@ final readonly class AuthUserProxy implements Authenticatable
      */
     public static function fromUser(
         UserDTO $user,
-        array $roles = [],
         array $permissions = [],
-        string $tenantId = '',
         string $tokenType = 'session',
         ?AuthServiceContract $tokensService = null,
     ): self {
@@ -60,11 +61,14 @@ final readonly class AuthUserProxy implements Authenticatable
             userId:        $user->id,
             username:      $user->username,
             email:         $user->email,
-            roles:         array_values($roles),
+            roles:         array_values($user->roles),
             permissions:   array_values($permissions),
-            tenantId:      $tenantId,
+            tenantId:      $user->tenantId ?? "",
             tokenType:     $tokenType,
             tokensService: $tokensService,
+            joinedAt:      $user->joinedAt ?? "",
+            fullName:      $user->fullName,
+            avatarUrl:     $user->avatarUrl,
         );
     }
 
@@ -85,8 +89,11 @@ final readonly class AuthUserProxy implements Authenticatable
             array_values($permissions),
             $tenantId,
             $tokenType,
+            $this->joinedAt,
             $this->tokensService,
             $this->accessToken,
+            $this->fullName,
+            $this->avatarUrl,
         );
     }
 
@@ -101,8 +108,11 @@ final readonly class AuthUserProxy implements Authenticatable
             $this->permissions,
             $this->tenantId,
             $this->tokenType,
+            $this->joinedAt,
             $this->tokensService,
             $token,
+            $this->fullName,
+            $this->avatarUrl,
         );
     }
 
@@ -181,6 +191,10 @@ final readonly class AuthUserProxy implements Authenticatable
             roles:       $this->roles,
             permissions: $this->permissions,
             tokenType:   $this->tokenType,
+            username:    $this->username,
+            email:       $this->email,
+            fullName:    $this->fullName,
+            avatarUrl:   $this->avatarUrl,
         );
     }
 }

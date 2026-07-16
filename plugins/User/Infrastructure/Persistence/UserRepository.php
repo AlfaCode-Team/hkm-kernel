@@ -35,7 +35,8 @@ final class UserRepository implements UserStore
 
     private const COLUMNS =
         'user_id, username, email, password_hash, remember_token,
-         version, email_verified_at, created_at';
+         version, email_verified_at, email_verification_token_hash,
+         email_verification_expires_at, created_at';
 
     public function __construct(
         private readonly DatabasePort $db,
@@ -49,7 +50,10 @@ final class UserRepository implements UserStore
      */
     public function paginate(ListUsersQuery $query): array
     {
-        $params = ['limit' => $query->limit + 1];
+        // Inline LIMIT as a validated int: bound params bind as strings and
+        // native prepares (EMULATE_PREPARES=false) reject `LIMIT '100'`.
+        $limit  = max(1, min(1001, $query->limit + 1));
+        $params = [];
         $cursor = '';
         if ($query->after !== null) {
             // user_id DESC → fetch rows strictly "older" than the cursor.
@@ -62,7 +66,7 @@ final class UserRepository implements UserStore
                 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
                  WHERE deleted_at IS NULL' . $cursor . '
                  ORDER BY user_id DESC
-                 LIMIT :limit',
+                 LIMIT ' . $limit,
                 $params,
             );
         } catch (\Throwable $e) {
@@ -93,6 +97,22 @@ final class UserRepository implements UserStore
         }
 
         $row = $this->fetchBy('remember_token', $tokenHash);
+
+        return $row === null ? null : self::hydrate($row);
+    }
+
+    /**
+     * Resolve a user by the SHA-256 hash of a pending email-verification token.
+     * Expiry is checked in the service (it holds the clock); an empty hash never
+     * matches so a blank/NULL column cannot confirm a forged empty token.
+     */
+    public function findByVerificationTokenHash(string $tokenHash): ?User
+    {
+        if ($tokenHash === '') {
+            return null;
+        }
+
+        $row = $this->fetchBy('email_verification_token_hash', $tokenHash);
 
         return $row === null ? null : self::hydrate($row);
     }
@@ -151,18 +171,23 @@ final class UserRepository implements UserStore
         return $row !== null;
     }
 
-    public function insert(User $user): void
+    public function insert(User &$user): void
     {
-        $now = self::now();
+        // The entity is the source of truth for created_at (set at register()).
+        // updated_at equals it on first insert.
+        $createdAt = $user->createdAt();
+        $updatedAt = $createdAt;
 
         try {
             $this->db->execute(
                 'INSERT INTO ' . self::TABLE . '
                     (user_id, username, email, password_hash, remember_token,
-                     version, email_verified_at, created_at, updated_at)
+                     version, email_verified_at, email_verification_token_hash,
+                     email_verification_expires_at, created_at, updated_at)
                  VALUES
                     (:user_id, :username, :email, :password_hash, :remember_token,
-                     :version, :email_verified_at, :created_at, :updated_at)',
+                     :version, :email_verified_at, :verif_token, :verif_expires,
+                     :created_at, :updated_at)',
                 [
                     'user_id'           => $user->id(),
                     'username'          => $user->username(),
@@ -171,8 +196,10 @@ final class UserRepository implements UserStore
                     'remember_token'    => $user->rememberToken(),
                     'version'           => $user->version(),
                     'email_verified_at' => self::fmt($user->emailVerifiedAt()),
-                    'created_at'        => $now,
-                    'updated_at'        => $now,
+                    'verif_token'       => $user->emailVerificationTokenHash(),
+                    'verif_expires'     => self::fmt($user->emailVerificationExpiresAt()),
+                    'created_at'        => self::fmt($createdAt),
+                    'updated_at'        => self::fmt($updatedAt),
                 ],
             );
         } catch (\Throwable $e) {
@@ -186,6 +213,11 @@ final class UserRepository implements UserStore
                 previous: $e,
             );
         }
+
+        // Reflect the persisted timestamps back onto the caller's entity, then
+        // mark it clean so it reports no pending changes after the write.
+        $user->setAttribute('updated_at', $updatedAt);
+        $user->syncOriginal();
     }
 
     /**
@@ -205,6 +237,8 @@ final class UserRepository implements UserStore
                     password_hash     = :password_hash,
                     remember_token    = :remember_token,
                     email_verified_at = :email_verified_at,
+                    email_verification_token_hash = :verif_token,
+                    email_verification_expires_at = :verif_expires,
                     version           = :version,
                     updated_at        = :updated_at
                  WHERE user_id = :user_id
@@ -215,6 +249,8 @@ final class UserRepository implements UserStore
                     'password_hash'     => $user->passwordHash(),
                     'remember_token'    => $user->rememberToken(),
                     'email_verified_at' => self::fmt($user->emailVerifiedAt()),
+                    'verif_token'       => $user->emailVerificationTokenHash(),
+                    'verif_expires'     => self::fmt($user->emailVerificationExpiresAt()),
                     'version'           => $user->version(),
                     'updated_at'        => self::now(),
                     'user_id'           => $user->id(),
@@ -232,6 +268,7 @@ final class UserRepository implements UserStore
                 previous: $e,
             );
         }
+           
 
         if ($affected < 1) {
             throw new OptimisticLockException(

@@ -1,0 +1,17 @@
+{
+    "name": "{{LOWER}}",
+    "version": "1.0.0",
+    "solves": "{{LOWER}}.management",
+    "type": "module",
+
+    "requires": [],
+    "exposes": [],
+
+    "routes": [],
+    "emits": [],
+    "listens": [],
+
+    "documentation": "The {{STUDLY}} plugin. Describe its single business domain here — this text is shown as a comment when the plugin is enabled into a project. Enabling publishes its config/, database/ (migrations, seeders, factories) and resources/ into the project; disabling can unpublish them and roll back its migrations.",
+
+    "config": []
+}

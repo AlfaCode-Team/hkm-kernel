@@ -56,6 +56,19 @@ final class FakeUserStore implements UserStore
         return null;
     }
 
+    public function findByVerificationTokenHash(string $tokenHash): ?User
+    {
+        if ($tokenHash === '') {
+            return null;
+        }
+        foreach ($this->byId as $user) {
+            if (hash_equals((string) $user->emailVerificationTokenHash(), $tokenHash)) {
+                return $user;
+            }
+        }
+        return null;
+    }
+
     public function updateRememberToken(string $userId, ?string $tokenHash): void
     {
         if ($tokenHash === null) {
@@ -78,11 +91,13 @@ final class FakeUserStore implements UserStore
         return false;
     }
 
-    public function insert(User $user): void
+    public function insert(User &$user): void
     {
         if ($this->existsByUsernameOrEmail($user->username(), $user->email())) {
             throw new DuplicateUserException();
         }
+        $user->setAttribute('updated_at', $user->createdAt());
+        $user->syncOriginal();
         $this->byId[$user->id()] = $user;
     }
 

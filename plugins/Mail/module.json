@@ -1,24 +1,47 @@
 {
     "name": "mail",
     "version": "1.0.0",
-    "solves": "mail.smtp",
+    "solves": "mail.delivery",
     "type": "module",
 
     "requires": [],
-    "exposes": ["AlfacodeTeam\\PhpServicePlatform\\Kernel\\Ports\\MailPort"],
+    "exposes": [
+        "AlfacodeTeam\\PhpServicePlatform\\Kernel\\Ports\\MailPort",
+        "Plugins\\Mail\\API\\Contracts\\MailerContract"
+    ],
 
     "routes": [],
     "emits": [],
     "listens": [],
 
+    "jobs": [
+        { "name": "mail.send", "handler": "Plugins\\Mail\\Application\\Jobs\\SendMailJob", "queue": "mail" }
+    ],
+
+    "documentation": "The Mail plugin — a native, dependency-free MailPort adapter + rich MailerContract. Transports: SMTP (TLS/STARTTLS, AUTH PLAIN/LOGIN/CRAM-MD5/XOAUTH2, multi-host failover, keep-alive), Sendmail, PHP mail(), Array/Log (test/dev). Message API: from/sender/return-path, to/cc/bcc, reply-to, HTML + auto plain-text alternative, file/raw/inline-CID attachments, custom headers, priority, read receipts, charset. Security: CR/LF header-injection guards on every address/header/param, TLS peer verification, DKIM RSA-SHA256 signing (relaxed/relaxed), hidden BCC. send()/queue() (queue via QueuePort + the mail.send job); views render through ViewRendererContract when present, else the view string is treated as raw HTML. Config in config/mail.php (MAIL_* env).",
+
     "config": [
-        { "key": "SMTP_HOST",         "type": "string", "required": false },
-        { "key": "SMTP_PORT",         "type": "int",    "required": false },
-        { "key": "SMTP_USERNAME",     "type": "string", "required": false },
-        { "key": "SMTP_PASSWORD",     "type": "string", "required": false },
-        { "key": "SMTP_ENCRYPTION",   "type": "string", "required": false },
-        { "key": "MAIL_FROM_ADDRESS", "type": "string", "required": false },
-        { "key": "MAIL_FROM_NAME",    "type": "string", "required": false },
-        { "key": "MAIL_VIEWS_PATH",   "type": "string", "required": false }
+        { "key": "MAIL_TRANSPORT",      "type": "string", "required": false },
+        { "key": "MAIL_FROM_ADDRESS",   "type": "string", "required": false },
+        { "key": "MAIL_FROM_NAME",      "type": "string", "required": false },
+        { "key": "MAIL_HOST",           "type": "string", "required": false },
+        { "key": "MAIL_SMTP_HOSTS",     "type": "string", "required": false },
+        { "key": "MAIL_PORT",           "type": "int",    "required": false },
+        { "key": "MAIL_ENCRYPTION",     "type": "string", "required": false },
+        { "key": "MAIL_USERNAME",       "type": "string", "required": false },
+        { "key": "MAIL_PASSWORD",       "type": "string", "required": false },
+        { "key": "MAIL_AUTH_MODE",      "type": "string", "required": false },
+        { "key": "MAIL_OAUTH_TOKEN",    "type": "string", "required": false },
+        { "key": "MAIL_HELO_DOMAIN",    "type": "string", "required": false },
+        { "key": "MAIL_TIMEOUT",        "type": "int",    "required": false },
+        { "key": "MAIL_VERIFY_PEER",    "type": "bool",   "required": false },
+        { "key": "MAIL_KEEP_ALIVE",     "type": "bool",   "required": false },
+        { "key": "MAIL_ALLOW_INSECURE_AUTH", "type": "bool", "required": false },
+        { "key": "MAIL_SENDMAIL_BINARY","type": "string", "required": false },
+        { "key": "MAIL_DKIM_DOMAIN",    "type": "string", "required": false },
+        { "key": "MAIL_DKIM_SELECTOR",  "type": "string", "required": false },
+        { "key": "MAIL_DKIM_KEY",       "type": "string", "required": false },
+        { "key": "MAIL_CHARSET",        "type": "string", "required": false },
+        { "key": "MAIL_QUEUE",          "type": "string", "required": false }
     ]
 }

@@ -12,7 +12,7 @@
 #   • the PHP CLI (bin/psp) installed AS bin/hkm so the launcher's default
 #     passthrough path (<kernel>/bin/hkm) resolves.
 #
-# End users still need PHP >= 8.4 on PATH — `hkm doctor` verifies it.
+# End users still need PHP 8.4 on PATH — `hkm doctor` verifies it.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -46,7 +46,7 @@ MODULES="${MODULES:-bundle}"
 # vendor/ is ALWAYS excluded — composer resolves it on the target. Everything
 # staged is git-tracked ⇒ no gitignored junk (.claude, node_modules, var/cache,
 # submodule vendors) can leak.
-SRC_PATHS="src plugins projects composer.json composer.lock bin/psp README.md LICENSE"
+SRC_PATHS="src plugins projects templates composer.json composer.lock bin/psp README.md LICENSE"
 [ "$MODULES" = bundle ] && SRC_PATHS="$SRC_PATHS modules"
 
 # Emit modules.lock: "<path> <url> <pinned-sha>" per submodule, from the SHA
@@ -81,11 +81,12 @@ stage_kernel() { # $1 = destination kernel root
   if [ -f "$k/bin/psp" ]; then mv "$k/bin/psp" "$k/bin/hkm"; chmod +x "$k/bin/hkm"; fi
 
   # Runtime install ships NO documentation or build tooling: strip every `docs`/
-  # `doc` and `tools` directory + leftover test caches from the staged tree.
+  # `doc` and `tools` directory + leftover test caches. The templates/ subtree is
+  # EXEMPT — a scaffolded project legitimately ships its own docs/tests/tooling.
   find "$k" -depth -type d \( -name docs -o -name doc -o -name tools -o -name tests \
-       -o -name .git -o -name .github \) -exec rm -rf {} + 2>/dev/null || true
+       -o -name .git -o -name .github \) -not -path "$k/templates/*" -exec rm -rf {} + 2>/dev/null || true
   find "$k" -type f \( -name '.phpunit.result.cache' -o -name '.gitignore' \
-       -o -name '.gitattributes' \) -delete 2>/dev/null || true
+       -o -name '.gitattributes' \) -not -path "$k/templates/*" -delete 2>/dev/null || true
 
   # Drop the composer-install helper used on non-.deb targets (macOS/Windows).
   cp "$TOOLS/templates/install-kernel.sh" "$k/install.sh" 2>/dev/null || true
@@ -111,7 +112,7 @@ if [[ "$want" == all || "$want" == linux ]]; then
   # composer is a hard dependency now: the package ships SOURCE, not vendor/, and
   # resolves dependencies on the target in postinst. Network access is required
   # at install time. In MODULES=git mode, git is also required to fetch modules.
-  DEPS="php-cli (>= 8.4), php-mbstring, php-curl, php-xml, php-zip, composer, ca-certificates"
+  DEPS="php8.4-cli, php8.4-mbstring, php8.4-curl, php8.4-xml, php8.4-zip, composer, ca-certificates"
   [ "$MODULES" = git ] && DEPS="$DEPS, git"
   cat > "$P/DEBIAN/control" <<EOF
 Package: hkm-kernel
@@ -119,13 +120,21 @@ Version: ${VERSION}
 Architecture: amd64
 Maintainer: AlfacodeTeam <dev@hkm.local>
 Depends: ${DEPS}
-Recommends: php-mysql | php-pgsql | php-sqlite3, php-redis, php-intl
+Recommends: php8.4-mysql | php8.4-pgsql | php8.4-sqlite3, php8.4-redis, php8.4-intl
 Description: PhpServicePlatform (HKM) kernel and native launcher
  Installs the kernel PHP source (src, plugins, projects, modules) under
  /opt/hkm-kernel and a native hkm launcher in /usr/bin. PHP dependencies are
  resolved with composer at install time (vendor/ is not bundled), so the
  runtime matches this machine's PHP. Needs network access during install.
  Run 'hkm doctor' afterwards to verify PHP and required extensions.
+EOF
+  # conffiles: the project registry + platform map are USER DATA. Marking them as
+  # dpkg conffiles makes upgrades PRESERVE the user's versions instead of
+  # overwriting them with the packaged defaults. (Relocate entirely with
+  # HKM_USERDATA_DIR if you'd rather keep them outside /opt.)
+  cat > "$P/DEBIAN/conffiles" <<EOF
+/opt/${KERNEL_DIRNAME}/projects/projects.json
+/opt/${KERNEL_DIRNAME}/projects/platform.json
 EOF
   # postinst: build vendor/ on the target via the shipped install.sh helper.
   cat > "$P/DEBIAN/postinst" <<EOF
@@ -226,7 +235,7 @@ EOF
 HKM Kernel — Windows
 ====================
 1. Extract this folder to C:\hkm  (or any path).
-2. Install PHP >= 8.4 (winget install PHP.PHP) and Composer, open a new terminal.
+2. Install PHP 8.4 (winget install PHP.PHP) and Composer, open a new terminal.
 3. Resolve dependencies (vendor/ is NOT bundled):
        cd C:\hkm\hkm-kernel
        install.bat

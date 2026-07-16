@@ -14,7 +14,7 @@ use AlfacodeTeam\PhpServicePlatform\Commands\Migrate\CliCommandFactory as Migrat
 use Plugins\Commands\Configuration\EnvironmentConfigurationLoader;
 use Plugins\Commands\Exceptions\ConfigurationException;
 use Plugins\Commands\Configuration\ConfigurationValidator;
-use Plugins\Commands\Infrastructure\Http\Commands\{ModuleAddCommand, ModuleRemoveCommand};
+use Plugins\Commands\Infrastructure\Http\Commands\{ModuleAddCommand, ModuleRemoveCommand, RouteListCommand};
 use Plugins\Commands\Application\Services\ModuleManagementService;
 use Plugins\Commands\Application\Services\MigrationService;
 use Plugins\Commands\API\Contracts\{ModuleManagementServiceContract, MigrationServiceContract};
@@ -190,6 +190,9 @@ final class Provider implements ModuleContract
             $cli->command($scoped->makeInScope(ModuleAddCommand::class, $this->solves()));
             $cli->command($scoped->makeInScope(ModuleRemoveCommand::class, $this->solves()));
 
+            // Read-only introspection — no DB deps, resolves straight from the manifest.
+            $cli->command(new RouteListCommand());
+
             // ── Migration Commands with Enterprise Safeguards ──────────────
             try {
                 $migrateConfig = $this->loadConfiguration();
@@ -213,7 +216,16 @@ final class Provider implements ModuleContract
             // Register all 25+ migration commands. Pass the built instances
             // directly so their factory-injected dependencies are preserved
             // (re-instantiating via class-string would drop them).
+            //
+            // Yield to any command a plugin already claimed (queued at boot,
+            // before this deferred callback runs). This is why the kernel's
+            // generic LetMigrate `tenant:*` commands do NOT shadow the Tenancy
+            // plugin's registry-based equivalents when Tenancy is enabled — and
+            // they still register normally when it is not.
             foreach ($migrationFactory->all() as $commandInstance) {
+                if ($cli->hasQueued($commandInstance->getName())) {
+                    continue;
+                }
                 $cli->command($commandInstance);
             }
         });

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Plugins\OAuth2\Application\Services;
 
 use Plugins\OAuth2\Application\Ports\AuthCodeStore;
+use Plugins\OAuth2\Application\Ports\AuthorizationFlow;
 use Plugins\OAuth2\Application\Ports\ClientStore;
 use Plugins\OAuth2\Domain\Entities\AuthCode;
 use Plugins\OAuth2\Domain\Exceptions\OAuthException;
@@ -25,7 +26,7 @@ use Plugins\OAuth2\Domain\ValueObjects\Pkce;
  *   - PKCE is MANDATORY for public clients; S256 strongly preferred.
  *   - code is random, hashed at rest, 60s TTL, single-use.
  */
-final class AuthorizationService
+final class AuthorizationService implements AuthorizationFlow
 {
     public function __construct(
         private readonly ClientStore $clients,
@@ -127,6 +128,28 @@ final class AuthorizationService
             'code'  => $rawCode,
             'state' => $req->state,
         ]);
+    }
+
+    /**
+     * Headless validate + issue for a first-party, already-authenticated user
+     * (AuthorizationFlow port — the old __DEV__ mobile login/register flow).
+     * Consent is skipped; every other check (client, redirect_uri exact match,
+     * scopes, PKCE-for-public-clients) still runs.
+     */
+    public function issueCodeFor(array $params, string $userId): array
+    {
+        $params['response_type'] = $params['response_type'] ?? 'code';
+
+        $request  = $this->validate($params);
+        $redirect = $this->issueCode($request, $userId);
+
+        parse_str((string) parse_url($redirect, PHP_URL_QUERY), $query);
+
+        return [
+            'code'         => (string) ($query['code'] ?? ''),
+            'state'        => (string) ($query['state'] ?? $request->state),
+            'redirect_uri' => $request->redirectUri,
+        ];
     }
 
     /** Build a redirect URL, appending params to any existing query string. */

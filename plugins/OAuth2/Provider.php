@@ -68,33 +68,31 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [
-            DatabaseConnectionManagerContract::class,
-            HashingPort::class,
-            UserServiceContract::class,    // password grant
-            ViewRendererContract::class,   // consent + device verification pages
-        ];
+        return ['database.management', 'crypto.services', 'user.management', 'view.rendering'];
     }
 
     /** @return list<class-string> */
     public function exposes(): array
     {
-        return [ClientStore::class];
+        return [
+            ClientStore::class,
+            \Plugins\OAuth2\Application\Ports\AuthorizationFlow::class,
+        ];
     }
 
     public function register(ModuleContainer $container): void
     {
         // ── persistence (central connection — control plane) ──────────────────
         $container->bind(ClientStore::class, static fn(ModuleContainer $c) =>
-            new ClientRepository(self::central($c)));
+            new ClientRepository($c->make(DatabasePort::class)));
         $container->bindInternal(AuthCodeStore::class, static fn(ModuleContainer $c) =>
-            new AuthCodeRepository(self::central($c)));
+            new AuthCodeRepository($c->make(DatabasePort::class)));
         $container->bindInternal(RefreshTokenStore::class, static fn(ModuleContainer $c) =>
-            new RefreshTokenRepository(self::central($c)));
+            new RefreshTokenRepository($c->make(DatabasePort::class)));
         $container->bindInternal(ScopeStore::class, static fn(ModuleContainer $c) =>
-            new ScopeRepository(self::central($c)));
+            new ScopeRepository($c->make(DatabasePort::class   )));
         $container->bindInternal(DeviceCodeStore::class, static fn(ModuleContainer $c) =>
-            new DeviceCodeRepository(self::central($c)));
+            new DeviceCodeRepository($c->make(DatabasePort::class  )));
 
         $container->bindInternal(ScopeValidator::class, static fn(ModuleContainer $c) =>
             new ScopeValidator($c->make(ScopeStore::class)));
@@ -128,6 +126,11 @@ final class Provider implements ModuleContract
                 $c->make(ScopeValidator::class),
                 (int) (env('OAUTH_CODE_TTL') ?: 60),
             ));
+
+        // Published port: headless code issuance for first-party authenticated
+        // flows (Auth's mobile login/register — old __DEV__ PKCE-without-browser).
+        $container->bind(\Plugins\OAuth2\Application\Ports\AuthorizationFlow::class,
+            static fn(ModuleContainer $c) => $c->make(AuthorizationService::class));
 
         $container->bindInternal(TokenService::class, static fn(ModuleContainer $c) =>
             new TokenService(

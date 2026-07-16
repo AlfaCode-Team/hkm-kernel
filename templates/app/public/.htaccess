@@ -1,0 +1,27 @@
+# Apache hardening + front-controller for app/public.
+# (Nginx users: set root to app/public and try_files $uri /index.php?$query_string;
+#  and `location ~ /\. { deny all; }`.)
+
+# Never serve dotfiles (.env, .git, …) even if the docroot is misconfigured.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# Do not expose the PHP version.
+<IfModule mod_headers.c>
+    Header always unset X-Powered-By
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Disable directory listing.
+Options -Indexes
+
+# Route every request through the single front controller.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [L]
+</IfModule>

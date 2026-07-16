@@ -4,23 +4,25 @@ declare(strict_types=1);
 
 namespace Plugins\Tenancy\Application\Services;
 
-use Plugins\Auth\API\Contracts\AuthServiceContract;
 use Plugins\Tenancy\API\Contracts\MembershipServiceContract;
-use Plugins\Tenancy\API\DTOs\TenantSelection;
 use Plugins\Tenancy\API\DTOs\TenantSummary;
-use Plugins\Tenancy\Application\Ports\AuditSink;
+use Plugins\Audit\API\Contracts\AuditServiceContract;
 use Plugins\Tenancy\Application\Ports\MembershipReader;
 use Plugins\Tenancy\Domain\Exceptions\NotAMemberException;
 
 /**
- * MembershipService — the tenant-selection flow.
+ * MembershipService — the tenant-selection authority (control plane ONLY).
  *
- * Turns an authenticated (unscoped) user into a tenant-scoped session:
- *   1. list the tenants they may switch into (active seats, active tenants),
- *   2. on selection, RE-VERIFY the membership against central `user_tenants`
- *      (never trust a client-supplied tenant id), then mint a tenant-scoped
- *      access token via the Auth module (`tnt` claim set),
- *   3. audit the switch.
+ * Answers exactly one question: does this user hold an active, routable seat
+ * in this tenant? It lists seats for the picker, RE-VERIFIES the membership
+ * against central `user_tenants` on selection (never trusting a client-supplied
+ * tenant id), and audits the switch/denial.
+ *
+ * It does NOT mint credentials — tenancy is not authentication. The HTTP
+ * boundary (TenantController) takes the verified seat returned here and asks
+ * the Auth module to issue the tenant-scoped token. Keeping Auth out of this
+ * service also keeps the container graph acyclic
+ * (AuthService → UserService → MembershipService).
  *
  * The re-verification on selection — and the per-request re-check that the Auth
  * layer/TenantContextStage performs — is what makes a revoked seat lose access
@@ -30,9 +32,7 @@ final class MembershipService implements MembershipServiceContract
 {
     public function __construct(
         private readonly MembershipReader $memberships,
-        private readonly AuthServiceContract $auth,
-        private readonly AuditSink $audit,
-        private readonly int $tokenTtl = 3600,
+        private readonly AuditServiceContract $audit,
     ) {}
 
     public function myTenants(string $userId): array
@@ -45,10 +45,19 @@ final class MembershipService implements MembershipServiceContract
 
     public function isActiveMember(string $userId, string $tenantId): bool
     {
-        return $this->memberships->find($userId, $tenantId)?->isRoutable() === true;
+        return $this->activeMember($userId, $tenantId) !== null;
     }
 
-    public function selectTenant(string $userId, string $tenantId, ?string $ip = null): TenantSelection
+    public function activeMember(string $userId, string $tenantId): ?TenantSummary
+    {
+        $membership = $this->memberships->find($userId, $tenantId);
+
+        return $membership !== null && $membership->isRoutable()
+            ? TenantSummary::fromMembership($membership)
+            : null;
+    }
+
+    public function selectTenant(string $userId, string $tenantId, ?string $ip = null): TenantSummary
     {
         $membership = $this->memberships->find($userId, $tenantId);
 
@@ -57,19 +66,8 @@ final class MembershipService implements MembershipServiceContract
             throw NotAMemberException::for($userId, $tenantId);
         }
 
-        $token = $this->auth->issueJwt(
-            $userId,
-            ['tnt' => $tenantId, 'roles' => [$membership->role]],
-            $this->tokenTtl,
-        );
-
         $this->audit->record('tenant.switch', $userId, $tenantId, ['role' => $membership->role], $ip);
 
-        return new TenantSelection(
-            token:     $token,
-            tenantId:  $tenantId,
-            role:      $membership->role,
-            expiresIn: $this->tokenTtl,
-        );
+        return TenantSummary::fromMembership($membership);
     }
 }

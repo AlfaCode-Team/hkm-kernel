@@ -7,10 +7,13 @@
  *   @var string $apiBase  Base path of the JSON API (e.g. /ajx/users).
  *   @var string $csrf     CSRF token (HMAC, bound to the session cookie).
  *   @var string $view     Rendered child-view HTML (injected by the renderer).
+ *   @var string $seoHead  Optional pre-rendered SEO head block (seoPrivate()) —
+ *                         owns <title> + robots when present; echo RAW.
  */
 $title   = $title   ?? 'Users';
 $apiBase = $apiBase ?? '/ajx/users';
 $csrf    = $csrf    ?? '';
+$seoHead = $seoHead ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -18,7 +21,11 @@ $csrf    = $csrf    ?? '';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
-    <title><?= htmlspecialchars($title, ENT_QUOTES, 'UTF-8') ?> · User</title>
+    <?php if ($seoHead !== ''): ?>
+        <?= $seoHead ?>
+    <?php else: ?>
+        <title><?= htmlspecialchars($title, ENT_QUOTES, 'UTF-8') ?> · User</title>
+    <?php endif; ?>
     <style>
         :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --fg:#e2e8f0; --muted:#94a3b8;
                 --accent:#6366f1; --danger:#ef4444; --ok:#22c55e; }
@@ -63,7 +70,6 @@ $csrf    = $csrf    ?? '';
             <a href="/users">All users</a>
             <a href="/users/create">Create</a>
             <a href="/account/settings">Settings</a>
-            <a href="/account/feedback">Feedback</a>
         </nav>
     </header>
 
@@ -124,7 +130,7 @@ $csrf    = $csrf    ?? '';
             create:   (payload) => request('POST', '', payload),
             update:   (id, payload) => request('PUT', '/' + encodeURIComponent(id), payload),
             remove:   (id) => request('DELETE', '/' + encodeURIComponent(id)),
-            csrf, flash,
+            request, csrf, flash,
         };
     })();
     </script>

@@ -19,10 +19,28 @@ const EnvMap = std.process.Environ.Map;
 pub const subtrees = [_][]const u8{
     "config",
     "database/migrations",
+    "database/tenant-template",
     "database/seeders",
     "database/factories",
     "resources",
 };
+
+/// Subtrees whose files are MIGRATIONS (applied to a DB), used when reconciling
+/// migration ownership after a plugin split. `database/migrations` runs on the
+/// central DB; `database/tenant-template` is provisioned into every tenant DB.
+pub const migration_subtrees = [_][]const u8{
+    "database/migrations",
+    "database/tenant-template",
+};
+
+/// True when `rel` is a migration file (lives under a migration subtree).
+pub fn isMigrationPath(rel: []const u8) bool {
+    for (migration_subtrees) |sub| {
+        const pfx = if (sub.len > 0) sub else "";
+        if (std.mem.startsWith(u8, rel, pfx) and rel.len > pfx.len and rel[pfx.len] == '/') return true;
+    }
+    return false;
+}
 
 /// Copy a plugin's publishable assets into the project (OVERWRITING existing
 /// files). Project-relative paths of every written file are appended to `out`.
@@ -52,17 +70,20 @@ pub fn publishAssets(
     }
 }
 
-/// Publish only assets that DO NOT yet exist in the project — used by `update`
-/// so new migrations/views/config land without clobbering files a user may have
-/// customised since the plugin was enabled. The NEW project-relative paths are
-/// appended to `out`. Pass `dry_run` to detect without writing.
-pub fn publishNewAssets(
+/// Analyse a plugin's publishable subtrees (config, database, resources)
+/// against the project's published copies, then bring the project in sync:
+/// files the plugin gained are published (appended to `new_out`) and files
+/// whose CONTENT drifted from the plugin's version are overwritten with the
+/// plugin copy (appended to `changed_out`) — the plugin is the source of
+/// truth on `update`. Pass `dry_run` to detect without writing.
+pub fn syncAssets(
     allocator: std.mem.Allocator,
     io: Io,
     pluginFolder: []const u8,
     projectRoot: []const u8,
     dry_run: bool,
-    out: *std.ArrayList([]const u8),
+    new_out: *std.ArrayList([]const u8),
+    changed_out: *std.ArrayList([]const u8),
 ) !void {
     const cwd = Dir.cwd();
     for (subtrees) |sub| {
@@ -74,15 +95,23 @@ pub fn publishNewAssets(
         for (rels.items) |rel| {
             const relDest = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ sub, rel });
             const dest = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ projectRoot, relDest });
-            if (util.fileExists(io, dest)) continue; // already published — leave it
+            const src = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srcDir, rel });
+            const bytes = cwd.readFileAlloc(io, src, allocator, .limited(16 * 1024 * 1024)) catch continue;
+
+            var kind: enum { new, changed } = .new;
+            if (cwd.readFileAlloc(io, dest, allocator, .limited(16 * 1024 * 1024)) catch null) |have| {
+                if (std.mem.eql(u8, have, bytes)) continue; // identical — in sync
+                kind = .changed;
+            }
 
             if (!dry_run) {
-                const src = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srcDir, rel });
-                const bytes = cwd.readFileAlloc(io, src, allocator, .limited(16 * 1024 * 1024)) catch continue;
                 if (util.parentOf(dest)) |parent| try cwd.createDirPath(io, parent);
                 try cwd.writeFile(io, .{ .sub_path = dest, .data = bytes });
             }
-            try out.append(allocator, relDest);
+            switch (kind) {
+                .new => try new_out.append(allocator, relDest),
+                .changed => try changed_out.append(allocator, relDest),
+            }
         }
     }
 }
@@ -125,6 +154,14 @@ fn collectFiles(allocator: std.mem.Allocator, io: Io, root: []const u8, prefix: 
 /// True if any published path is a migration (used to decide migrate:run).
 pub fn hasMigrations(paths: []const []const u8) bool {
     for (paths) |p| if (std.mem.startsWith(u8, p, "database/migrations/")) return true;
+    return false;
+}
+
+/// True if any path is a migration on EITHER surface — central
+/// (database/migrations) or tenant (database/tenant-template). Used by
+/// `update` to decide whether a migrate pass is needed at all.
+pub fn hasAnyMigrations(paths: []const []const u8) bool {
+    for (paths) |p| if (isMigrationPath(p)) return true;
     return false;
 }
 
@@ -479,8 +516,10 @@ fn scopedPluginConfig(
 }
 
 /// Run ONLY this plugin's migrations as its own batch: install + run on the
-/// CENTRAL database first, then `tenant:migrate --all` for every tenant of the
-/// project. Best-effort — a non-zero exit is surfaced as a warning, never fatal.
+/// CENTRAL database first, then `tenant:migrate` for every active tenant of
+/// the project. The two passes are independent — a plugin shipping only
+/// tenant-template migrations still gets its tenant pass, and vice versa.
+/// Best-effort — a non-zero exit is surfaced as a warning, never fatal.
 pub fn runPluginMigrations(
     allocator: std.mem.Allocator,
     io: Io,
@@ -490,34 +529,48 @@ pub fn runPluginMigrations(
     folder: []const u8,
     paths: []const []const u8,
 ) !void {
-    const scoped = (try scopedPluginConfig(allocator, io, projectRoot, folder, paths)) orelse return;
-    defer Dir.cwd().deleteTree(io, scoped.tmp_root) catch {};
-    const cfgArg = scoped.config_arg;
-
     // 1. Central database — migrate:run applies ONLY this plugin's pending
     //    migrations (paths are scoped to it) as a NEW batch in the shared
     //    tracking table. We do NOT refresh/drop: a clean enable has nothing
     //    applied yet (disable rolled it back), and dropping tables here would
     //    fail on cross-plugin foreign keys. We capture --json output to learn
     //    the batch number and record it in the plugin-assets manifest.
-    prompt.muted(try std.fmt.allocPrint(allocator, "    migrating {s} on central DB (own batch)…", .{folder}));
-    _ = try spawnCli(allocator, io, env, projectRoot, autoload, &.{ "migrate:install", "--force", cfgArg });
-    const central = try spawnCliCaptureBatch(allocator, io, env, projectRoot, autoload, &.{ "migrate:run", "--force", "--json", cfgArg });
-    if (!central.ran or central.code != 0) {
-        prompt.warn("Central migrate:run returned non-zero — check the DB state.");
-    } else if (central.applied > 0 and central.batch != null) {
-        try recordBatch(allocator, io, projectRoot, folder, central.batch.?);
-        prompt.ok(try std.fmt.allocPrint(allocator, "{s} migrated on central DB — {d} migration(s), batch {d}", .{ folder, central.applied, central.batch.? }));
-    } else {
-        prompt.muted(try std.fmt.allocPrint(allocator, "    {s}: no new migrations to apply on central DB.", .{folder}));
+    //    scopedPluginConfig is null when the plugin ships no central migrations.
+    const scoped = try scopedPluginConfig(allocator, io, projectRoot, folder, paths);
+    defer if (scoped) |s| Dir.cwd().deleteTree(io, s.tmp_root) catch {};
+
+    if (scoped) |s| {
+        prompt.muted(try std.fmt.allocPrint(allocator, "    migrating {s} on central DB (own batch)…", .{folder}));
+        _ = try spawnCli(allocator, io, env, projectRoot, autoload, &.{ "migrate:install", "--force", s.config_arg });
+        const central = try spawnCliCaptureBatch(allocator, io, env, projectRoot, autoload, &.{ "migrate:run", "--force", "--json", s.config_arg });
+        if (!central.ran or central.code != 0) {
+            prompt.warn("Central migrate:run returned non-zero — check the DB state.");
+        } else if (central.applied > 0 and central.batch != null) {
+            try recordBatch(allocator, io, projectRoot, folder, central.batch.?);
+            prompt.ok(try std.fmt.allocPrint(allocator, "{s} migrated on central DB — {d} migration(s), batch {d}", .{ folder, central.applied, central.batch.? }));
+        } else {
+            prompt.muted(try std.fmt.allocPrint(allocator, "    {s}: no new migrations to apply on central DB.", .{folder}));
+        }
     }
 
-    // 2. Every tenant database of this project — same, each tenant records the
-    //    plugin's migrations as its own batch in its own tracking table.
-    if (scoped.has_tenants) {
-        prompt.muted(try std.fmt.allocPrint(allocator, "    migrating {s} across all tenants (own batch each)…", .{folder}));
-        const code = try spawnCli(allocator, io, env, projectRoot, autoload, &.{ "tenant:migrate", "--all", cfgArg });
-        if (code != 0 and code != 255) prompt.warn("tenant:migrate returned non-zero — check tenant DBs.");
+    // 2. Tenant databases — tenant:migrate is registry-driven (Tenancy's
+    //    MigrateTenantsCommand): it applies the PROJECT's published
+    //    database/tenant-template against every active tenant, each with its
+    //    own tracking table, and skips tenants already up to date. Run it when
+    //    the plugin ships tenant-template migrations (regardless of central
+    //    ones) or the base let-migrate config declares a tenants resolver.
+    var ships_tenant_migs = false;
+    for (paths) |p| {
+        if (std.mem.startsWith(u8, p, "database/tenant-template/")) {
+            ships_tenant_migs = true;
+            break;
+        }
+    }
+    const has_tenants_cfg = if (scoped) |s| s.has_tenants else false;
+    if (ships_tenant_migs or has_tenants_cfg) {
+        prompt.muted(try std.fmt.allocPrint(allocator, "    migrating tenant template across all active tenants…", .{}));
+        const code = try spawnCli(allocator, io, env, projectRoot, autoload, &.{"tenant:migrate"});
+        if (code != 0 and code != 255) prompt.warn("tenant:migrate returned non-zero — check tenant DBs (is the Tenancy plugin enabled?).");
     }
 }
 
@@ -568,6 +621,97 @@ pub fn unpublishPlugin(allocator: std.mem.Allocator, io: Io, env: *EnvMap, proje
     }
     try forgetPublished(allocator, io, projectRoot, folder);
     prompt.muted(try std.fmt.allocPrint(allocator, "    removed {d} published file(s).", .{removed}));
+}
+
+// ── migration-ownership reconciliation (plugin splits) ─────────────────────────
+
+/// A plugin folder on disk: its name + absolute path (e.g. .../plugins/Feedback).
+pub const PluginDir = struct { name: []const u8, dir: []const u8 };
+
+/// A migration whose manifest ownership was transferred from one plugin to
+/// another because the file moved between plugins (a split).
+pub const MigrationMove = struct { path: []const u8, from: []const u8, to: []const u8 };
+
+/// The name of the plugin in `plugins` that currently SHIPS the migration file
+/// `base` (matched by basename across every migration subtree), or null.
+fn currentMigrationOwner(allocator: std.mem.Allocator, io: Io, plugins: []const PluginDir, base: []const u8) ?[]const u8 {
+    for (plugins) |pl| {
+        for (migration_subtrees) |sub| {
+            const f = std.fmt.allocPrint(allocator, "{s}/{s}/{s}", .{ util.trimSlash(pl.dir), sub, base }) catch continue;
+            if (util.fileExists(io, f)) return pl.name;
+        }
+    }
+    return null;
+}
+
+fn removePathFromEntry(allocator: std.mem.Allocator, entries: *std.ArrayList(Entry), name: []const u8, path: []const u8) !void {
+    for (entries.items) |*e| {
+        if (!util.eqlIgnoreCase(e.name, name)) continue;
+        var kept: std.ArrayList([]const u8) = .empty;
+        for (e.paths) |p| {
+            if (!std.mem.eql(u8, p, path)) try kept.append(allocator, p);
+        }
+        e.paths = try kept.toOwnedSlice(allocator);
+        return;
+    }
+}
+
+fn addPathToEntry(allocator: std.mem.Allocator, entries: *std.ArrayList(Entry), name: []const u8, path: []const u8) !void {
+    for (entries.items) |*e| {
+        if (!util.eqlIgnoreCase(e.name, name)) continue;
+        for (e.paths) |p| {
+            if (std.mem.eql(u8, p, path)) return; // already owned
+        }
+        var list: std.ArrayList([]const u8) = .empty;
+        for (e.paths) |p| try list.append(allocator, p);
+        try list.append(allocator, path);
+        e.paths = try list.toOwnedSlice(allocator);
+        return;
+    }
+    // No entry for the new owner yet — create one (the plugin was just enabled).
+    var list: std.ArrayList([]const u8) = .empty;
+    try list.append(allocator, path);
+    try entries.append(allocator, .{ .name = try allocator.dupe(u8, name), .paths = try list.toOwnedSlice(allocator) });
+}
+
+/// Reassign, in the plugin-assets manifest, every tracked migration to the plugin
+/// that currently SHIPS it. When a plugin split moves a migration file to a new
+/// plugin (same filename, new owner), its manifest ownership transfers WITHOUT
+/// touching the database: the migration's row in the shared `let_migrations`
+/// table is keyed by filename and still marks it applied, so the table AND its
+/// data are preserved. This is what stops a later `disable` of the OLD plugin
+/// from rolling back — and DROPPING — a table the NEW plugin now owns. When
+/// `dry_run`, moves are detected and returned but the manifest is not rewritten.
+pub fn reconcileMigrationOwnership(
+    allocator: std.mem.Allocator,
+    io: Io,
+    projectRoot: []const u8,
+    plugins: []const PluginDir,
+    dry_run: bool,
+    moves: *std.ArrayList(MigrationMove),
+) !void {
+    var entries = try readManifest(allocator, io, projectRoot);
+    if (entries.items.len == 0) return;
+
+    // Detect: any tracked migration whose current shipping owner differs from
+    // the plugin it is recorded under.
+    for (entries.items) |e| {
+        for (e.paths) |p| {
+            if (!isMigrationPath(p)) continue;
+            const base = std.fs.path.basename(p);
+            const owner = currentMigrationOwner(allocator, io, plugins, base) orelse continue;
+            if (!util.eqlIgnoreCase(owner, e.name)) {
+                try moves.append(allocator, .{ .path = p, .from = e.name, .to = owner });
+            }
+        }
+    }
+    if (moves.items.len == 0 or dry_run) return;
+
+    for (moves.items) |mv| {
+        try removePathFromEntry(allocator, &entries, mv.from, mv.path);
+        try addPathToEntry(allocator, &entries, mv.to, mv.path);
+    }
+    try writeManifest(allocator, io, projectRoot, entries.items);
 }
 
 /// Publish every plugin currently enabled in a project's bootstrap (copy only,

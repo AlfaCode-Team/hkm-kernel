@@ -9,6 +9,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Identity;
 use Project\Http\Controllers\Concerns\InteractsWithCsrf;
+use Project\Http\Controllers\Concerns\InteractsWithSession;
 
 /**
  * Base controller for JSON / API endpoints.
@@ -26,6 +27,7 @@ use Project\Http\Controllers\Concerns\InteractsWithCsrf;
 abstract class ApiController implements RequestAware
 {
     use InteractsWithCsrf;
+    use InteractsWithSession;
 
     /** 200 OK with a `data` envelope. */
     protected function ok(mixed $data = null, int $status = 200): Response

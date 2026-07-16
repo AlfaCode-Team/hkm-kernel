@@ -63,6 +63,20 @@ export default function App({
     router.on('navigate', () => headManager.forceUpdate())
   }, [])
 
+  // Server-driven tab title. On an XHR navigation the server's seoFor()/
+  // seoPrivate() helpers send the page's suffixed TITLE STRING as the reserved
+  // `seoHead` prop (on a full page load the same prop is the rendered SEO HTML
+  // block, which the HTML shell consumes and strips from the client payload —
+  // so it never reaches here). Writing document.title updates the FIRST <title>
+  // element in the document, i.e. the server-rendered one, so no duplicate tags
+  // are ever created. Anything containing markup is ignored — plain text only.
+  useEffect(() => {
+    const seoHead = current.page?.props?.seoHead
+    if (typeof seoHead === 'string' && seoHead !== '' && !seoHead.includes('<')) {
+      document.title = seoHead
+    }
+  }, [current.page])
+
   if (!current.component) {
     return createElement(
       HeadContext.Provider,

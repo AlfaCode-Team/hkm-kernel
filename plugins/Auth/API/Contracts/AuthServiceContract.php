@@ -42,7 +42,12 @@ interface AuthServiceContract
      * `user_tenants` table at tenant-selection time. `tenant` is accepted as a
      * legacy alias.
      *
-     * @param array{roles?:list<string>,permissions?:list<string>,tnt?:string,tenant?:string} $claims
+     * Display-identity claims (OIDC names) may be supplied: `preferred_username`,
+     * `email`, `name` (full name from the tenant user_profiles table). When
+     * username/email are omitted they are filled from the central user record;
+     * `name` is only minted by tenant-aware callers (tenant selection).
+     *
+     * @param array{roles?:list<string>,permissions?:list<string>,tnt?:string,tenant?:string,preferred_username?:string,email?:string,name?:string} $claims
      */
     public function issueJwt(string $userId, array $claims = [], int $ttlSeconds = 3600): string;
 
@@ -74,6 +79,10 @@ interface AuthServiceContract
      * SessionAuthStage can rebuild an Identity on subsequent requests. Call AFTER
      * verifying credentials (e.g. UserServiceContract::verifyCredentials).
      *
+     * Display identity: username/email are filled from the central user record
+     * when omitted; $fullName (first + last from the tenant user_profiles table)
+     * is stored as supplied — pass it when tenant context is known.
+     *
      * @param list<string> $roles
      * @param list<string> $permissions
      */
@@ -83,6 +92,10 @@ interface AuthServiceContract
         array $roles = [],
         array $permissions = [],
         string $tenantId = '',
+        string $username = '',
+        string $email = '',
+        string $fullName = '',
+        ?string $avatarUrl = null,
     ): void;
 
     /** Tear down a web/AJAX login: clear attributes and rotate the session id. */

@@ -27,11 +27,11 @@ use Plugins\Tenancy\Infrastructure\TenantConnectionResolver;
  * container so every repository resolved downstream (ExecuteStage) transparently
  * talks to the tenant database.
  *
- * Routing decision:
- *   - Identifier returns ''  -> no rebind. The request keeps the central
- *     DatabasePort (login, tenant picker, apex/public pages). In claim mode a
- *     tenant-scoped controller must require an Identity (the `auth` filter) so an
- *     unscoped request can never read tenant data.
+ * Routing decision — STRICT, no unscoped passthrough:
+ *   - No tenant (cookie empty AND identifier returns '' or throws) -> 404.
+ *     Every host must be assigned to a tenant; a request that cannot be scoped
+ *     is never served the central DatabasePort. Control-plane code that needs
+ *     central pins it explicitly (ConnectionManager default), not via this stage.
  *   - Tenant present -> rebind, or fail closed with a clean status. There is no
  *     silent fallback to another tenant or to central.
  *
@@ -68,38 +68,50 @@ final class TenantContextStage implements HttpStageContract
         $identifier = $this->identifier
             ?? ($container?->has(TenantIdentifier::class) ? $container->make(TenantIdentifier::class) : null);
 
-        // No container/identifier available — nothing to route.
-        if ($identifier === null || $container === null) {
-            return $next($request);
+        // No identifier bound means Tenancy is not in this request's dependency
+        // graph — fail loudly instead of silently skipping tenant resolution.
+        // (Register Tenancy as an essential module so it binds on every request.)
+        if ($identifier === null) {
+            throw new \RuntimeException(
+                'TenantContextStage: no TenantIdentifier is bound for this request. '
+                . 'Ensure the Tenancy module is loaded — register it as an essential module.'
+            );
         }
 
         $jar = $container->has(CookieJar::class) ? $container->make(CookieJar::class) : null;
         $userId = $request->identity()?->userId ?? '';
 
-        // Identify (JWT `tnt` claim / Host). The identifier ALWAYS wins when it
-        // has a value — a Host or a fresh claim is authoritative, so tenant
-        // switching takes effect immediately. Only when it yields '' do we fall
-        // back to the encrypted, user-bound cookie, letting a returning user keep
-        // their last selection without re-running the picker.
-        $tenantId = $this->rememberedTenant($jar, $request);
 
 
-        if($tenantId === '') {
-            $tenantId = $identifier->identify($request);
-            $fromCookie = false;
-        } else {
-            $fromCookie = true;
+        $fromCookie = false;
+        $tenantId = $this->rememberedTenant($jar, $request, $userId);
+        $fromCookie = $tenantId !== '';
+
+        // The remembered selection (encrypted, principal-bound cookie) is tried
+        // first; only when there is no valid hint does the identifier run
+        // (JWT `tnt` claim / Host, per TENANCY_MODE). An identifier may throw
+        // UnknownTenantException to fail closed on a host it refuses to serve.
+        try {
+            if ($tenantId === '') {
+                $tenantId = $identifier->identify($request);
+            }
+        } catch (UnknownTenantException) {
+            return Response::notFound('Tenant not found.');
         }
 
-        // Unscoped request (apex/central host, reserved sub-domain, or a guest in
-        // claim mode): no tenant to route — keep the central DatabasePort bound and
-        // continue. Without this, resolver->for('') would throw UnknownTenant and
-        // every control-plane/public request (login, OAuth2, marketing) would 404.
+        // EVERY request must resolve to a tenant — there is NO unscoped
+        // passthrough to the central DatabasePort. A host that is not assigned
+        // to a tenant (and a claim-mode request without a tenant claim/cookie)
+        // fails closed with a 404 here, so an unknown website pointed at this
+        // server is never served anything. Control-plane repositories that need
+        // the central connection pin it explicitly via the ConnectionManager
+        // default — they do not depend on this stage skipping the rebind.
         if ($tenantId === '') {
-            return $next($request);
+            return Response::notFound('Tenant not found.');
         }
 
         $resolver = $this->resolver ?? $container->make(TenantConnectionResolverContract::class);
+
 
         try {
             $db = $resolver->for($tenantId);
@@ -171,29 +183,40 @@ final class TenantContextStage implements HttpStageContract
             }
         }
 
-        return false; 
+        return false;
     }
 
     /**
      * Read the remembered tenant from the encrypted cookie. Returns '' unless the
-     * cookie decrypts cleanly AND was minted for THIS user (user-bound, so a
-     * cookie issued for another account can never be replayed). A guest (empty
-     * userId) never has a remembered tenant.
+     * cookie decrypts cleanly AND was minted for THIS principal — a cookie issued
+     * for another account can never be replayed, while a guest-minted cookie
+     * ('u' = '') still works for guests so public pages keep their selection.
      */
-    private function rememberedTenant(?CookieJar $jar, Request $request): string
+    private function rememberedTenant(?CookieJar $jar, Request $request, string $userId): string
     {
         if ($jar === null) {
             return '';
         }
 
         $raw = $jar->read($request, self::COOKIE); // decrypted; null if absent/tampered
+
         if ($raw === null) {
             return '';
         }
 
         $data = json_decode($raw, true);
 
-        return is_string($data['t'] ?? null) ? $data['t'] : '';
+        // Enforce the principal binding: the hint is only honoured by whoever it
+        // was minted for. A guest-minted hint ('u' = '') keeps working for
+        // guests — public pages don't require login — while a hint minted for
+        // one user is never replayed onto another user (or onto a guest after
+        // logout). Log-in flips the principal, so a fresh hint is re-minted.
+        $mintedFor = is_string($data['u'] ?? null) ? $data['u'] : '';
+        if (!is_string($data['t'] ?? null) || $mintedFor !== $userId) {
+            return '';
+        }
+
+        return $data['t'];
     }
 
     /** Queue the encrypted, user-bound tenant hint (flushed by QueuedCookiesStage). */

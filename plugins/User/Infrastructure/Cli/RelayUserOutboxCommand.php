@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Plugins\User\Infrastructure\Cli;
 
 use AlfacodeTeam\PhpIoCli\AbstractCommand;
-use Plugins\User\Infrastructure\Outbox\OutboxRelay;
+use Plugins\User\Application\Services\OutboxRelayService;
 
 /**
  * user:outbox:relay — dispatch pending user integration events to the EventBus.
@@ -17,7 +17,7 @@ use Plugins\User\Infrastructure\Outbox\OutboxRelay;
 final class RelayUserOutboxCommand extends AbstractCommand
 {
     public function __construct(
-        private readonly OutboxRelay $relay,
+        private readonly OutboxRelayService $relay,
     ) {
         parent::__construct();
     }

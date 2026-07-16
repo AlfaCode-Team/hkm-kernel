@@ -5,7 +5,10 @@
     "type": "module",
 
     "requires": ["database.management", "crypto.services", "user.management", "view.rendering"],
-    "exposes": ["Plugins\\OAuth2\\Application\\Ports\\ClientStore"],
+    "exposes": [
+        "Plugins\\OAuth2\\Application\\Ports\\ClientStore",
+        "Plugins\\OAuth2\\Application\\Ports\\AuthorizationFlow"
+    ],
 
     "views": "resources/views",
 

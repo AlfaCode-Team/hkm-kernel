@@ -15,6 +15,7 @@ const util = @import("../lib/util.zig");
 const sources = @import("../lib/plugin_sources.zig");
 const boot = @import("../lib/plugin_bootstrap.zig");
 const assets = @import("../lib/plugin_assets.zig");
+const ui = @import("../lib/plugin_ui.zig");
 const deps = @import("../lib/plugin_deps.zig");
 const services = @import("../lib/services.zig");
 
@@ -27,7 +28,7 @@ const Located = sources.Located;
 const Enabled = boot.Enabled;
 const Activation = boot.Activation;
 
-const Action = enum { analyze, verify, enable, disable, update, create, delete, make_migration, make_seeder, make_factory };
+const Action = enum { analyze, verify, enable, disable, update, upgrade, create, delete, make_migration, make_seeder, make_factory };
 
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
     var action: Action = .analyze;
@@ -92,6 +93,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
             }
             return updatePlugins(allocator, io, env, op(ops, 0), op(ops, 1), dry_run);
         },
+        .upgrade => return upgradeProject(allocator, io, env, op(ops, 0), dry_run),
         .create => {
             if (ops.len == 0) {
                 prompt.err("Usage: hkm plugins create <name> [path|name] [--kernel] [--dry-run]");
@@ -134,7 +136,8 @@ fn actionFromWord(a: []const u8) Action {
 fn actionFromWordOpt(a: []const u8) ?Action {
     if (std.mem.eql(u8, a, "enable") or std.mem.eql(u8, a, "add") or std.mem.eql(u8, a, "on")) return .enable;
     if (std.mem.eql(u8, a, "disable") or std.mem.eql(u8, a, "remove") or std.mem.eql(u8, a, "off")) return .disable;
-    if (std.mem.eql(u8, a, "update") or std.mem.eql(u8, a, "sync") or std.mem.eql(u8, a, "upgrade")) return .update;
+    if (std.mem.eql(u8, a, "update") or std.mem.eql(u8, a, "sync")) return .update;
+    if (std.mem.eql(u8, a, "upgrade") or std.mem.eql(u8, a, "reconcile") or std.mem.eql(u8, a, "migrate")) return .upgrade;
     if (std.mem.eql(u8, a, "create") or std.mem.eql(u8, a, "new") or std.mem.eql(u8, a, "scaffold")) return .create;
     if (std.mem.eql(u8, a, "delete") or std.mem.eql(u8, a, "del") or std.mem.eql(u8, a, "destroy") or
         std.mem.eql(u8, a, "rm")) return .delete;
@@ -882,12 +885,16 @@ fn disableOne(
     return support.text;
 }
 
-// ── update (re-publish new assets + migrate) ───────────────────────────────────
+// ── update (analyse + sync assets/ui + migrate) ────────────────────────────────
 
-/// Update already-enabled plugins: publish any NEW assets (migrations, views,
-/// config the plugin gained since it was enabled) WITHOUT clobbering existing
-/// published files, then run the plugin's pending migrations (a fresh batch in
-/// the shared tracking table; tenants too). `only` limits to one plugin.
+/// Update already-enabled plugins. Per plugin, ANALYSE every publishable
+/// surface (config, database migrations/tenant-template/seeders/factories,
+/// resources, ui) against what the project holds, then bring the project in
+/// sync: NEW plugin files are published, files whose content DRIFTED from the
+/// plugin's version are refreshed (plugin wins), a drifted ui/ mirror is
+/// re-synced, and — when any central OR tenant migration was new/changed —
+/// the plugin's pending migrations run (a fresh batch in the shared tracking
+/// table; tenants too). `only` limits to one plugin.
 fn updatePlugins(
     allocator: std.mem.Allocator,
     io: Io,
@@ -920,8 +927,17 @@ fn updatePlugins(
 
     const autoload = try services.resolveAutoload(allocator, io, env);
 
+    // Discover plugin UIs once so each plugin's frontend mirror can be
+    // analysed alongside its assets (only when the project has a frontend).
+    const frontend = try std.fmt.allocPrint(allocator, "{s}/frontend", .{root});
+    const has_frontend = util.dirExists(Dir.cwd(), io, frontend);
+    var ui_plugins: std.ArrayList(ui.UiPlugin) = .empty;
+    if (has_frontend) try ui.discover(allocator, io, env, root, &ui_plugins);
+
     var touched: usize = 0;
     var new_total: usize = 0;
+    var changed_total: usize = 0;
+    var ui_synced: usize = 0;
     var matched = false;
 
     // Heal the Support-helpers require for enabled plugins that gained (or always
@@ -962,40 +978,79 @@ fn updatePlugins(
             }
         }
 
-        // Detect (and, unless dry-run, copy) only assets not already published.
+        // Analyse every publishable surface (config, database, resources)
+        // against the project: NEW files are published, content-drifted files
+        // are refreshed with the plugin's version.
         var new_paths: std.ArrayList([]const u8) = .empty;
-        try assets.publishNewAssets(allocator, io, fp, root, dry_run, &new_paths);
+        var changed_paths: std.ArrayList([]const u8) = .empty;
+        try assets.syncAssets(allocator, io, fp, root, dry_run, &new_paths, &changed_paths);
 
-        if (new_paths.items.len == 0) {
-            prompt.muted(try std.fmt.allocPrint(allocator, "{s}: up to date — no new assets.", .{e.name}));
+        // Analyse the plugin's ui/ mirror (frontend/plugins/<slug>) the same
+        // way — re-sync when it drifted; a symlinked mirror is always current.
+        var ui_dirty: ?ui.UiPlugin = null;
+        for (ui_plugins.items) |up| {
+            if (!util.eqlIgnoreCase(up.name, e.name)) continue;
+            if (try ui.mirrorDiffers(allocator, io, root, up)) ui_dirty = up;
+            break;
+        }
+
+        if (new_paths.items.len == 0 and changed_paths.items.len == 0 and ui_dirty == null) {
+            prompt.muted(try std.fmt.allocPrint(allocator, "{s}: up to date — config, database, resources and ui all match.", .{e.name}));
             continue;
         }
 
         touched += 1;
         new_total += new_paths.items.len;
-        const verb = if (dry_run) "Would publish" else "Published";
-        prompt.ok(try std.fmt.allocPrint(allocator, "{s} {d} new asset(s) for {s}", .{ verb, new_paths.items.len, e.name }));
-        for (new_paths.items) |p| prompt.muted(try std.fmt.allocPrint(allocator, "    + {s}", .{p}));
+        changed_total += changed_paths.items.len;
+        if (new_paths.items.len > 0) {
+            const verb = if (dry_run) "Would publish" else "Published";
+            prompt.ok(try std.fmt.allocPrint(allocator, "{s} {d} new asset(s) for {s}", .{ verb, new_paths.items.len, e.name }));
+            for (new_paths.items) |p| prompt.muted(try std.fmt.allocPrint(allocator, "    + {s}", .{p}));
+        }
+        if (changed_paths.items.len > 0) {
+            const verb = if (dry_run) "Would refresh" else "Refreshed";
+            prompt.ok(try std.fmt.allocPrint(allocator, "{s} {d} changed asset(s) for {s}", .{ verb, changed_paths.items.len, e.name }));
+            for (changed_paths.items) |p| prompt.muted(try std.fmt.allocPrint(allocator, "    ~ {s}", .{p}));
+        }
+        if (ui_dirty) |up| {
+            if (dry_run) {
+                ui_synced += 1;
+                prompt.ok(try std.fmt.allocPrint(allocator, "Would sync ui for {s} → frontend/plugins/{s}", .{ e.name, up.slug }));
+            } else {
+                const n = try ui.syncPlugin(allocator, io, root, up, false);
+                ui_synced += 1;
+                prompt.ok(try std.fmt.allocPrint(allocator, "Synced ui for {s} → frontend/plugins/{s} ({d} file(s))", .{ e.name, up.slug, n }));
+            }
+        }
 
+        const migrations_dirty = assets.hasAnyMigrations(new_paths.items) or assets.hasAnyMigrations(changed_paths.items);
         if (dry_run) {
-            if (assets.hasMigrations(new_paths.items)) prompt.muted("    + would run pending migrations (central + tenants)");
+            if (migrations_dirty) prompt.muted("    + would run pending migrations (central + tenants)");
             continue;
         }
 
-        // Merge new paths into the manifest's recorded path list, then migrate
-        // the plugin's pending migrations (only the new ones apply).
+        // Merge the synced paths into the manifest's recorded list, then run
+        // the plugin's pending migrations when any central or tenant migration
+        // was new/changed (already-applied ones are skipped by name).
         const existing = (try assets.publishedPathsFor(allocator, io, root, e.name)) orelse &[_][]const u8{};
         var merged: std.ArrayList([]const u8) = .empty;
         for (existing) |p| try merged.append(allocator, p);
         for (new_paths.items) |p| {
             if (!containsStr(merged.items, p)) try merged.append(allocator, p);
         }
+        for (changed_paths.items) |p| {
+            if (!containsStr(merged.items, p)) try merged.append(allocator, p);
+        }
         try assets.recordPublished(allocator, io, root, e.name, merged.items);
 
-        if (assets.hasMigrations(new_paths.items)) {
+        if (migrations_dirty) {
             try assets.runPluginMigrations(allocator, io, env, root, autoload, e.name, merged.items);
         }
     }
+
+    // A re-synced ui/ may have changed its alias/entry — regenerate the glue
+    // files (manifest.json, index.ts, tsconfig.plugins.json) from the live set.
+    if (ui_synced > 0 and !dry_run) try ui.writeGlue(allocator, io, root, ui_plugins.items);
 
     if (only.len > 0 and !matched) {
         prompt.warn(try std.fmt.allocPrint(allocator, "{s} is not enabled in this project.", .{only}));
@@ -1004,11 +1059,138 @@ fn updatePlugins(
     }
 
     if (dry_run) {
-        prompt.outro(try std.fmt.allocPrint(allocator, "Dry run — {d} plugin(s) with {d} new asset(s) · {d} Support require(s) to wire", .{ touched, new_total, wired }));
+        prompt.outro(try std.fmt.allocPrint(allocator, "Dry run — {d} plugin(s): {d} new · {d} changed asset(s) · {d} ui mirror(s) to sync · {d} Support require(s) to wire", .{ touched, new_total, changed_total, ui_synced, wired }));
         return 0;
     }
     if (wired > 0) try Dir.cwd().writeFile(io, .{ .sub_path = bootstrap, .data = bootstrap_src });
-    prompt.outro(try std.fmt.allocPrint(allocator, "Updated {d} plugin(s) · {d} new asset(s) published · {d} Support require(s) wired", .{ touched, new_total, wired }));
+    prompt.outro(try std.fmt.allocPrint(allocator, "Updated {d} plugin(s) · {d} new · {d} refreshed asset(s) · {d} ui mirror(s) synced · {d} Support require(s) wired", .{ touched, new_total, changed_total, ui_synced, wired }));
+    return 0;
+}
+
+// ── upgrade (heal deps + publish/migrate + reconcile split ownership) ──────────
+
+/// Full project upgrade after its plugins changed. Three phases, each idempotent:
+///
+///   1. Dependency healing — a plugin that gained a new `requires` domain has its
+///      missing provider auto-enabled (on-demand), so new cross-plugin deps that
+///      appeared since the plugin was first enabled are wired in.
+///   2. Assets + migrations — every enabled plugin's NEW assets are published and
+///      its pending migrations run (delegates to `update`; already-applied
+///      migrations are skipped by name, so nothing re-runs).
+///   3. Split reconciliation — when a plugin SPLIT (a migration/table moved to a
+///      new plugin), the manifest's migration ownership is transferred to the new
+///      owner. No DDL runs: the shared `let_migrations` row (keyed by filename)
+///      still marks the migration applied, so the table + its data are preserved.
+///      This is the data-safety step — it prevents a later disable of the OLD
+///      plugin from dropping a table the NEW plugin now owns.
+fn upgradeProject(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []const u8, dry_run: bool) !u8 {
+    const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
+
+    const bootstrap = try std.fmt.allocPrint(allocator, "{s}/app/bootstrap/app.php", .{root});
+    const source = (try readBootstrap(allocator, io, bootstrap)) orelse return 1;
+
+    var aliases: std.ArrayList(boot.Alias) = .empty;
+    try boot.collectAliases(allocator, source, &aliases);
+    var enabled: std.ArrayList(Enabled) = .empty;
+    try boot.collectEnabled(allocator, source, aliases.items, &enabled);
+
+    const srcs = try sources.discoverSources(allocator, io, env, root);
+    const search = &[_]Source{ .project, .kernel };
+
+    var cat: std.ArrayList(deps.Provider) = .empty;
+    try deps.catalogue(allocator, io, srcs, search, &cat);
+
+    prompt.intro("hkm plugins upgrade");
+    prompt.ok(try std.fmt.allocPrint(allocator, "project  {s}", .{root}));
+
+    if (enabled.items.len == 0) {
+        prompt.warn("No plugins enabled in this project.");
+        prompt.outro("Nothing to upgrade");
+        return 0;
+    }
+
+    // ── Phase 1: dependency healing ────────────────────────────────────────────
+    const Step = struct { folder: []const u8, dir: ?[]const u8 };
+    var plan: std.ArrayList(Step) = .empty;
+    for (enabled.items) |e| {
+        var needed: std.ArrayList(deps.Provider) = .empty;
+        var missing: std.ArrayList([]const u8) = .empty;
+        try deps.requiredClosure(allocator, cat.items, e.name, &needed, &missing);
+        for (needed.items) |dep| {
+            if (boot.findEnabled(enabled.items, dep.located.name) != null) continue; // already wired
+            var seen = false;
+            for (plan.items) |s| {
+                if (util.eqlIgnoreCase(s.folder, dep.located.name)) seen = true;
+            }
+            if (seen) continue;
+            try plan.append(allocator, .{ .folder = dep.located.name, .dir = dep.located.dir });
+        }
+    }
+
+    if (plan.items.len > 0) {
+        prompt.section("New dependencies to enable");
+        for (plan.items) |s| {
+            const prov = deps.findByName(cat.items, s.folder);
+            const solves = if (prov) |p| (p.solves orelse "—") else "—";
+            prompt.muted(try std.fmt.allocPrint(allocator, "    {s}  (solves: {s})", .{ s.folder, solves }));
+        }
+        var cur = source;
+        for (plan.items) |s| {
+            cur = (try enableOne(allocator, io, env, root, cur, s.folder, s.dir, false, true, dry_run)) orelse return 1;
+        }
+        if (!dry_run) {
+            try Dir.cwd().writeFile(io, .{ .sub_path = bootstrap, .data = cur });
+            prompt.ok(try std.fmt.allocPrint(allocator, "Wired {d} new dependency plugin(s) into the bootstrap", .{plan.items.len}));
+        }
+    } else {
+        prompt.muted("Dependencies: all required providers already enabled.");
+    }
+
+    // ── Phase 2: publish NEW assets + run pending migrations for every plugin ────
+    prompt.section("Assets + migrations");
+    _ = try updatePlugins(allocator, io, env, "", target, dry_run);
+
+    // ── Phase 3: reconcile migration ownership across plugin splits ─────────────
+    prompt.section("Split reconciliation (migration ownership)");
+
+    // Re-read the bootstrap: Phase 1 may have enabled new plugins.
+    const source2 = (try readBootstrap(allocator, io, bootstrap)) orelse source;
+    var aliases2: std.ArrayList(boot.Alias) = .empty;
+    try boot.collectAliases(allocator, source2, &aliases2);
+    var enabled2: std.ArrayList(Enabled) = .empty;
+    try boot.collectEnabled(allocator, source2, aliases2.items, &enabled2);
+
+    var plugin_dirs: std.ArrayList(assets.PluginDir) = .empty;
+    for (enabled2.items) |e| {
+        for (search) |src| {
+            const d = srcs.dirFor(src) orelse continue;
+            const fp = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ d, e.name });
+            if (util.dirExists(Dir.cwd(), io, fp)) {
+                try plugin_dirs.append(allocator, .{ .name = e.name, .dir = fp });
+                break;
+            }
+        }
+    }
+
+    var moves: std.ArrayList(assets.MigrationMove) = .empty;
+    try assets.reconcileMigrationOwnership(allocator, io, root, plugin_dirs.items, dry_run, &moves);
+
+    if (moves.items.len == 0) {
+        prompt.muted("No migration moved between plugins — ownership already correct.");
+    } else {
+        const verb = if (dry_run) "Would transfer" else "Transferred";
+        prompt.ok(try std.fmt.allocPrint(allocator, "{s} {d} migration(s) to their new plugin owner (no data touched)", .{ verb, moves.items.len }));
+        for (moves.items) |mv| {
+            prompt.muted(try std.fmt.allocPrint(allocator, "    {s}  {s} → {s}", .{ std.fs.path.basename(mv.path), mv.from, mv.to }));
+        }
+        prompt.note("Tables + data preserved — the migration stays applied; only manifest ownership changed.");
+    }
+
+    if (dry_run) {
+        prompt.outro("Dry run — no files, bootstrap or database changed");
+        return 0;
+    }
+    prompt.outro("Upgrade complete");
     return 0;
 }
 
@@ -1329,7 +1511,8 @@ fn printHelp() void {
     prompt.item("hkm plugins verify [proj]", "audit enabled plugins: wiring, deps + copied assets/views/migrations/configs");
     prompt.item("hkm plugins enable <plugin> [proj]", "wire a plugin into the project bootstrap");
     prompt.item("hkm plugins disable <plugin> [proj]", "remove a plugin from the project bootstrap");
-    prompt.item("hkm plugins update [plugin] [proj]", "publish NEW assets of enabled plugin(s) + migrate them; wire any missing Support/helpers.php require");
+    prompt.item("hkm plugins update [plugin] [proj]", "analyse enabled plugin(s) vs the project (config/database/resources/ui): publish new + refresh changed assets, re-sync a drifted ui mirror, migrate central + tenant DBs; wire any missing Support/helpers.php require");
+    prompt.item("hkm plugins upgrade [proj]", "full upgrade after plugins changed: heal new deps, publish/migrate, reconcile plugin SPLITS (moves migration ownership without dropping data)");
     prompt.item("hkm plugins create <name> [proj]", "scaffold a new plugin (project, or --kernel)");
     prompt.item("hkm plugins delete <name> [proj]", "delete a plugin folder from disk");
     prompt.item("hkm plugins make:migration <plugin> <name>", "add a migration INTO a plugin (not published)");
@@ -1351,6 +1534,8 @@ fn printHelp() void {
     prompt.section("Notes");
     prompt.item("enable", "resolves requires[] deps (e.g. Tenancy → Database/Auth/User), publishes assets + migrate:run");
     prompt.item("disable", "won't orphan dependents (offers to cascade); offers to prune now-unused deps, keeping shared ones");
+    prompt.item("update", "the plugin is the source of truth: a project file that drifted from the plugin's copy is OVERWRITTEN (dry-run first to preview); migrations run only when a migration file was new/changed");
+    prompt.item("upgrade", "split-safe: a migration moved to a new plugin keeps its data; only manifest ownership transfers, no DDL re-runs (aliases: reconcile/migrate)");
     prompt.item("create", "scaffolds a complete plugin (config, migration, seeder, factory, view)");
     prompt.item("Support helpers", "a plugin's Support/helpers.php is require_once'd in the bootstrap on enable, removed on disable");
     prompt.item("aliases", "enable=add/on · disable=remove/off · create=new/make · delete=del/rm");

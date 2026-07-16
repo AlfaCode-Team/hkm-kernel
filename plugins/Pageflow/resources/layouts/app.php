@@ -50,6 +50,32 @@ $appName   = htmlspecialchars((string) ($props['appName'] ?? 'Pageflow App'), EN
 $pageTitle = htmlspecialchars((string) ($props['title'] ?? $appName), ENT_QUOTES, 'UTF-8');
 $locale    = htmlspecialchars((string) ($props['locale'] ?? 'en'), ENT_QUOTES, 'UTF-8');
 
+/*
+ * ── RICH SEO HEAD — the reserved `seoHead` prop ────────────────────────────
+ * A controller builds the COMPLETE SEO block (<title>, meta description,
+ * canonical, robots, hreflang, Open Graph + Twitter card, Schema.org JSON-LD
+ * @graph) with ONE call — InteractsWithGraphSeo::seoFor(title:, description:,
+ * path:, image:, type:, data:) — and passes the rendered string as the
+ * `seoHead` page prop. When present it OWNS the <title> (the default one below
+ * is skipped). It is pre-rendered, host-aware, escaped HTML from the Project
+ * layer — echo it RAW; never re-escape it.
+ *
+ * Crawlers always take the full-page-load path, so this is all they need. The
+ * prop is STRIPPED from the page object this shell boots the client with (see
+ * $bootPage below): the block contains a literal </script> (its JSON-LD tag),
+ * which would terminate the inline window.initialPage script early — and the
+ * client has no use for server-rendered head HTML anyway.
+ */
+$seoHead  = (string) ($props['seoHead'] ?? '');
+$bootPage = $seoHead === '' ? $FLOW_PAGE : new \Plugins\Pageflow\Http\PageflowPage(
+    component:      $FLOW_PAGE->component,
+    props:          array_diff_key($props, ['seoHead' => true]),
+    url:            $FLOW_PAGE->url,
+    version:        $FLOW_PAGE->version,
+    clearHistory:   $FLOW_PAGE->clearHistory,
+    encryptHistory: $FLOW_PAGE->encryptHistory,
+);
+
 // The `hkm ui` surface to boot + its Vite entry point (manifest key, relative to
 // the frontend/ vite root). Surface: render()'s $FLOW_SURFACE → `surface` shared
 // prop → VITE_SURFACE env → 'admin'.
@@ -72,7 +98,16 @@ $assetVersion = rawurlencode($FLOW_PAGE->version);
         <meta name="csrf-token" content="<?= htmlspecialchars($FLOW_CSRF, ENT_QUOTES, 'UTF-8') ?>">
     <?php endif; ?>
 
-    <title><?= $pageTitle ?></title>
+    <?php if ($seoHead !== '' && str_contains($seoHead, '<')): ?>
+        <?php /* Full SEO block from seoFor() — includes its own <title>. */ ?>
+        <?= $seoHead ?>
+    <?php elseif ($seoHead !== ''): ?>
+        <?php /* Defensive: a plain-text seoHead (the XHR tab-title string) is
+                 title-only — escape it; never echo non-markup raw. */ ?>
+        <title><?= htmlspecialchars($seoHead, ENT_QUOTES, 'UTF-8') ?></title>
+    <?php else: ?>
+        <title><?= $pageTitle ?></title>
+    <?php endif; ?>
 
     <?php if (function_exists('vite')): ?>
         <?php /* React Fast Refresh preamble (dev/HMR only; empty string in prod). */ ?>
@@ -91,8 +126,9 @@ $assetVersion = rawurlencode($FLOW_PAGE->version);
      * Publishes the page object as the `window.initialPage` global that OLD
      * Pageflow bundles boot from. The CURRENT client ignores this global and
      * boots from the root element's data-page attribute instead (see the body).
+     * $bootPage is $FLOW_PAGE minus the server-only `seoHead` prop.
      */
-    echo $FLOW_PAGE->renderScript();
+    echo $bootPage->renderScript();
     ?>
 </head>
 <body>
@@ -104,8 +140,9 @@ $assetVersion = rawurlencode($FLOW_PAGE->version);
      *
      * To switch to the CURRENT (Inertia v2) client, drop the legacy <script> in
      * <head> and replace this bare div with the data-page mount, which carries
-     * the page object on the element itself:
-     *   echo $FLOW_PAGE->mount($FLOW_APP_ID);
+     * the page object on the element itself (use $bootPage, not $FLOW_PAGE, so
+     * the server-only seoHead prop stays out of the payload):
+     *   echo $bootPage->mount($FLOW_APP_ID);
      *   // → <div id="app" data-page="{escaped-json}"></div>
      */
     ?>

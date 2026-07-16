@@ -168,17 +168,36 @@ final class DomainResolver
     /**
      * @return array{adminSubs: list<string>, apiSubs: list<string>, projects: array<string, mixed>}
      */
+    /**
+     * Directory holding the persistent registry files (projects.json,
+     * platform.json). HKM_USERDATA_DIR relocates them outside the kernel so an
+     * update never clobbers them; falls back to <base>/projects for a checkout.
+     */
+    private static function userdataDir(string $base): string
+    {
+        $dir = $_SERVER['HKM_USERDATA_DIR']
+            ?? $_ENV['HKM_USERDATA_DIR']
+            ?? getenv('HKM_USERDATA_DIR')
+            ?: null;
+
+        return is_string($dir) && $dir !== '' ? rtrim($dir, '/') : $base . '/projects';
+    }
+
     private static function loadRegistries(string $base): array
     {
         if (isset(self::$cache[$base])) {
             return self::$cache[$base];
         }
 
-        $platform  = self::readJson($base . '/projects/platform.json');
+        // The registry files are USER DATA: they live in HKM_USERDATA_DIR when
+        // set (persistent, outside the kernel install so an update cannot
+        // overwrite them), else under <base>/projects for a dev checkout.
+        $userdata  = self::userdataDir($base);
+        $platform  = self::readJson($userdata . '/platform.json');
         $adminSubs = self::stringList($platform['subdomains']['admin'] ?? null) ?: ['app'];
         $apiSubs   = self::stringList($platform['subdomains']['api'] ?? null) ?: ['api'];
 
-        $projects = self::readJson($base . '/projects/projects.json');
+        $projects = self::readJson($userdata . '/projects.json');
 
         return self::$cache[$base] = [
             'adminSubs' => $adminSubs,
