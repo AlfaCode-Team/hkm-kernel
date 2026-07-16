@@ -1,0 +1,62 @@
+name: Auto Release
+
+# When work lands on main, read the top CHANGELOG version and, if it has no
+# matching tag yet, create and push `vX.Y.Z`. Pushing that tag triggers the
+# existing Release workflow (.github/workflows/release.yml), which runs the
+# test gate, builds every OS bundle, and publishes the GitHub Release.
+#
+# IMPORTANT: the tag is pushed with a Personal Access Token (secret RELEASE_PAT)
+# — a tag pushed with the default GITHUB_TOKEN does NOT trigger release.yml
+# (GitHub blocks workflow-triggering-workflow recursion).
+
+"on":
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag new CHANGELOG version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0            # need all tags
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Read top CHANGELOG version
+        id: ver
+        run: |
+          # First "## [x.y.z]" heading — skip "## [Unreleased]".
+          VERSION="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md \
+                     | tr -d '## []')"
+          if [ -z "$VERSION" ]; then
+            echo "No versioned CHANGELOG entry found — nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists — skipping."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version detected: v$VERSION"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.ver.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
