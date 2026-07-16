@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.12] - 2026-07-16
+
+### Changed
+- **Bundle dependencies pinned to the PHP 8.4 series (not `>= 8.4`).** The
+  Debian `.deb` `Depends`/`Recommends` now use the versioned `php8.4-*`
+  packages instead of the unversioned `php-cli (>= 8.4)` meta-package — which
+  would also let PHP 8.5+ satisfy the dependency. The docstring and Windows
+  `INSTALL.txt` wording changed from "PHP >= 8.4" to "PHP 8.4". The runtime is
+  now locked to the 8.4 line, not "8.4 or newer".
+
 ## [1.0.11] - 2026-07-16
 
 ### Added
