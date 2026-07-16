@@ -1,18 +1,18 @@
 name: Auto Release
 
 # When work lands on main, read the top CHANGELOG version and, if it has no
-# matching tag yet, create and push `vX.Y.Z`. Pushing that tag triggers the
-# existing Release workflow (.github/workflows/release.yml), which runs the
-# test gate, builds every OS bundle, and publishes the GitHub Release.
+# matching tag yet, create the tag `vX.Y.Z` and run the Release build for it.
 #
-# IMPORTANT: the tag is pushed with a Personal Access Token (secret RELEASE_PAT)
-# — a tag pushed with the default GITHUB_TOKEN does NOT trigger release.yml
-# (GitHub blocks workflow-triggering-workflow recursion).
+# No PAT required: instead of relying on the tag push to trigger release.yml
+# (GitHub blocks workflow-triggering-workflow with the default token), this
+# workflow CALLS release.yml directly via workflow_call, passing the version.
 
 "on":
   push:
     branches:
       - main
+    paths:
+      - CHANGELOG.md            # only a version bump can start a release
 
 permissions:
   contents: write
@@ -22,19 +22,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
-    name: Tag new CHANGELOG version
+  detect:
+    name: Detect new version
     runs-on: ubuntu-22.04
+    outputs:
+      release: ${{ steps.ver.outputs.release }}
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0            # need all tags
-          token: ${{ secrets.RELEASE_PAT }}
+        with: { fetch-depth: 0 }        # need all tags
 
       - name: Read top CHANGELOG version
         id: ver
         run: |
-          # First "## [x.y.z]" heading — skip "## [Unreleased]".
+          # First "## [x.y.z]" heading — skips "## [Unreleased]".
           VERSION="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md \
                      | tr -d '## []')"
           if [ -z "$VERSION" ]; then
@@ -60,3 +61,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin "v$VERSION"
+
+  # Build + publish, reusing the single source of truth in release.yml.
+  release:
+    name: Build & publish
+    needs: detect
+    if: needs.detect.outputs.release == 'true'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.detect.outputs.version }}
