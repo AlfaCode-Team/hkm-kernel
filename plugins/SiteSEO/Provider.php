@@ -35,7 +35,7 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [HttpClientPort::class];
+        return ['http.client'];
     }
 
     /** @return list<class-string> */

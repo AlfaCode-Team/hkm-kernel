@@ -78,7 +78,10 @@ class Schema implements SchemaInterface
 	 */
 	public function __toString(): string
 	{
-		return '<script type="application/ld+json">'. json_encode($this->jsonSerialize(),JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) .'</script>';
+		// JSON_HEX_TAG: with slashes unescaped, a "</script>" inside any
+		// user-sourced string value would otherwise close the JSON-LD block
+		// and execute markup (stored XSS on public pages).
+		return '<script type="application/ld+json">'. json_encode($this->jsonSerialize(), \JSON_HEX_TAG | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRETTY_PRINT) .'</script>';
 	}
 
 }

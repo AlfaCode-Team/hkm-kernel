@@ -42,7 +42,6 @@ final class PageflowAuth
      */
     public static function resolve(?Identity $identity): array
     {
-        // dd($identity);
         if (self::$projector !== null) {
             return (self::$projector)($identity);
         }
@@ -57,15 +56,25 @@ final class PageflowAuth
             return [
                 'userId'        => '',
                 'tenantId'      => '',
+                'username'      => '',
+                'fullName'      => '',
+                'email'         => '',
+                'avatarUrl'     => null,
                 'roles'         => [],
                 'permissions'   => [],
                 'authenticated' => false,
             ];
         }
 
+        // Display identity (username/fullName/email/avatarUrl) is filled on the
+        // Identity at issuance — non-sensitive, safe to share for UI (useAuth()).
         return [
             'userId'        => $identity->userId,
             'tenantId'      => $identity->tenantId,
+            'username'      => $identity->username,
+            'fullName'      => $identity->fullName,
+            'email'         => $identity->email,
+            'avatarUrl'     => $identity->avatarUrl,
             'roles'         => $identity->roles,
             'permissions'   => $identity->permissions,
             'authenticated' => true,

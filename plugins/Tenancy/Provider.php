@@ -80,7 +80,15 @@ final class Provider implements ModuleContract
 
     public function requires(): array
     {
-        return ['database.management', 'auth.identity', 'user.management', 'audit.trail'];
+        // Documentation only — the kernel reads module.json "requires" (the
+        // single source of truth); keep this in sync with it. Module-level
+        // requires cover ONLY the always-on TenantContextStage path (the
+        // connection resolver needs the Database plugin); everything the
+        // selection/admin/invitation/host ROUTES need (auth.identity,
+        // user.management, audit.trail, http.pageflow) is declared per route
+        // in module.json routes[].requires — so a Tenancy-essential project
+        // does not register those modules on every request.
+        return ['database.management'];
     }
 
     public function exposes(): array

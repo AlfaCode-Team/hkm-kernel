@@ -26,11 +26,15 @@ interface ModuleContract
     public function solves(): string;
 
     /**
-     * Port contracts and domain contracts this module requires.
-     * Must match module.json "requires" field.
+     * Module DOMAINS this module requires — the solves values of the plugins it
+     * depends on. ONE CONVENTION: return exactly module.json "requires" (the
+     * single source of truth the kernel actually reads; this method is
+     * documentation and must stay in sync). Ports (DatabasePort, …) resolve via
+     * CoreContainer and are NOT listed. Every entry must be a registered
+     * module's solves domain — the boot fails on anything else.
      *
-     * @return class-string[]
-     * @example [DatabasePort::class, PdfGatewayContract::class]
+     * @return list<string>
+     * @example ['database.management', 'view.rendering']
      */
     public function requires(): array;
 

@@ -49,6 +49,7 @@ php_errors.log
 /dist/
 /dist-toolchain/
 *.phar
+*.pdf
 
 # ── RUNTIME STATE (per-project var/ is ephemeral, regenerable) ─
 # Root-level var/ (base fallback) + per-project projects/*/var/.

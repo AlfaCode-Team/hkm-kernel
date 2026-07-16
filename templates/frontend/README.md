@@ -53,7 +53,7 @@ The scaffold ships two surfaces so you can see the model:
 | Surface | Entry | Example pages |
 |---|---|---|
 | `admin` | `src/surfaces/admin/index.tsx` | `Dashboard`, `Login`, `Users/Index` (search + partial reload + `useForm` delete + pagination) |
-| `project` | `src/surfaces/project/index.tsx` | `Home` (public landing: `<Head>` SEO + newsletter `useForm`), `About` (in-app `<Link>` nav). Hydrates SSR markup when present. |
+| `project` | `src/surfaces/project/index.tsx` | `Home` (public landing + newsletter `useForm`), `About` (in-app `<Link>` nav). Hydrates SSR markup when present. Titles/SEO come from the server `seoHead` prop (`seoFor()`/`seoPrivate()`) — see `docs/HOW_IT_WORKS.md`. |
 
 They share the `@ui` design system and the federated `@pageflow` client, but
 build to `/build/admin/` and `/build/project/` independently.

@@ -41,6 +41,12 @@ plugins/User/ui/
 public surface. A single Pageflow shell can pick the surface by URL face (see the
 psp-shop `resources/layouts/pageflow.php` — `str_starts_with($FLOW_PAGE->url, '/admin')`).
 
+Every page's SEO/title is server-driven via the reserved `seoHead` prop
+(`UserFlowController`: `/register` gets the full `seoFor()` head; the auth-gated
+and token pages get `seoPrivate()` = branded title + noindex). Pages must NOT
+set `<Head title>` — the client syncs the tab title from `seoHead` on every
+navigation (see `plugins/Pageflow/README.md`).
+
 ## Authorization
 
 `UserService::list()` enforces the `user:list` permission (admin-only). Session

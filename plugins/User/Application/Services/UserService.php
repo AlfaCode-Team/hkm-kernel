@@ -299,7 +299,7 @@ final class UserService implements UserServiceContract
         }
 
         if ($this->profiles !== null) {
-            $user->setProfile($this->profiles->getProfile($user->id(), $this->tenantId));
+            $user->setProfile($this->profiles->getProfile($user->id(), $this->tenantId ?? ''));
         }
 
         $dto = UserDTO::fromEntity($user);
@@ -423,7 +423,7 @@ final class UserService implements UserServiceContract
             $user?->setMembership($membership);
 
             if ($this->profiles !== null) {
-                $user?->setProfile($this->profiles->getProfile($user?->id(), $this->tenantId));
+                $user?->setProfile($this->profiles->getProfile($user->id(), $this->tenantId ?? ''));
             }
 
             // 2. Timing-safe: run a hash comparison even when the user is unknown.
@@ -480,7 +480,7 @@ final class UserService implements UserServiceContract
             $user?->setMembership($membership);
         }
         if ($this->profiles !== null) {
-            $user?->setProfile($this->profiles->getProfile($user?->id(), $this->tenantId));
+            $user?->setProfile($this->profiles->getProfile($user->id(), $this->tenantId ?? ''));
         }
 
         return $user === null ? null : UserDTO::fromEntity($user);
@@ -535,7 +535,7 @@ final class UserService implements UserServiceContract
         }
 
         if ($this->profiles !== null) {
-            $user->setProfile($this->profiles->getProfile($user->id(), $this->tenantId));
+            $user->setProfile($this->profiles->getProfile($user->id(), $this->tenantId ?? ''));
         }
 
         return UserDTO::fromEntity($user);
@@ -577,7 +577,7 @@ final class UserService implements UserServiceContract
             $user?->setMembership($membership);
         }
         if ($this->profiles !== null) {
-            $user?->setProfile($this->profiles->getProfile($user?->id(), $this->tenantId));
+            $user?->setProfile($this->profiles->getProfile($user->id(), $this->tenantId ?? ''));
         }
 
         $this->collector->beginCollection();

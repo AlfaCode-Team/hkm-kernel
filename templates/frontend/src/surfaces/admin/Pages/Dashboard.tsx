@@ -1,4 +1,4 @@
-import { usePage, Head, Link } from "@pageflow/react";
+import { usePage, Link } from "@pageflow/react";
 import { Button } from "@ui/button";
 
 // A Pageflow page: the server sends { component: "Dashboard", props: {...} }.
@@ -18,7 +18,6 @@ export default function Dashboard() {
 
   return (
     <>
-      <Head title="Dashboard" />
       <main className="mx-auto max-w-4xl p-8">
         <header className="mb-8 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">

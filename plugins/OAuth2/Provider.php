@@ -68,12 +68,7 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [
-            DatabaseConnectionManagerContract::class,
-            HashingPort::class,
-            UserServiceContract::class,    // password grant
-            ViewRendererContract::class,   // consent + device verification pages
-        ];
+        return ['database.management', 'crypto.services', 'user.management', 'view.rendering'];
     }
 
     /** @return list<class-string> */

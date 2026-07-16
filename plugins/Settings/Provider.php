@@ -27,7 +27,7 @@ final class Provider implements ModuleContract
     /** @return list<class-string> */
     public function requires(): array
     {
-        return [DatabasePort::class];
+        return ['database.management', 'validation.rules'];
     }
 
     /** @return list<class-string> */

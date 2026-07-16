@@ -2,12 +2,18 @@
 
 namespace AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages;
 
-use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{ManifestReader, ManifestWriter};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, ManifestReader, ManifestWriter};
 
 /**
  * Compiles the service graph the OnDemandLoader uses at runtime.
  * service-manifest.php: ['services' => [domain => {module, requires, exposes, name}]].
- * Only module-to-module requires are recorded (ports resolve via CoreContainer).
+ *
+ * Every requires[] entry MUST be the solves domain of a registered module.
+ * An entry that matches nothing FAILS the boot with a descriptive message —
+ * silently dropping it (the old behaviour) meant a typo'd domain, or a plugin
+ * missing from withModules([...]), surfaced only as an unbound-contract error
+ * deep at request time. Port dependencies (DatabasePort, MailPort, …) resolve
+ * via CoreContainer and do not belong in requires[].
  */
 final class CompileServiceManifestStage implements BootStageContract
 {
@@ -32,14 +38,19 @@ final class CompileServiceManifestStage implements BootStageContract
         }
 
         $services = [];
+        $unknown = [];
         foreach ($this->moduleClasses as $class) {
             $m = $manifests[$class];
             $domain = $m['solves'];
 
-            $moduleRequires = array_values(array_filter(
-                $m['requires'] ?? [],
-                static fn($dep) => isset($domains[$dep]),
-            ));
+            $moduleRequires = [];
+            foreach ($m['requires'] ?? [] as $dep) {
+                if (isset($domains[$dep])) {
+                    $moduleRequires[] = $dep;
+                } else {
+                    $unknown[] = "[{$class}] requires '{$dep}'";
+                }
+            }
 
             $services[$domain] = [
                 'name' => $m['name'] ?? $domain,
@@ -47,6 +58,15 @@ final class CompileServiceManifestStage implements BootStageContract
                 'requires' => $moduleRequires,
                 'exposes' => $m['exposes'] ?? [],
             ];
+        }
+
+        if ($unknown !== []) {
+            throw new BootException(
+                "Unknown module.json requires[] entries — no registered module solves them:\n  "
+                . implode("\n  ", $unknown)
+                . "\nFix the spelling, or add the plugin that solves the domain to withModules([...]) "
+                . "in the project bootstrap. Registered domains: " . implode(', ', array_keys($domains))
+            );
         }
 
         // Synthetic project scope — present only when the project declares its own

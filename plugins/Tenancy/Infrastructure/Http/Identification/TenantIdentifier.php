@@ -17,10 +17,18 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
  * {@see \Plugins\Tenancy\Infrastructure\Http\Stages\TenantContextStage} +
  * {@see \Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract}.
  *
- * Returning '' means "no tenant" — the request keeps the central DatabasePort.
+ * Returning '' means "no tenant identified" — TenantContextStage fails closed
+ * (404): every host must be assigned to a tenant, there is no unscoped
+ * passthrough to the central DatabasePort. An identifier MAY also throw
+ * UnknownTenantException to refuse a host explicitly — same 404 outcome.
  */
 interface TenantIdentifier
 {
-    /** Tenant id for this request, or '' for an unscoped/central request. */
+    /**
+     * Tenant id for this request, or '' when none could be identified.
+     *
+     * @throws \Plugins\Tenancy\Domain\Exceptions\UnknownTenantException
+     *         to refuse the host explicitly (fail closed)
+     */
     public function identify(Request $request): string;
 }

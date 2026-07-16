@@ -64,12 +64,15 @@ final class Provider implements ModuleContract
     public function requires(): array
     {
         return [
-            DatabaseConnectionManagerContract::class,
-            AuditServiceContract::class,
-            HashingPort::class,
-            CachePort::class,
-            ViewRendererContract::class,
-            HttpClientPort::class, // breached-password screening (opt-in via USER_BREACH_CHECK)
+            'database.management',
+            'crypto.services',
+            'cache.redis',
+            'view.rendering',
+            'http.client', // breached-password screening (opt-in via USER_BREACH_CHECK)
+            'validation.rules',
+            'mail.delivery',
+            'feedback.management',
+            'audit.trail',
         ];
     }
 
@@ -120,12 +123,22 @@ final class Provider implements ModuleContract
         // Resolver mode: the tenant connection is resolved per call from the
         // tenantId, through Tenancy's published contract (optional — reads
         // degrade to '' when Tenancy is absent).
-        $container->bind(TenantProfileReaderContract::class, static fn(ModuleContainer $c) =>
-            new TenantProfileProvisioner(
-                connections: $c->make(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class)
-                    ? $c->make(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class)
-                    : null,
-            ));
+        // makeInScope: User cannot declare tenancy.routing in requires[]
+        // (Tenancy already requires user.management — a requires cycle would
+        // fail the boot), so a plain make() from the user.management scope
+        // throws. Resolve the PUBLIC contract under Tenancy's own scope,
+        // guarded — reads are best-effort by contract, so a request that never
+        // loaded Tenancy simply yields no profile data.
+        $container->bind(TenantProfileReaderContract::class, static function (ModuleContainer $c) {
+            $resolver = null;
+            try {
+                $resolver = $c->makeInScope(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class, 'tenancy.routing');
+            } catch (\Throwable) {
+                // Tenancy absent for this request — profile reads degrade to ''.
+            }
+
+            return new TenantProfileProvisioner(connections: $resolver);
+        });
 
         $container->bind(UserServiceContract::class, static fn(ModuleContainer $c) =>
             new UserService(

@@ -43,11 +43,7 @@ final class Provider implements ModuleContract
         // Mirrors module.json "requires". personal_access_tokens is a control-plane
         // table, pinned to central. UserServiceContract verifies credentials for the
         // session login flow; SessionPort (essential) carries the web/AJAX session.
-        return [
-            DatabaseConnectionManagerContract::class,
-            HashingPort::class,
-            UserServiceContract::class,
-        ];
+        return ['database.management', 'crypto.services', 'user.management', 'authorization.policy'];
     }
 
     /** @return list<class-string> */

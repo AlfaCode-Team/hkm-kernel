@@ -4,6 +4,7 @@
     "domains": {{DOMAINS_JSON}},
     "features": [],
     "views": "resources",
+    "essentials": [],
     "routePolicy": { "disable": [] },
     "routes": [
         { "method": "GET", "path": "/",     "handler": "{{STUDLY}}\\Infrastructure\\Http\\HomeController@index" },

@@ -28,6 +28,10 @@ final class AuthorizationRequest
     public function toFormState(): array
     {
         return [
+            // validate() re-checks the full parameter set on the consent POST,
+            // including response_type — omitting it made every approval fail
+            // with unsupported_response_type.
+            'response_type'         => 'code',
             'client_id'             => $this->client->id,
             'redirect_uri'          => $this->redirectUri,
             'scope'                 => implode(' ', $this->scopes),
