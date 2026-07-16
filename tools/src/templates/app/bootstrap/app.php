@@ -94,6 +94,7 @@ use Plugins\SiteSEO\Application\Listeners\EnqueueIndexNowListener;
 use Plugins\SiteSEO\Provider as SiteSeoModule;
 use Plugins\View\Provider as ViewModule;
 use Plugins\SecurityFilters\Provider as SecurityFiltersModule;
+use Plugins\Edge\Provider as EdgeProvider;
 
 
 // Flat layout: this directory's grandparent is the project root.
@@ -289,6 +290,12 @@ return Kernel::configure()
         // JSON-LD, robots, IndexNow. Exposes SeoServiceContract + the /api/seo/*
         // routes. Needs http.client (above) for its network actions.
         SiteSeoModule::class,
+
+        // Edge (solves: edge.routing) — generates the host's web-server front
+        // config (nginx SNI stream splitter / nginx-only / Apache vhost) from the
+        // platform's registered domains. CLI-first: `hkm edge:status`,
+        // `hkm edge:apply`. Routes opt in via "requires": ["edge.routing"].
+        EdgeProvider::class,
     ])
 
     // ESSENTIAL modules: registered into EVERY request container regardless of

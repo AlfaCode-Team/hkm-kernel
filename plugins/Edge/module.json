@@ -1,0 +1,32 @@
+{
+    "name": "edge",
+    "version": "1.0.0",
+    "solves": "edge.routing",
+    "type": "module",
+
+    "requires": [],
+    "exposes": ["Plugins\\Edge\\API\\Contracts\\EdgeServiceContract"],
+
+    "routes": [],
+    "emits": [],
+    "listens": [],
+
+    "config": [
+        { "key": "EDGE_LISTEN_PORT",       "type": "int",    "required": false },
+        { "key": "EDGE_NGINX_BACKEND",     "type": "string", "required": false },
+        { "key": "EDGE_APACHE_BACKEND",    "type": "string", "required": false },
+        { "key": "EDGE_APP_BACKEND",       "type": "string", "required": false },
+        { "key": "EDGE_SSL_CERT",          "type": "string", "required": false },
+        { "key": "EDGE_SSL_KEY",           "type": "string", "required": false },
+        { "key": "EDGE_STREAM_PATH",       "type": "string", "required": false },
+        { "key": "EDGE_NGINX_PATH",        "type": "string", "required": false },
+        { "key": "EDGE_APACHE_PATH",       "type": "string", "required": false },
+        { "key": "EDGE_RELOAD",            "type": "bool",   "required": false },
+        { "key": "EDGE_EXTRA_DOMAINS",     "type": "string", "required": false },
+        { "key": "EDGE_EXCLUDE_DOMAINS",   "type": "string", "required": false },
+        { "key": "EDGE_NGINX_TEST_CMD",    "type": "string", "required": false },
+        { "key": "EDGE_NGINX_RELOAD_CMD",  "type": "string", "required": false },
+        { "key": "EDGE_APACHE_TEST_CMD",   "type": "string", "required": false },
+        { "key": "EDGE_APACHE_RELOAD_CMD", "type": "string", "required": false }
+    ]
+}
