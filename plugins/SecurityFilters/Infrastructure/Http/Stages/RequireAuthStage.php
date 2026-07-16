@@ -47,18 +47,24 @@ final class RequireAuthStage implements HttpStageContract
         if ($identity === null || $identity->isGuest()) {
             // A browser navigating to a protected PAGE should land on the login
             // page (the natural "page" for an auth-required error), not a raw
-            // JSON body. This covers BOTH a full page load and a Pageflow SPA
-            // navigation: Pageflow requests carry the X-Pageflow header and,
-            // though they are XHR (so expectsJson() is true), the Pageflow
-            // client follows a 302 as a client-side visit — so we must redirect
-            // them, not answer with JSON. Only a genuine API/fetch caller (JSON
-            // expected AND no X-Pageflow header) keeps the machine-readable 401.
-            // The originally-requested path rides along as ?redirectTo so login
-            // can bounce the user back (Auth guards it — same-origin/relative).
+            // JSON body. We redirect ONLY genuine page navigations:
+            //   • a Pageflow SPA navigation — carries the X-Pageflow header and,
+            //     though XHR (expectsJson() true), the client follows a 302 as a
+            //     client-side visit; OR
+            //   • a full browser page load — advertises `Accept: text/html` and
+            //     does NOT expect JSON.
+            // Everything else (API/fetch/XHR, or a header-less/programmatic
+            // request) keeps the machine-readable 401. The requested path rides
+            // along as ?redirectTo so login can bounce back (Auth guards it —
+            // same-origin/relative only).
             $isPageflow = (string) ($request->header('X-Pageflow') ?? '') !== '';
+            $wantsHtml  = str_contains(strtolower((string) ($request->header('Accept') ?? '')), 'text/html');
 
-            if ($isPageflow || !$request->expectsJson()) {
-                $query  = $request->uri()->getQuery();
+            if ($isPageflow || ($wantsHtml && !$request->expectsJson())) {
+                // Rebuild path + query from the query bag (never $request->uri(),
+                // which requires a host and throws on host-less requests).
+                $params = $request->queryAll();
+                $query  = $params !== [] ? http_build_query($params) : '';
                 $target = $request->path() . ($query !== '' ? '?' . $query : '');
 
                 return Response::redirect('/login?redirectTo=' . rawurlencode($target));
