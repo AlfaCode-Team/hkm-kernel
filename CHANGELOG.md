@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.15] - 2026-07-17
+
+### Fixed
+- **Edge now serves local (`.local`/`.test`) domains in dev.** The
+  `EDGE_LOCAL_IN_SERVER` flag was defined but never read, so a project whose
+  domains are all local rendered an empty vhost (header comment only). Dev mode
+  (`hkm … --dev`, which exports `HKM_DEV=1`) now folds local domains into the
+  generated nginx/Apache vhost automatically — `hkm cli -p <project> --dev
+  edge:apply` produces a working local site with no extra flag. A production
+  (non `--dev`) run still keeps local domains out of the server config (they
+  resolve through DNS); `EDGE_LOCAL_IN_SERVER=true` forces local-in-server
+  outside dev. Local domains continue to sync to `/etc/hosts` in both cases.
+
 ## [1.0.13] - 2026-07-17
 
 ### Added
