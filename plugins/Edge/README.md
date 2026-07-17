@@ -136,9 +136,13 @@ Domains are then **split**:
   # <<< HKM Edge (local domains) <<<
   ```
 
-Tune the local TLD set with `EDGE_LOCAL_TLDS`. Set `EDGE_LOCAL_IN_SERVER=true` if
-you also want nginx to serve `.local` sites locally (they then appear in BOTH the
-server config and `/etc/hosts`).
+Tune the local TLD set with `EDGE_LOCAL_TLDS`. **In dev mode (`hkm … --dev`, which
+exports `HKM_DEV=1`) the local domains are served by the vhost automatically** —
+they appear in BOTH the server config and `/etc/hosts` — so `hkm cli -p <p> --dev
+edge:apply` gives you a working local nginx/Apache site with no extra flag. A
+production (non `--dev`) run keeps them OUT of the server config (public domains
+resolve through DNS); set `EDGE_LOCAL_IN_SERVER=true` to force local-in-server
+outside dev too.
 
 ### `/etc/hosts` rules — dev only, never duplicates
 

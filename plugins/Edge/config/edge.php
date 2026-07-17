@@ -90,8 +90,11 @@ return [
         'ip'   => (string) (env('EDGE_HOSTS_IP') ?: '127.0.0.1'),
     ],
 
-    // Set true to ALSO include local domains in the generated server config
-    // (e.g. when nginx serves your .local sites in local development).
+    // Also include local (.local/.test) domains in the generated server config.
+    // Dev mode (`hkm … --dev`, which exports HKM_DEV=1) turns this ON automatically
+    // so nginx/Apache serves your .local sites locally; set this true to force it
+    // outside dev too. A production (non --dev) run leaves it off — public domains
+    // resolve through DNS. Local domains are written to /etc/hosts regardless.
     'include_local_in_server' => filter_var(env('EDGE_LOCAL_IN_SERVER', 'false'), FILTER_VALIDATE_BOOL),
 
     // How each project is served (per-project override via proj.json "edge").

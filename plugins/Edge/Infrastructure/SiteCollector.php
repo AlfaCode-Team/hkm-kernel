@@ -87,10 +87,19 @@ final class SiteCollector
         $edge  = (array) ($this->projJson($path)['edge'] ?? []);
         $model = ServeModel::from_((string) ($edge['serve'] ?? edge_config('serve.model', 'fpm')));
 
+        // In dev mode (`hkm … --dev` → HKM_DEV=1) — or when EDGE_LOCAL_IN_SERVER
+        // is forced — the local (.local/.test) domains are ALSO served by the
+        // vhost, not just written to /etc/hosts. A production run keeps them out
+        // (public domains resolve through DNS). Local domains still feed /etc/hosts
+        // in both cases, so the loopback mapping is present for the served vhost.
+        $public = $this->serveLocalInServer()
+            ? array_values(array_unique([...$cls['public'], ...$cls['local']]))
+            : $cls['public'];
+
         return new Site(
             name:          $name,
             docroot:       $path . '/app/public',
-            publicDomains: $cls['public'],
+            publicDomains: $public,
             localDomains:  $cls['local'],
             model:         $model,
             upstream:      $this->upstream($model, $edge),
@@ -125,6 +134,21 @@ final class SiteCollector
     }
 
     // ── serving + env ───────────────────────────────────────────────────────
+
+    /**
+     * Should local (.local/.test) domains be served by the vhost — not just
+     * written to /etc/hosts? True in dev mode (the launcher exports HKM_DEV=1 for
+     * `--dev`) or when EDGE_LOCAL_IN_SERVER is explicitly forced. False for a
+     * production run, where public domains resolve through DNS.
+     */
+    private function serveLocalInServer(): bool
+    {
+        if (filter_var(\env('HKM_DEV', 'false'), FILTER_VALIDATE_BOOL)) {
+            return true;
+        }
+
+        return (bool) edge_config('include_local_in_server', false);
+    }
 
     /** @param array<string, mixed> $edge */
     private function upstream(ServeModel $model, array $edge): string
