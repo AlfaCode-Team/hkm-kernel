@@ -1,0 +1,74 @@
+name: Auto Release
+
+# When work lands on main, read the top CHANGELOG version and, if it has no
+# matching tag yet, create the tag `vX.Y.Z` and run the Release build for it.
+#
+# No PAT required: instead of relying on the tag push to trigger release.yml
+# (GitHub blocks workflow-triggering-workflow with the default token), this
+# workflow CALLS release.yml directly via workflow_call, passing the version.
+
+"on":
+  push:
+    branches:
+      - main
+    paths:
+      - CHANGELOG.md            # only a version bump can start a release
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect new version
+    runs-on: ubuntu-22.04
+    outputs:
+      release: ${{ steps.ver.outputs.release }}
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }        # need all tags
+
+      - name: Read top CHANGELOG version
+        id: ver
+        run: |
+          # First "## [x.y.z]" heading — skips "## [Unreleased]".
+          VERSION="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md \
+                     | tr -d '## []')"
+          if [ -z "$VERSION" ]; then
+            echo "No versioned CHANGELOG entry found — nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists — skipping."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version detected: v$VERSION"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.ver.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+
+  # Build + publish, reusing the single source of truth in release.yml.
+  release:
+    name: Build & publish
+    needs: detect
+    if: needs.detect.outputs.release == 'true'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.detect.outputs.version }}

@@ -1,0 +1,153 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Plugins\Edge\Infrastructure;
+
+use Plugins\Edge\Domain\ServerStack;
+
+/**
+ * Talks to the operating system (the "vendor" here is the host itself): detects
+ * which web servers are installed/active and whether nginx has the stream
+ * module, and runs validate/reload commands. All shell access is funnelled
+ * through run() so nothing else in the plugin shells out directly.
+ */
+final class SystemProbe
+{
+    /** Probe the host and build an immutable ServerStack snapshot. */
+    public function detect(): ServerStack
+    {
+        $nginxInstalled  = $this->which('nginx');
+        $apacheInstalled = $this->which('apache2') || $this->which('httpd') || $this->which('apachectl');
+
+        return new ServerStack(
+            nginxInstalled:  $nginxInstalled,
+            nginxActive:     $this->active('nginx'),
+            nginxHasStream:  $nginxInstalled && $this->nginxHasStream(),
+            apacheInstalled: $apacheInstalled,
+            apacheActive:    $this->active('apache2') || $this->active('httpd'),
+        );
+    }
+
+    /** The PHP version running THIS command, e.g. "8.4". */
+    public function phpCliVersion(): string
+    {
+        return PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+    }
+
+    /**
+     * Resolve the PHP-FPM upstream that matches the CLI PHP version running the
+     * command, so a multi-PHP host binds the vhost to the RIGHT pool:
+     *   1. the versioned socket for the CLI version (Debian/Ubuntu naming),
+     *   2. any versioned socket present — the exact version, else the newest,
+     *   3. a generic/unversioned socket (RHEL, custom),
+     *   4. a TCP fallback (127.0.0.1:9000, common in containers).
+     */
+    public function phpFpmSocket(): string
+    {
+        $ver = $this->phpCliVersion();
+
+        foreach (["/run/php/php{$ver}-fpm.sock", "/var/run/php/php{$ver}-fpm.sock"] as $sock) {
+            if (@file_exists($sock)) {
+                return "unix:{$sock}";
+            }
+        }
+
+        $socks = array_merge(glob('/run/php/php*-fpm.sock') ?: [], glob('/var/run/php/php*-fpm.sock') ?: []);
+        if ($socks !== []) {
+            // exact CLI version wins; otherwise the newest available pool.
+            usort($socks, fn (string $a, string $b): int => version_compare($this->sockVersion($b), $this->sockVersion($a)));
+            foreach ($socks as $s) {
+                if ($this->sockVersion($s) === $ver) {
+                    return "unix:{$s}";
+                }
+            }
+            return "unix:{$socks[0]}";
+        }
+
+        foreach (['/run/php-fpm/www.sock', '/var/run/php-fpm/www.sock', '/run/php/php-fpm.sock'] as $sock) {
+            if (@file_exists($sock)) {
+                return "unix:{$sock}";
+            }
+        }
+
+        return '127.0.0.1:9000';
+    }
+
+    /** Which php*-fpm services systemd reports as active (best-effort, for status). */
+    public function phpFpmActive(): array
+    {
+        [$code, $out] = $this->run("systemctl list-units --type=service --state=active --no-legend 'php*-fpm*.service'");
+        if ($code !== 0 || trim($out) === '') {
+            return [];
+        }
+        $names = [];
+        foreach (explode("\n", trim($out)) as $line) {
+            if (preg_match('/(php[0-9.]*-fpm[^\s]*)\.service/', $line, $m)) {
+                $names[] = $m[1];
+            }
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    private function sockVersion(string $path): string
+    {
+        return preg_match('/php(\d+\.\d+)-fpm\.sock$/', $path, $m) ? $m[1] : '0';
+    }
+
+    /** Run an arbitrary command; returns [exitCode, combinedOutput]. */
+    public function run(string $command): array
+    {
+        $output = [];
+        $code   = 0;
+        @exec($command . ' 2>&1', $output, $code);
+
+        return [$code, implode("\n", $output)];
+    }
+
+    private function which(string $binary): bool
+    {
+        [$code] = $this->run('command -v ' . escapeshellarg($binary));
+
+        return $code === 0;
+    }
+
+    /**
+     * Is a service active? Prefer systemd; fall back to a process match so it
+     * still works on non-systemd hosts / inside containers.
+     */
+    private function active(string $service): bool
+    {
+        [$code, $out] = $this->run('systemctl is-active ' . escapeshellarg($service));
+        if ($code === 0 && trim($out) === 'active') {
+            return true;
+        }
+
+        [$pcode] = $this->run('pgrep -x ' . escapeshellarg($service));
+
+        return $pcode === 0;
+    }
+
+    /** Does the installed nginx support the stream (L4) module? */
+    private function nginxHasStream(): bool
+    {
+        [, $banner] = $this->run('nginx -V');
+        if (str_contains($banner, '--with-stream')) {
+            return true;
+        }
+
+        // Dynamic module shipped separately (Debian/RHEL common paths).
+        foreach ([
+            '/usr/lib/nginx/modules/ngx_stream_module.so',
+            '/usr/lib64/nginx/modules/ngx_stream_module.so',
+            '/etc/nginx/modules/ngx_stream_module.so',
+        ] as $path) {
+            if (is_file($path)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

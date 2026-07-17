@@ -479,6 +479,27 @@ VERSION=1.2.3 ./tools/bundle.sh all         # .deb + macOS .app + Windows .zip �
 Releases are cut by pushing a `v*` tag — CI runs the test suite first, then builds all three
 OS bundles and publishes them automatically.
 
+### Releasing (branch model + automation)
+
+Development happens on the **`master`** dev branch; **`main`** is the stable release branch.
+Releases are **CHANGELOG-driven and automatic** — you never tag by hand.
+
+1. Do your work on `master` and commit.
+2. Add a new `## [x.y.z] - YYYY-MM-DD` section to [`CHANGELOG.md`](CHANGELOG.md)
+   (below `## [Unreleased]`), describing the changes.
+3. Open a PR `master` → `main` and merge it.
+4. On merge, the **Auto Release** workflow ([`.github/workflows/auto-release.yml`](.github/workflows/auto-release.yml))
+   reads the top CHANGELOG version and, if no `vX.Y.Z` tag exists yet, creates the tag and
+   calls the **Release** workflow — which runs the test gate, builds all OS bundles, and
+   publishes the GitHub Release (notes pulled from that CHANGELOG section).
+
+Notes:
+- A release only starts when the merge changes `CHANGELOG.md` **and** introduces a version
+  not already tagged — ordinary merges don't publish anything.
+- No secret/PAT is required: Auto Release invokes the Release workflow directly via
+  `workflow_call`.
+- You can still cut a release manually at any time by pushing a `v*` tag.
+
 For deep dives, see the layer guides in [`docs/ai-context/`](docs/) and the
 [CHANGELOG](CHANGELOG.md).
 

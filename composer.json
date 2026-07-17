@@ -71,7 +71,8 @@
             "plugins/Auth/Support/helpers.php",
             "plugins/Authorization/Engine/functions.php",
             "plugins/Cookie/Support/helpers.php",
-            "plugins/Pageflow/Support/helpers.php"
+            "plugins/Pageflow/Support/helpers.php",
+            "plugins/Edge/Support/helpers.php"
         ],
         "exclude-from-classmap": [
             "**/database/seeders/**",
