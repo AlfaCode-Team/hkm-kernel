@@ -52,7 +52,7 @@ final class EdgeApplyCommand extends AbstractCommand
         }
 
         if ($dryRun) {
-            $this->info('strategy: ' . $result['strategy'] . '  →  ' . $result['path'] . '  (' . $result['domains'] . ' domains)');
+            $this->info('strategy: ' . $result['strategy'] . '  →  ' . $result['path'] . '  (' . ($result['sites'] ?? 0) . ' site(s))');
             $this->newLine();
             $this->muted($result['contents']);
 

@@ -4,52 +4,58 @@ declare(strict_types=1);
 
 namespace Plugins\Edge\Infrastructure;
 
+use Plugins\Edge\Domain\ServeModel;
+use Plugins\Edge\Domain\Site;
 use Plugins\Edge\Domain\Strategy;
 
 /**
- * Pure config renderer — no I/O, no globals beyond edge_config(). Turns a
- * strategy + domain list into the text of an nginx stream router, an nginx
- * reverse-proxy vhost, or an Apache SSL VirtualHost.
+ * Pure config renderer — no I/O. Turns a strategy + the list of Sites into the
+ * text of the host's web-server config: a per-project vhost (docroot
+ * <project>/app/public, FPM fastcgi or Swoole proxy, with the run-env injected)
+ * modeled on templates/app/{nginx,apache}.conf.example, plus — for the stream
+ * strategy — the nginx SNI splitter that routes SNI → nginx (:444) / Apache.
  */
 final class ConfigRenderer
 {
     /**
-     * @param list<string> $domains
+     * @param list<Site> $sites
      * @return array{0: string, 1: string} [targetPath, contents] ('' path for None)
      */
-    public function render(Strategy $strategy, array $domains): array
+    public function render(Strategy $strategy, array $sites): array
     {
         return match ($strategy) {
-            Strategy::NginxStream => [(string) edge_config('paths.stream'), $this->stream($domains)],
-            Strategy::NginxOnly   => [(string) edge_config('paths.nginx'),  $this->nginx($domains)],
-            Strategy::ApacheOnly  => [(string) edge_config('paths.apache'), $this->apache($domains)],
-            Strategy::None        => ['', ''],
+            Strategy::NginxStream => [
+                (string) edge_config('paths.stream'),
+                $this->stream($sites) . "\n" . $this->nginxVhosts($sites, $this->nginxInternalPort()),
+            ],
+            Strategy::NginxOnly => [
+                (string) edge_config('paths.nginx'),
+                $this->nginxVhosts($sites, (int) edge_config('listen', 443)),
+            ],
+            Strategy::ApacheOnly => [
+                (string) edge_config('paths.apache'),
+                $this->apacheVhosts($sites, (int) edge_config('listen', 443)),
+            ],
+            Strategy::None => ['', ''],
         };
     }
 
-    /** nginx SNI (L4) stream splitter: listed domains → nginx, default → Apache. */
-    private function stream(array $domains): string
-    {
-        $nginx  = (string) edge_config('upstreams.nginx');
-        $apache = (string) edge_config('upstreams.apache');
-        $listen = (int) edge_config('listen', 443);
+    // ── nginx SNI stream splitter (L4) ────────────────────────────────────────
 
+    /** @param list<Site> $sites */
+    private function stream(array $sites): string
+    {
         $map = '';
-        foreach ($domains as $d) {
+        foreach ($this->publicDomains($sites) as $d) {
             $pad = str_repeat(' ', max(1, 42 - strlen($d)));
             $map .= "        {$d}{$pad}nginx_backend;\n";
         }
 
         $tpl = <<<'NGINX'
 # Managed by the HKM Edge plugin (`hkm edge:apply`). Do NOT edit by hand.
-#
-# SNI TLS router: the ClientHello's server name is read WITHOUT decrypting
-# (ssl_preread), then the raw TLS stream is forwarded to the matching backend.
-# Listed platform domains go to nginx (%NGINX%); everything else falls back to
-# Apache (%APACHE%). TLS is terminated by the chosen backend, not here.
-#
-# This block MUST live at the nginx MAIN context (top level of nginx.conf),
-# NOT inside http{}. Include it from nginx.conf:  include %SELF%;
+# SNI TLS router: server name is read WITHOUT decrypting (ssl_preread), then the
+# raw TLS stream is forwarded. Platform domains → nginx (%NGINX%); everything
+# else → Apache (%APACHE%). This block lives at the nginx MAIN context.
 stream {
     upstream nginx_backend { server %NGINX%; }
     upstream apache_ssl    { server %APACHE%; }
@@ -67,30 +73,91 @@ stream {
 NGINX;
 
         return $this->fill($tpl, [
-            '%NGINX%'  => $nginx,
-            '%APACHE%' => $apache,
-            '%LISTEN%' => (string) $listen,
+            '%NGINX%'  => (string) edge_config('upstreams.nginx'),
+            '%APACHE%' => (string) edge_config('upstreams.apache'),
+            '%LISTEN%' => (string) (int) edge_config('listen', 443),
             '%MAP%'    => $map,
-            '%SELF%'   => (string) edge_config('paths.stream'),
         ]);
     }
 
-    /** Plain nginx reverse-proxy vhost (no Apache present, no stream layer). */
-    private function nginx(array $domains): string
+    // ── per-project nginx vhosts ──────────────────────────────────────────────
+
+    /** @param list<Site> $sites */
+    private function nginxVhosts(array $sites, int $port): string
     {
-        $app    = (string) edge_config('upstreams.app');
-        $cert   = (string) edge_config('ssl.cert');
-        $key    = (string) edge_config('ssl.key');
-        $names  = $domains === [] ? '_' : implode(' ', $domains);
+        $out = "# Managed by the HKM Edge plugin (`hkm edge:apply`). Do NOT edit by hand.\n";
+        foreach ($sites as $site) {
+            if (!$site->servesPublic()) {
+                continue;
+            }
+            $out .= "\n" . ($site->model === ServeModel::Swoole
+                ? $this->nginxSwoole($site, $port)
+                : $this->nginxFpm($site, $port));
+        }
+
+        return rtrim($out, "\n") . "\n";
+    }
+
+    private function nginxFpm(Site $site, int $port): string
+    {
+        $params = '';
+        foreach ($site->env as $k => $v) {
+            $params .= sprintf("            fastcgi_param %s \"%s\";\n", $k, $this->escapeNginx($v));
+        }
 
         $tpl = <<<'NGINX'
-# Managed by the HKM Edge plugin (`hkm edge:apply`). Do NOT edit by hand.
-# nginx-only: no Apache on this host. nginx terminates TLS and reverse-proxies
-# every platform domain to the application backend (%APP%).
-upstream hkm_app_backend { server %APP%; }
-
+# Project: %NAME% (PHP-FPM)
 server {
-    listen %LISTEN% ssl;
+    listen %PORT% ssl;
+    http2 on;
+    server_name %NAMES%;
+
+    root %DOCROOT%;
+    index index.php;
+
+    ssl_certificate     %CERT%;
+    ssl_certificate_key %KEY%;
+
+    location ~ /\. { deny all; return 404; }
+
+    location ~ \.php$ {
+        location = /index.php {
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+%PARAMS%            fastcgi_pass %UPSTREAM%;
+        }
+        return 404;
+    }
+
+    location / { try_files $uri /index.php$is_args$args; }
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    server_tokens off;
+    client_max_body_size 25m;
+}
+NGINX;
+
+        return $this->fill($tpl, [
+            '%NAME%'     => $site->name,
+            '%PORT%'     => (string) $port,
+            '%NAMES%'    => implode(' ', $site->publicDomains),
+            '%DOCROOT%'  => $site->docroot,
+            '%CERT%'     => (string) edge_config('ssl.cert'),
+            '%KEY%'      => (string) edge_config('ssl.key'),
+            '%PARAMS%'   => $params,
+            '%UPSTREAM%' => $site->upstream,
+        ]);
+    }
+
+    private function nginxSwoole(Site $site, int $port): string
+    {
+        $tpl = <<<'NGINX'
+# Project: %NAME% (OpenSwoole) — env lives in the Swoole process:
+#   hkm run %NAME% --swoole   (bind it to %UPSTREAM%)
+server {
+    listen %PORT% ssl;
     http2 on;
     server_name %NAMES%;
 
@@ -98,7 +165,7 @@ server {
     ssl_certificate_key %KEY%;
 
     location / {
-        proxy_pass http://hkm_app_backend;
+        proxy_pass http://%UPSTREAM%;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
@@ -111,53 +178,126 @@ server {
 NGINX;
 
         return $this->fill($tpl, [
-            '%APP%'    => $app,
-            '%LISTEN%' => (string) (int) edge_config('listen', 443),
-            '%NAMES%'  => $names,
-            '%CERT%'   => $cert,
-            '%KEY%'    => $key,
+            '%NAME%'     => $site->name,
+            '%PORT%'     => (string) $port,
+            '%NAMES%'    => implode(' ', $site->publicDomains),
+            '%CERT%'     => (string) edge_config('ssl.cert'),
+            '%KEY%'      => (string) edge_config('ssl.key'),
+            '%UPSTREAM%' => $site->upstream,
         ]);
     }
 
-    /** Apache SSL VirtualHost (Apache is the active server). */
-    private function apache(array $domains): string
-    {
-        $app  = (string) edge_config('upstreams.app');
-        $cert = (string) edge_config('ssl.cert');
-        $key  = (string) edge_config('ssl.key');
+    // ── per-project Apache vhosts ─────────────────────────────────────────────
 
-        $primary = $domains[0] ?? '_';
+    /** @param list<Site> $sites */
+    private function apacheVhosts(array $sites, int $port): string
+    {
+        $out = "# Managed by the HKM Edge plugin (`hkm edge:apply`). Do NOT edit by hand.\n";
+        foreach ($sites as $site) {
+            if (!$site->servesPublic()) {
+                continue;
+            }
+            $out .= "\n" . $this->apacheSite($site, $port);
+        }
+
+        return rtrim($out, "\n") . "\n";
+    }
+
+    private function apacheSite(Site $site, int $port): string
+    {
         $aliases = '';
-        foreach (array_slice($domains, 1) as $d) {
+        foreach (array_slice($site->publicDomains, 1) as $d) {
             $aliases .= "    ServerAlias {$d}\n";
+        }
+        $setenv = '';
+        foreach ($site->env as $k => $v) {
+            $setenv .= sprintf("    SetEnv %s \"%s\"\n", $k, $this->escapeApache($v));
+        }
+
+        // PHP handler: FPM via mod_proxy_fcgi, or reverse-proxy for Swoole.
+        if ($site->model === ServeModel::Swoole) {
+            $handler = "    ProxyPreserveHost On\n    ProxyPass        / http://{$site->upstream}/\n    ProxyPassReverse / http://{$site->upstream}/";
+        } else {
+            $fcgi = str_starts_with($site->upstream, 'unix:')
+                ? 'proxy:' . $site->upstream . '|fcgi://localhost/'
+                : 'proxy:fcgi://' . $site->upstream;
+            $handler = "    <FilesMatch \"\\.php$\">\n        SetHandler \"{$fcgi}\"\n    </FilesMatch>";
         }
 
         $tpl = <<<'APACHE'
-# Managed by the HKM Edge plugin (`hkm edge:apply`). Do NOT edit by hand.
-# Apache-only: Apache terminates TLS and reverse-proxies every platform domain
-# to the application backend (%APP%).
-<VirtualHost *:%LISTEN%>
+# Project: %NAME%
+<VirtualHost *:%PORT%>
     ServerName %PRIMARY%
-%ALIASES%
+%ALIASES%    DocumentRoot %DOCROOT%
+
+    <Directory %DOCROOT%>
+        AllowOverride All
+        Require all granted
+        Options -Indexes +FollowSymLinks
+    </Directory>
+    <DirectoryMatch "/\.">
+        Require all denied
+    </DirectoryMatch>
+
     SSLEngine on
     SSLCertificateFile    %CERT%
     SSLCertificateKeyFile %KEY%
 
-    ProxyPreserveHost On
-    ProxyPass        / http://%APP%/
-    ProxyPassReverse / http://%APP%/
-    RequestHeader set X-Forwarded-Proto "https"
+%SETENV%%HANDLER%
+
+    ServerTokens Prod
+    ServerSignature Off
+    LimitRequestBody 26214400
 </VirtualHost>
 APACHE;
 
         return $this->fill($tpl, [
-            '%APP%'     => $app,
-            '%LISTEN%'  => (string) (int) edge_config('listen', 443),
-            '%PRIMARY%' => $primary,
-            '%ALIASES%' => rtrim($aliases, "\n"),
-            '%CERT%'    => $cert,
-            '%KEY%'     => $key,
+            '%NAME%'    => $site->name,
+            '%PORT%'    => (string) $port,
+            '%PRIMARY%' => $site->publicDomains[0] ?? '_',
+            '%ALIASES%' => $aliases,
+            '%DOCROOT%' => $site->docroot,
+            '%CERT%'    => (string) edge_config('ssl.cert'),
+            '%KEY%'     => (string) edge_config('ssl.key'),
+            '%SETENV%'  => $setenv,
+            '%HANDLER%' => $handler,
         ]);
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    /** @param list<Site> $sites @return list<string> */
+    private function publicDomains(array $sites): array
+    {
+        $domains = [];
+        foreach ($sites as $site) {
+            foreach ($site->publicDomains as $d) {
+                $domains[] = $d;
+            }
+        }
+        $domains = array_values(array_unique($domains));
+        sort($domains);
+
+        return $domains;
+    }
+
+    /** The internal port nginx vhosts listen on when behind the stream splitter. */
+    private function nginxInternalPort(): int
+    {
+        $backend = (string) edge_config('upstreams.nginx', '127.0.0.1:444');
+        $port    = (int) substr(strrchr($backend, ':') ?: ':444', 1);
+
+        return $port > 0 ? $port : 444;
+    }
+
+    private function escapeNginx(string $v): string
+    {
+        return str_replace(['\\', '"'], ['\\\\', '\\"'], $v);
+    }
+
+    private function escapeApache(string $v): string
+    {
+        return str_replace('"', '\\"', $v);
     }
 
     /** @param array<string, string> $vars */

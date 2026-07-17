@@ -32,6 +32,12 @@
         { "key": "EDGE_MANAGE_HOSTS",      "type": "bool",   "required": false },
         { "key": "EDGE_HOSTS_PATH",        "type": "string", "required": false },
         { "key": "EDGE_HOSTS_IP",          "type": "string", "required": false },
-        { "key": "EDGE_LOCAL_IN_SERVER",   "type": "bool",   "required": false }
+        { "key": "EDGE_LOCAL_IN_SERVER",   "type": "bool",   "required": false },
+        { "key": "EDGE_SERVE_MODEL",       "type": "string", "required": false },
+        { "key": "EDGE_FPM_SOCKET",        "type": "string", "required": false },
+        { "key": "EDGE_SWOOLE_HOST",       "type": "string", "required": false },
+        { "key": "EDGE_SWOOLE_BASE_PORT",  "type": "int",    "required": false },
+        { "key": "EDGE_INJECT_KERNEL_ENV", "type": "bool",   "required": false },
+        { "key": "EDGE_APP_ENV",           "type": "string", "required": false }
     ]
 }

@@ -24,7 +24,7 @@ interface EdgeServiceContract
      * (optionally) validate + reload the server.
      *
      * @return array{
-     *   ok: bool, strategy: string, path?: string, domains?: int,
+     *   ok: bool, strategy: string, path?: string, sites?: int,
      *   dry_run?: bool, contents?: string, steps?: list<string>,
      *   hosts?: array<string, mixed>|null, message?: string
      * }

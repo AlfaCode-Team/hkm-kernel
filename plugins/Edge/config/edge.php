@@ -93,4 +93,25 @@ return [
     // Set true to ALSO include local domains in the generated server config
     // (e.g. when nginx serves your .local sites in local development).
     'include_local_in_server' => filter_var(env('EDGE_LOCAL_IN_SERVER', 'false'), FILTER_VALIDATE_BOOL),
+
+    // How each project is served (per-project override via proj.json "edge").
+    'serve' => [
+        'model'            => (string) (env('EDGE_SERVE_MODEL') ?: 'fpm'),   // fpm | swoole
+        'fpm_socket'       => (string) (env('EDGE_FPM_SOCKET') ?: 'unix:/run/php/php-fpm.sock'),
+        'swoole_host'      => (string) (env('EDGE_SWOOLE_HOST') ?: '127.0.0.1'),
+        'swoole_base_port' => (int) (env('EDGE_SWOOLE_BASE_PORT') ?: 9500),
+    ],
+
+    // Inject the kernel-resolution env (PSP_GLOBAL_AUTOLOAD / HKM_KERNEL_HOME)
+    // into each vhost so FPM workers boot against the correct kernel.
+    'inject_kernel_env' => filter_var(env('EDGE_INJECT_KERNEL_ENV', 'true'), FILTER_VALIDATE_BOOL),
+
+    // Base run-env written into every generated vhost. Per-project proj.json
+    // "edge": { "env": { … } } extras override these.
+    'env' => [
+        'app_env'         => (string) (env('EDGE_APP_ENV') ?: env('APP_ENV') ?: 'production'),
+        'userdata_dir'    => (string) env('HKM_USERDATA_DIR', ''),
+        'global_autoload' => (string) env('PSP_GLOBAL_AUTOLOAD', ''),
+        'kernel_home'     => (string) env('HKM_KERNEL_HOME', ''),
+    ],
 ];

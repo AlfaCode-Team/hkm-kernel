@@ -40,7 +40,16 @@ final class EdgeStatusCommand extends AbstractCommand
         $this->info('apache active   : ' . $yn($stack->apacheActive));
         $this->newLine();
         $this->success('strategy: ' . $plan->strategy->label());
-        $this->info('server domains : ' . count($plan->domains) . ($plan->domains === [] ? '' : ' (' . implode(', ', $plan->domains) . ')'));
+        $this->info('project sites  : ' . count($plan->sites));
+        foreach ($plan->sites as $site) {
+            $this->info(sprintf(
+                '  • %s [%s → %s]  %s',
+                $site->name,
+                $site->model->value,
+                $site->upstream,
+                $site->publicDomains === [] ? '(no public domains)' : implode(', ', $site->publicDomains),
+            ));
+        }
         $this->info('local domains  : ' . count($plan->localDomains) . ($plan->localDomains === [] ? '' : ' → /etc/hosts (' . implode(', ', $plan->localDomains) . ')'));
         $this->info('target         : ' . ($plan->targetPath === '' ? '(none)' : $plan->targetPath));
 

@@ -61,6 +61,37 @@ hkm edge:hosts --dry-run     # show the hosts block that would be written
 hkm edge:hosts --remove      # remove the HKM-managed hosts block
 ```
 
+## Per-project serving (the vhost model)
+
+Edge is **project-aware**: it reads the global registry (`projects.json` →
+name/path/domains) and renders **one vhost per project**, with:
+
+- **docroot = `<project path>/app/public`** (never the project root — keeps
+  `.env`/config/src/vendor out of the web tree), modeled on
+  `templates/app/{nginx,apache}.conf.example`;
+- the **run-env injected** so the served project boots: `APP_ENV`,
+  `HKM_USERDATA_DIR`, and (when `EDGE_INJECT_KERNEL_ENV=true`) `HKM_KERNEL_HOME`
+  + `PSP_GLOBAL_AUTOLOAD` — as `fastcgi_param` (nginx FPM) / `SetEnv` (Apache);
+- a **serve model** per project: `fpm` (fastcgi to PHP-FPM) or `swoole`
+  (reverse-proxy to the project's OpenSwoole port).
+
+Each project may override the model + upstream + extra env in its **`proj.json`**:
+
+```jsonc
+{
+  "name": "shop",
+  "edge": {
+    "serve":  "swoole",          // or "fpm"
+    "port":   9601,              // swoole upstream port
+    "socket": "unix:/run/php/php8.4-fpm.sock",  // fpm socket (fpm model)
+    "env":    { "APP_ENV": "production", "SHOP_FLAG": "1" }   // per-project extras
+  }
+}
+```
+
+Defaults come from `EDGE_SERVE_MODEL` / `EDGE_FPM_SOCKET` /
+`EDGE_SWOOLE_HOST` / `EDGE_SWOOLE_BASE_PORT`.
+
 ## Domains — public vs local
 
 Collected automatically from `projects/projects.json` (each project's
@@ -106,6 +137,11 @@ server config and `/etc/hosts`).
 | `EDGE_MANAGE_HOSTS` | `true` | write local domains to /etc/hosts on apply |
 | `EDGE_HOSTS_PATH` / `EDGE_HOSTS_IP` | `/etc/hosts` / `127.0.0.1` | hosts file + loopback target |
 | `EDGE_LOCAL_IN_SERVER` | `false` | also include local domains in the server config |
+| `EDGE_SERVE_MODEL` | `fpm` | default serve model (`fpm` \| `swoole`); per-project override in `proj.json` |
+| `EDGE_FPM_SOCKET` | `unix:/run/php/php-fpm.sock` | default PHP-FPM socket/addr |
+| `EDGE_SWOOLE_HOST` / `EDGE_SWOOLE_BASE_PORT` | `127.0.0.1` / `9500` | Swoole upstream host + base port |
+| `EDGE_INJECT_KERNEL_ENV` | `true` | inject `PSP_GLOBAL_AUTOLOAD` + `HKM_KERNEL_HOME` into each vhost |
+| `EDGE_APP_ENV` | `APP_ENV` or `production` | `APP_ENV` written into each vhost |
 
 Defaults write to `var/edge/` so no root is needed to test; in production point
 `EDGE_*_PATH` at the real nginx/Apache include dirs and run `hkm` with the

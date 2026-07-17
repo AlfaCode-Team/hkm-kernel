@@ -9,8 +9,8 @@ use Plugins\Edge\Domain\EdgePlan;
 use Plugins\Edge\Domain\ServerStack;
 use Plugins\Edge\Domain\Strategy;
 use Plugins\Edge\Infrastructure\ConfigRenderer;
-use Plugins\Edge\Infrastructure\DomainCollector;
 use Plugins\Edge\Infrastructure\HostsFileWriter;
+use Plugins\Edge\Infrastructure\SiteCollector;
 use Plugins\Edge\Infrastructure\SystemProbe;
 
 /**
@@ -22,7 +22,7 @@ final class EdgeService implements EdgeServiceContract
 {
     public function __construct(
         private readonly SystemProbe $probe,
-        private readonly DomainCollector $domains,
+        private readonly SiteCollector $sites,
         private readonly ConfigRenderer $renderer,
         private readonly HostsFileWriter $hosts,
     ) {}
@@ -37,23 +37,19 @@ final class EdgeService implements EdgeServiceContract
         $stack    = $this->probe->detect();
         $strategy = $stack->strategy();
 
-        // Local domains (.local / .test / …) are dev-only — they go to /etc/hosts,
-        // NOT the public server config, unless EDGE_LOCAL_IN_SERVER is set.
-        $split         = $this->domains->split();
-        $serverDomains = (bool) edge_config('include_local_in_server', false)
-            ? array_values(array_unique([...$split['public'], ...$split['local']]))
-            : $split['public'];
-        sort($serverDomains);
+        // Per-project sites (public domains → server config); local (.local/.test)
+        // domains ride along on each site but go to /etc/hosts, not the config.
+        $sites = $this->sites->sites();
 
-        [$path, $body] = $this->renderer->render($strategy, $serverDomains);
+        [$path, $body] = $this->renderer->render($strategy, $sites);
 
-        return new EdgePlan($stack, $strategy, $serverDomains, $split['local'], $path, $body);
+        return new EdgePlan($stack, $strategy, $sites, $this->sites->localDomains(), $path, $body);
     }
 
     public function syncHosts(bool $remove = false, bool $dryRun = false): array
     {
         return $this->hosts->sync(
-            domains: $this->domains->split()['local'],
+            domains: $this->sites->localDomains(),
             ip:      (string) edge_config('hosts.ip', '127.0.0.1'),
             path:    (string) edge_config('hosts.path', '/etc/hosts'),
             remove:  $remove,
@@ -87,7 +83,7 @@ final class EdgeService implements EdgeServiceContract
                 'dry_run'  => true,
                 'strategy' => $plan->strategy->value,
                 'path'     => $plan->targetPath,
-                'domains'  => \count($plan->domains),
+                'sites'    => \count($plan->sites),
                 'contents' => $plan->contents,
                 'hosts'    => $hosts,
             ];
@@ -105,8 +101,8 @@ final class EdgeService implements EdgeServiceContract
             return ['ok' => false, 'strategy' => $plan->strategy->value, 'hosts' => $hosts, 'message' => "Failed to write {$plan->targetPath}"];
         }
 
-        $domainCount = \count($plan->domains);
-        $steps = ["wrote {$plan->targetPath} ({$domainCount} domains)"];
+        $siteCount = \count($plan->sites);
+        $steps = ["wrote {$plan->targetPath} ({$siteCount} project site(s))"];
 
         if ($reload) {
             $isApache = $plan->strategy === Strategy::ApacheOnly;
@@ -130,7 +126,7 @@ final class EdgeService implements EdgeServiceContract
             'ok'       => true,
             'strategy' => $plan->strategy->value,
             'path'     => $plan->targetPath,
-            'domains'  => \count($plan->domains),
+            'sites'    => \count($plan->sites),
             'steps'    => $steps,
             'hosts'    => $hosts,
         ];

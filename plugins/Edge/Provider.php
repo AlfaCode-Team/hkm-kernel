@@ -16,8 +16,8 @@ use Plugins\Edge\Infrastructure\Cli\EdgeApplyCommand;
 use Plugins\Edge\Infrastructure\Cli\EdgeHostsCommand;
 use Plugins\Edge\Infrastructure\Cli\EdgeStatusCommand;
 use Plugins\Edge\Infrastructure\ConfigRenderer;
-use Plugins\Edge\Infrastructure\DomainCollector;
 use Plugins\Edge\Infrastructure\HostsFileWriter;
+use Plugins\Edge\Infrastructure\SiteCollector;
 use Plugins\Edge\Infrastructure\SystemProbe;
 
 /**
@@ -69,7 +69,7 @@ final class Provider implements ModuleContract
     {
         return new EdgeService(
             new SystemProbe(),
-            new DomainCollector(),
+            new SiteCollector(),
             new ConfigRenderer(),
             new HostsFileWriter(),
         );
