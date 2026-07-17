@@ -145,7 +145,7 @@ server config and `/etc/hosts`).
 | `EDGE_HOSTS_PATH` / `EDGE_HOSTS_IP` | `/etc/hosts` / `127.0.0.1` | hosts file + loopback target |
 | `EDGE_LOCAL_IN_SERVER` | `false` | also include local domains in the server config |
 | `EDGE_SERVE_MODEL` | `fpm` | default serve model (`fpm` \| `swoole`); per-project override in `proj.json` |
-| `EDGE_FPM_SOCKET` | `unix:/run/php/php-fpm.sock` | default PHP-FPM socket/addr |
+| `EDGE_FPM_SOCKET` | *(auto)* | pin the FPM socket/addr; empty = auto-resolve the socket matching the CLI PHP version |
 | `EDGE_SWOOLE_HOST` / `EDGE_SWOOLE_BASE_PORT` | `127.0.0.1` / `9500` | Swoole upstream host + base port |
 | `EDGE_INJECT_KERNEL_ENV` | `true` | inject `PSP_GLOBAL_AUTOLOAD` + `HKM_KERNEL_HOME` into each vhost |
 | `EDGE_APP_ENV` | `APP_ENV` or `production` | `APP_ENV` written into each vhost |

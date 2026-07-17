@@ -40,6 +40,13 @@ final class EdgeStatusCommand extends AbstractCommand
         $this->info('nginx stream    : ' . $yn($stack->nginxHasStream));
         $this->info('apache installed: ' . $yn($stack->apacheInstalled));
         $this->info('apache active   : ' . $yn($stack->apacheActive));
+
+        $php = $this->edge->phpFpm();
+        $this->info('php (cli)       : ' . $php['version']);
+        $this->info('php-fpm socket  : ' . $php['socket']);
+        if ($php['active'] !== []) {
+            $this->info('php-fpm active  : ' . implode(', ', $php['active']));
+        }
         $this->newLine();
         $this->success('strategy: ' . $plan->strategy->label());
         $this->info('project sites  : ' . count($plan->sites));

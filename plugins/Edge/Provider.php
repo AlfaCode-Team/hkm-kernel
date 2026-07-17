@@ -67,9 +67,11 @@ final class Provider implements ModuleContract
 
     private static function service(): EdgeService
     {
+        $probe = new SystemProbe();
+
         return new EdgeService(
-            new SystemProbe(),
-            new SiteCollector(),
+            $probe,
+            new SiteCollector($probe),
             new ConfigRenderer(),
             new HostsFileWriter(),
         );

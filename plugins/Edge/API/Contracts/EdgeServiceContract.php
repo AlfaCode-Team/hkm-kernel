@@ -17,6 +17,13 @@ interface EdgeServiceContract
     public function detect(): ServerStack;
 
     /**
+     * PHP-FPM binding info for the CLI PHP version running the command.
+     *
+     * @return array{version: string, socket: string, active: list<string>}
+     */
+    public function phpFpm(): array;
+
+    /**
      * Detect + collect sites + render — WITHOUT touching the filesystem.
      * $all=false (default) scopes to the CURRENT project; true = every project.
      */

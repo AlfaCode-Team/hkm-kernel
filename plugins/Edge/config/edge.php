@@ -97,7 +97,9 @@ return [
     // How each project is served (per-project override via proj.json "edge").
     'serve' => [
         'model'            => (string) (env('EDGE_SERVE_MODEL') ?: 'fpm'),   // fpm | swoole
-        'fpm_socket'       => (string) (env('EDGE_FPM_SOCKET') ?: 'unix:/run/php/php-fpm.sock'),
+        // Empty = auto-resolve the FPM socket matching the CLI PHP version
+        // (multi-PHP hosts). Set explicitly to pin a socket/addr.
+        'fpm_socket'       => (string) env('EDGE_FPM_SOCKET', ''),
         'swoole_host'      => (string) (env('EDGE_SWOOLE_HOST') ?: '127.0.0.1'),
         'swoole_base_port' => (int) (env('EDGE_SWOOLE_BASE_PORT') ?: 9500),
     ],

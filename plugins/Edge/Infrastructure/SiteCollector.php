@@ -19,6 +19,8 @@ use Plugins\Edge\Domain\Site;
  */
 final class SiteCollector
 {
+    public function __construct(private readonly SystemProbe $probe = new SystemProbe()) {}
+
     /**
      * @param bool $all false (default) = ONLY the current project (read from
      *                  base_path()/proj.json); true = every registered project.
@@ -134,8 +136,11 @@ final class SiteCollector
             return "{$host}:{$port}";
         }
 
-        // FPM: an explicit per-project socket, else the global default.
-        return (string) ($edge['socket'] ?? edge_config('serve.fpm_socket', 'unix:/run/php/php-fpm.sock'));
+        // FPM: an explicit per-project socket, else an explicit EDGE_FPM_SOCKET,
+        // else auto-resolve the socket matching the CLI PHP version (multi-PHP hosts).
+        $explicit = (string) ($edge['socket'] ?? edge_config('serve.fpm_socket', ''));
+
+        return $explicit !== '' ? $explicit : $this->probe->phpFpmSocket();
     }
 
     /**

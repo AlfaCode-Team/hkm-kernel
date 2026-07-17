@@ -29,6 +29,73 @@ final class SystemProbe
         );
     }
 
+    /** The PHP version running THIS command, e.g. "8.4". */
+    public function phpCliVersion(): string
+    {
+        return PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+    }
+
+    /**
+     * Resolve the PHP-FPM upstream that matches the CLI PHP version running the
+     * command, so a multi-PHP host binds the vhost to the RIGHT pool:
+     *   1. the versioned socket for the CLI version (Debian/Ubuntu naming),
+     *   2. any versioned socket present — the exact version, else the newest,
+     *   3. a generic/unversioned socket (RHEL, custom),
+     *   4. a TCP fallback (127.0.0.1:9000, common in containers).
+     */
+    public function phpFpmSocket(): string
+    {
+        $ver = $this->phpCliVersion();
+
+        foreach (["/run/php/php{$ver}-fpm.sock", "/var/run/php/php{$ver}-fpm.sock"] as $sock) {
+            if (@file_exists($sock)) {
+                return "unix:{$sock}";
+            }
+        }
+
+        $socks = array_merge(glob('/run/php/php*-fpm.sock') ?: [], glob('/var/run/php/php*-fpm.sock') ?: []);
+        if ($socks !== []) {
+            // exact CLI version wins; otherwise the newest available pool.
+            usort($socks, fn (string $a, string $b): int => version_compare($this->sockVersion($b), $this->sockVersion($a)));
+            foreach ($socks as $s) {
+                if ($this->sockVersion($s) === $ver) {
+                    return "unix:{$s}";
+                }
+            }
+            return "unix:{$socks[0]}";
+        }
+
+        foreach (['/run/php-fpm/www.sock', '/var/run/php-fpm/www.sock', '/run/php/php-fpm.sock'] as $sock) {
+            if (@file_exists($sock)) {
+                return "unix:{$sock}";
+            }
+        }
+
+        return '127.0.0.1:9000';
+    }
+
+    /** Which php*-fpm services systemd reports as active (best-effort, for status). */
+    public function phpFpmActive(): array
+    {
+        [$code, $out] = $this->run("systemctl list-units --type=service --state=active --no-legend 'php*-fpm*.service'");
+        if ($code !== 0 || trim($out) === '') {
+            return [];
+        }
+        $names = [];
+        foreach (explode("\n", trim($out)) as $line) {
+            if (preg_match('/(php[0-9.]*-fpm[^\s]*)\.service/', $line, $m)) {
+                $names[] = $m[1];
+            }
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    private function sockVersion(string $path): string
+    {
+        return preg_match('/php(\d+\.\d+)-fpm\.sock$/', $path, $m) ? $m[1] : '0';
+    }
+
     /** Run an arbitrary command; returns [exitCode, combinedOutput]. */
     public function run(string $command): array
     {

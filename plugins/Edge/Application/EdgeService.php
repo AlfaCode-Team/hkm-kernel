@@ -32,6 +32,15 @@ final class EdgeService implements EdgeServiceContract
         return $this->probe->detect();
     }
 
+    public function phpFpm(): array
+    {
+        return [
+            'version' => $this->probe->phpCliVersion(),
+            'socket'  => $this->probe->phpFpmSocket(),
+            'active'  => $this->probe->phpFpmActive(),
+        ];
+    }
+
     public function plan(bool $all = false): EdgePlan
     {
         $stack    = $this->probe->detect();
