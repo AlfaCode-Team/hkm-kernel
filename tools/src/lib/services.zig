@@ -89,6 +89,20 @@ pub fn resolveKernelHome(allocator: std.mem.Allocator, io: Io, env: *EnvMap, aut
     return null;
 }
 
+/// Resolve the DIRECTORY that holds the project registry (projects.json), to
+/// export as PSP_PROJECTS_DIR — so a child (the kernel, plugins like Edge) reads
+/// the SAME registry the launcher does, without having to re-derive it. Honours
+/// an explicit PSP_PROJECTS_DIR, else takes the parent of the resolved
+/// registry file (which itself prefers HKM_USERDATA_DIR, then HKM_KERNEL_HOME).
+pub fn resolveProjectsDir(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !?[]const u8 {
+    if (env.get("PSP_PROJECTS_DIR")) |d| {
+        if (d.len > 0) return try allocator.dupe(u8, util.trimSlash(d));
+    }
+    const jsonPath = (try registry.resolvePath(allocator, io, env)) orelse return null;
+    if (std.fs.path.dirname(jsonPath)) |dir| return try allocator.dupe(u8, dir);
+    return null;
+}
+
 /// Resolve a directory holding the scaffolding templates, or null.
 /// Probes each candidate for a `proj.json`; HKM_TEMPLATES_DIR is trusted
 /// without the probe so a partial override directory still works.

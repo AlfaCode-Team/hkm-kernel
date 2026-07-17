@@ -94,7 +94,7 @@ final class SiteCollector
             localDomains:  $cls['local'],
             model:         $model,
             upstream:      $this->upstream($model, $edge),
-            env:           $this->env($path, $edge),
+            env:           $this->env($edge),
         );
     }
 
@@ -150,31 +150,25 @@ final class SiteCollector
      * @param array<string, mixed> $edge
      * @return array<string, string>
      */
-    private function env(string $path, array $edge): array
+    private function env(array $edge): array
     {
         $env = [];
 
-        $appEnv = (string) edge_config('env.app_env', 'production');
+        $appEnv = (string) edge_config('app_env', 'production');
         if ($appEnv !== '') {
             $env['APP_ENV'] = $appEnv;
         }
 
-        $userdata = (string) edge_config('env.userdata_dir', '');
-        if ($userdata !== '') {
-            $env['HKM_USERDATA_DIR'] = $userdata;
-        }
-
+        // Pass through the kernel-resolution env the launcher already exported for
+        // the active context (dev vs live). We read it straight from the process
+        // environment — no deriving, no defaulting. FPM workers don't inherit it,
+        // so the vhost must carry whatever `hkm` set.
         if ((bool) edge_config('inject_kernel_env', true)) {
-            $home     = (string) edge_config('env.kernel_home', '');
-            $autoload = (string) edge_config('env.global_autoload', '');
-            if ($autoload === '' && $home !== '') {
-                $autoload = $home . '/vendor/autoload.php';
-            }
-            if ($home !== '') {
-                $env['HKM_KERNEL_HOME'] = $home;
-            }
-            if ($autoload !== '') {
-                $env['PSP_GLOBAL_AUTOLOAD'] = $autoload;
+            foreach ((array) edge_config('kernel_env_keys', []) as $key) {
+                $value = (string) \env((string) $key, '');
+                if ($value !== '') {
+                    $env[(string) $key] = $value;
+                }
             }
         }
 

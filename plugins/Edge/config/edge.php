@@ -104,16 +104,24 @@ return [
         'swoole_base_port' => (int) (env('EDGE_SWOOLE_BASE_PORT') ?: 9500),
     ],
 
-    // Inject the kernel-resolution env (PSP_GLOBAL_AUTOLOAD / HKM_KERNEL_HOME)
-    // into each vhost so FPM workers boot against the correct kernel.
+    // Inject the kernel-resolution env into each vhost so FPM workers (which do
+    // NOT inherit your shell/hkm environment) boot against the correct kernel.
     'inject_kernel_env' => filter_var(env('EDGE_INJECT_KERNEL_ENV', 'true'), FILTER_VALIDATE_BOOL),
 
-    // Base run-env written into every generated vhost. Per-project proj.json
-    // "edge": { "env": { … } } extras override these.
-    'env' => [
-        'app_env'         => (string) (env('EDGE_APP_ENV') ?: env('APP_ENV') ?: 'production'),
-        'userdata_dir'    => (string) env('HKM_USERDATA_DIR', ''),
-        'global_autoload' => (string) env('PSP_GLOBAL_AUTOLOAD', ''),
-        'kernel_home'     => (string) env('HKM_KERNEL_HOME', ''),
+    // APP_ENV written into each vhost.
+    'app_env' => (string) (env('EDGE_APP_ENV') ?: env('APP_ENV') ?: 'production'),
+
+    // The launcher (`hkm run` / `hkm cli`) ALREADY exports the kernel-resolution
+    // env for the active context — dev (HKM_DEV_HOME + the checkout) vs live (the
+    // installed kernel). Edge simply PASSES THROUGH whichever of these are present
+    // in the environment; it does not derive, default, or configure them. So a
+    // dev run naturally carries HKM_DEV_HOME, a live run carries the installed
+    // paths, and PSP_PROJECTS_DIR only appears if you actually set it.
+    'kernel_env_keys' => [
+        'HKM_KERNEL_HOME',
+        'HKM_DEV_HOME',
+        'HKM_USERDATA_DIR',
+        'PSP_GLOBAL_AUTOLOAD',
+        'PSP_PROJECTS_DIR',
     ],
 ];
