@@ -20,12 +20,22 @@ interface EdgeServiceContract
     public function plan(): EdgePlan;
 
     /**
-     * Write the rendered config, then (optionally) validate + reload the server.
+     * Write the rendered config, sync local domains to /etc/hosts, then
+     * (optionally) validate + reload the server.
      *
      * @return array{
      *   ok: bool, strategy: string, path?: string, domains?: int,
-     *   dry_run?: bool, contents?: string, steps?: list<string>, message?: string
+     *   dry_run?: bool, contents?: string, steps?: list<string>,
+     *   hosts?: array<string, mixed>|null, message?: string
      * }
      */
-    public function apply(bool $reload = true, bool $dryRun = false): array;
+    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null): array;
+
+    /**
+     * Sync the platform's LOCAL domains (.local / .test / …) into /etc/hosts
+     * (pointing at the loopback), or remove the managed block with $remove.
+     *
+     * @return array{ok: bool, changed?: bool, dry_run?: bool, path: string, count: int, block?: string, message?: string}
+     */
+    public function syncHosts(bool $remove = false, bool $dryRun = false): array;
 }

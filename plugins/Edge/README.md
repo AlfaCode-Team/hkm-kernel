@@ -51,18 +51,43 @@ layer never sees plaintext, so certificates live on the backends.
 ## Commands
 
 ```bash
-hkm edge:status              # probe host; show stack, strategy, domains, target path
-hkm edge:apply               # render + write + `nginx -t` / `apachectl configtest` + reload
-hkm edge:apply --dry-run     # print the config that WOULD be written; change nothing
+hkm edge:status              # probe host; show stack, strategy, server + local domains
+hkm edge:apply               # render + write server config + sync /etc/hosts + reload
+hkm edge:apply --dry-run     # print what WOULD be written; change nothing
 hkm edge:apply --no-reload   # write the file only; skip validate + reload
+hkm edge:apply --no-hosts    # skip the /etc/hosts sync
+hkm edge:hosts               # sync ONLY the local domains into /etc/hosts (needs sudo)
+hkm edge:hosts --dry-run     # show the hosts block that would be written
+hkm edge:hosts --remove      # remove the HKM-managed hosts block
 ```
 
-## Domains
+## Domains — public vs local
 
 Collected automatically from `projects/projects.json` (each project's
 `domains[]`), plus `EDGE_EXTRA_DOMAINS`, minus `EDGE_EXCLUDE_DOMAINS`. Every
 hostname is validated against a strict charset before it can reach a rendered
 config, so a malformed registry entry can never inject directives.
+
+Domains are then **split**:
+
+- **Public** (real FQDN, e.g. `app.example.com`) → go into the **server config**
+  (nginx stream / vhost / Apache).
+- **Local** (`*.local`, `*.test`, `*.localhost`, `*.example`, `*.invalid`, or a
+  single-label host like `myapp`) → are **dev-only**: kept OUT of the public
+  server config and written to **`/etc/hosts`** pointing at the loopback, so they
+  resolve on this machine. The managed block is delimited by markers, so the rest
+  of your hosts file is never touched and re-runs are idempotent:
+
+  ```
+  # >>> HKM Edge (local domains) >>>
+  127.0.0.1    api.hkm.local
+  127.0.0.1    hkm.local
+  # <<< HKM Edge (local domains) <<<
+  ```
+
+Tune the local TLD set with `EDGE_LOCAL_TLDS`. Set `EDGE_LOCAL_IN_SERVER=true` if
+you also want nginx to serve `.local` sites locally (they then appear in BOTH the
+server config and `/etc/hosts`).
 
 ## Configuration (`config/edge.php`, all env-driven)
 
@@ -77,6 +102,10 @@ config, so a malformed registry entry can never inject directives.
 | `EDGE_RELOAD` | `false` | reload after write by default (also controllable per-command) |
 | `EDGE_*_TEST_CMD` / `EDGE_*_RELOAD_CMD` | `nginx -t`, `nginx -s reload`, `apachectl configtest`, `apachectl graceful` | validate/reload commands per distro |
 | `EDGE_EXTRA_DOMAINS` / `EDGE_EXCLUDE_DOMAINS` | — | comma-separated add/drop |
+| `EDGE_LOCAL_TLDS` | `local,test,localhost,example,invalid` | TLDs treated as local (→ /etc/hosts) |
+| `EDGE_MANAGE_HOSTS` | `true` | write local domains to /etc/hosts on apply |
+| `EDGE_HOSTS_PATH` / `EDGE_HOSTS_IP` | `/etc/hosts` / `127.0.0.1` | hosts file + loopback target |
+| `EDGE_LOCAL_IN_SERVER` | `false` | also include local domains in the server config |
 
 Defaults write to `var/edge/` so no root is needed to test; in production point
 `EDGE_*_PATH` at the real nginx/Apache include dirs and run `hkm` with the

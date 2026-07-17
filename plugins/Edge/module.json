@@ -27,6 +27,11 @@
         { "key": "EDGE_NGINX_TEST_CMD",    "type": "string", "required": false },
         { "key": "EDGE_NGINX_RELOAD_CMD",  "type": "string", "required": false },
         { "key": "EDGE_APACHE_TEST_CMD",   "type": "string", "required": false },
-        { "key": "EDGE_APACHE_RELOAD_CMD", "type": "string", "required": false }
+        { "key": "EDGE_APACHE_RELOAD_CMD", "type": "string", "required": false },
+        { "key": "EDGE_LOCAL_TLDS",        "type": "string", "required": false },
+        { "key": "EDGE_MANAGE_HOSTS",      "type": "bool",   "required": false },
+        { "key": "EDGE_HOSTS_PATH",        "type": "string", "required": false },
+        { "key": "EDGE_HOSTS_IP",          "type": "string", "required": false },
+        { "key": "EDGE_LOCAL_IN_SERVER",   "type": "bool",   "required": false }
     ]
 }

@@ -57,4 +57,20 @@ return [
     'platform_registry' => base_path('projects/platform.json'),
     'extra_domains'   => array_values(array_filter(array_map('trim', explode(',', (string) env('EDGE_EXTRA_DOMAINS', ''))))),
     'exclude_domains' => array_values(array_filter(array_map('trim', explode(',', (string) env('EDGE_EXCLUDE_DOMAINS', ''))))),
+
+    // Local (dev-only) domains. A domain whose TLD is in this list — or that has
+    // no dot at all — is treated as LOCAL: it is kept OUT of the public server
+    // config and written to /etc/hosts instead (pointing at the loopback).
+    'local_tlds' => array_values(array_filter(array_map('trim', explode(',', (string) env('EDGE_LOCAL_TLDS', 'local,test,localhost,example,invalid'))))),
+
+    // Write local domains into /etc/hosts on apply (needs privileges to edit it).
+    'manage_hosts' => filter_var(env('EDGE_MANAGE_HOSTS', 'true'), FILTER_VALIDATE_BOOL),
+    'hosts' => [
+        'path' => (string) (env('EDGE_HOSTS_PATH') ?: '/etc/hosts'),
+        'ip'   => (string) (env('EDGE_HOSTS_IP') ?: '127.0.0.1'),
+    ],
+
+    // Set true to ALSO include local domains in the generated server config
+    // (e.g. when nginx serves your .local sites in local development).
+    'include_local_in_server' => filter_var(env('EDGE_LOCAL_IN_SERVER', 'false'), FILTER_VALIDATE_BOOL),
 ];

@@ -13,9 +13,11 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
 use Plugins\Edge\API\Contracts\EdgeServiceContract;
 use Plugins\Edge\Application\EdgeService;
 use Plugins\Edge\Infrastructure\Cli\EdgeApplyCommand;
+use Plugins\Edge\Infrastructure\Cli\EdgeHostsCommand;
 use Plugins\Edge\Infrastructure\Cli\EdgeStatusCommand;
 use Plugins\Edge\Infrastructure\ConfigRenderer;
 use Plugins\Edge\Infrastructure\DomainCollector;
+use Plugins\Edge\Infrastructure\HostsFileWriter;
 use Plugins\Edge\Infrastructure\SystemProbe;
 
 /**
@@ -59,11 +61,17 @@ final class Provider implements ModuleContract
             $service = self::service();
             $cli->command(new EdgeStatusCommand($service));
             $cli->command(new EdgeApplyCommand($service));
+            $cli->command(new EdgeHostsCommand($service));
         });
     }
 
     private static function service(): EdgeService
     {
-        return new EdgeService(new SystemProbe(), new DomainCollector(), new ConfigRenderer());
+        return new EdgeService(
+            new SystemProbe(),
+            new DomainCollector(),
+            new ConfigRenderer(),
+            new HostsFileWriter(),
+        );
     }
 }
