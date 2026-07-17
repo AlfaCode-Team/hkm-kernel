@@ -31,6 +31,7 @@ final class EdgeHostsCommand extends AbstractCommand
         $this->addOption('dry-run', '', 'Show what would change; write nothing');
         $this->addOption('remove', '', 'Remove the HKM-managed block from the hosts file');
         $this->addOption('all', '', 'Include every registered project (default: only the current one)');
+        $this->addOption('force', '', 'Allow running outside dev mode (normally requires --dev)');
     }
 
     protected function handle(): int
@@ -39,20 +40,26 @@ final class EdgeHostsCommand extends AbstractCommand
             remove: $this->hasOption('remove'),
             dryRun: $this->hasOption('dry-run'),
             all:    $this->hasOption('all'),
+            force:  $this->hasOption('force'),
         );
 
-        $count = (int) ($result['count'] ?? 0);
-        $path  = (string) ($result['path'] ?? '/etc/hosts');
+        $count   = (int) ($result['count'] ?? 0);
+        $path    = (string) ($result['path'] ?? '/etc/hosts');
+        $skipped = (array) ($result['skipped'] ?? []);
 
         if (($result['ok'] ?? false) !== true) {
             $this->error('hosts sync failed: ' . ($result['message'] ?? 'unknown error'));
             return self::FAILURE;
         }
 
+        if ($skipped !== []) {
+            $this->muted('already in ' . $path . ' (left untouched): ' . implode(', ', $skipped));
+        }
+
         if (($result['dry_run'] ?? false) === true) {
-            $this->info("Would write {$count} local domain(s) to {$path}:");
+            $this->info("Would write {$count} new local domain(s) to {$path}:");
             $this->newLine();
-            $this->muted(($result['block'] ?? '') === '' ? '(managed block would be removed)' : (string) $result['block']);
+            $this->muted(($result['block'] ?? '') === '' ? '(nothing to add — managed block would be removed)' : (string) $result['block']);
             return self::SUCCESS;
         }
 

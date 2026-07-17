@@ -47,13 +47,13 @@ Run `hkm ui sync` after `hkm plugins enable|disable <plugin>` so the federated
 npm install                       # once
 npm run dev -- --mode admin       # dev server for the admin surface (HMR)
 npm run dev -- --mode project     # dev server for the public surface
-npm run build -- --mode admin     # build one surface → ../public_html/build/admin/
+npm run build -- --mode admin     # build one surface → ../app/public/build/admin/
 npm run build:all                 # build every discovered surface
 npm run surfaces                  # list discovered surfaces
 ```
 
-Each build writes `../public_html/build/<surface>/[name].[hash].js` +
-`manifest-<surface>.json`; dev writes `../public_html/<surface>-hot`. The PHP
+Each build writes `../app/public/build/<surface>/[name].[hash].js` +
+`manifest-<surface>.json`; dev writes `../app/public/<surface>-hot`. The PHP
 `vite()` helper reads those, so the shell auto-switches between dev and prod.
 
 ### Adding a whole new surface (a new app)

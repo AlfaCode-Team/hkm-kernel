@@ -62,11 +62,16 @@ hkm cli -p <project> edge:apply --dry-run   # print what WOULD be written
 hkm cli -p <project> edge:apply --no-reload # write only; skip validate + reload
 hkm cli -p <project> edge:apply --no-hosts  # skip the /etc/hosts sync
 hkm cli -p <project> edge:apply --all       # render ALL projects into one file
-hkm cli -p <project> edge:hosts          # sync THIS project's local domains → /etc/hosts (sudo)
-hkm cli -p <project> edge:hosts --remove # remove the HKM-managed hosts block
+sudo hkm cli -p <project> --dev edge:hosts   # sync THIS project's local domains → /etc/hosts
+sudo hkm cli -p <project> --dev edge:hosts --remove   # remove the HKM-managed block
+hkm cli -p <project> edge:hosts --dry-run --force     # preview outside dev mode
 ```
 
-(During development add `--dev` so `hkm` uses your dev kernel checkout.)
+Notes:
+
+- **`--dev`** makes `hkm` use your dev kernel checkout — and is **required** for
+  `edge:hosts` (see the `/etc/hosts` rules below).
+- **`sudo`** is needed to write `/etc/hosts` (and `/etc/nginx` in production).
 
 ## Per-project serving (the vhost model)
 
@@ -76,9 +81,16 @@ name/path/domains) and renders **one vhost per project**, with:
 - **docroot = `<project path>/app/public`** (never the project root — keeps
   `.env`/config/src/vendor out of the web tree), modeled on
   `templates/app/{nginx,apache}.conf.example`;
-- the **run-env injected** so the served project boots: `APP_ENV`,
-  `HKM_USERDATA_DIR`, and (when `EDGE_INJECT_KERNEL_ENV=true`) `HKM_KERNEL_HOME`
-  + `PSP_GLOBAL_AUTOLOAD` — as `fastcgi_param` (nginx FPM) / `SetEnv` (Apache);
+- the **run-env injected** so the served project boots (FPM workers don't
+  inherit your shell/`hkm` env) — as `fastcgi_param` (nginx) / `SetEnv` (Apache).
+  Edge **passes through** the kernel-resolution env the launcher already exported
+  for the active context — it doesn't derive or configure it. `hkm … --dev`
+  carries `HKM_DEV_HOME` + the checkout's `HKM_KERNEL_HOME` / `PSP_GLOBAL_AUTOLOAD`;
+  a live `hkm cli` carries the installed kernel's paths. The pass-through set is
+  `kernel_env_keys` (default `HKM_KERNEL_HOME`, `HKM_DEV_HOME`, `HKM_USERDATA_DIR`,
+  `PSP_GLOBAL_AUTOLOAD`, `PSP_PROJECTS_DIR`) — only the ones actually set in the
+  environment are written. Plus `APP_ENV`. Set `EDGE_INJECT_KERNEL_ENV=false` to
+  skip all of them;
 - a **serve model** per project: `fpm` (fastcgi to PHP-FPM) or `swoole`
   (reverse-proxy to the project's OpenSwoole port).
 
@@ -101,10 +113,11 @@ Defaults come from `EDGE_SERVE_MODEL` / `EDGE_FPM_SOCKET` /
 
 ## Domains — public vs local
 
-Collected automatically from `projects/projects.json` (each project's
-`domains[]`), plus `EDGE_EXTRA_DOMAINS`, minus `EDGE_EXCLUDE_DOMAINS`. Every
-hostname is validated against a strict charset before it can reach a rendered
-config, so a malformed registry entry can never inject directives.
+Collected from the **current project's `proj.json`** `domains[]` (or every
+registered project with `--all`), plus `EDGE_EXTRA_DOMAINS`, minus
+`EDGE_EXCLUDE_DOMAINS`. Every hostname is validated against a strict charset
+before it can reach a rendered config, so a malformed entry can never inject
+directives.
 
 Domains are then **split**:
 
@@ -126,6 +139,41 @@ Domains are then **split**:
 Tune the local TLD set with `EDGE_LOCAL_TLDS`. Set `EDGE_LOCAL_IN_SERVER=true` if
 you also want nginx to serve `.local` sites locally (they then appear in BOTH the
 server config and `/etc/hosts`).
+
+### `/etc/hosts` rules — dev only, never duplicates
+
+**1. Requires dev mode.** `/etc/hosts` is a *developer-machine* concern: a live
+server resolves its public domains through **DNS**. So the hosts sync only runs
+when the launcher marks the invocation as dev (`hkm … --dev`, which exports
+`HKM_DEV=1`). Outside dev:
+
+- `edge:hosts` **refuses** with a clear message (override with `--force`),
+- `edge:apply` **silently skips** the hosts step — a VPS run never touches
+  `/etc/hosts`.
+
+```bash
+sudo hkm cli -p myproject --dev edge:hosts       # ✓ writes the block
+hkm cli -p myproject edge:hosts                  # ✗ refuses (not dev mode)
+hkm cli -p myproject edge:hosts --force          # ✓ explicit override
+```
+
+> Writing `/etc/hosts` needs root, so use `sudo`. The launcher reads your
+> `config.env` via `SUDO_USER`, so `sudo hkm … --dev` still finds `HKM_DEV_HOME`.
+
+**2. Existing entries win — a host is never duplicated.** Before writing, every
+domain is checked against the rest of the hosts file (outside the managed block,
+comments and multi-host lines handled). A hostname already mapped there is
+**skipped and left untouched**; only genuinely missing ones are added:
+
+```text
+already in /etc/hosts (left untouched): hkm.local
+Would write 2 new local domain(s) to /etc/hosts:
+127.0.0.1    api.hkm.local
+127.0.0.1    app.hkm.local
+```
+
+Re-runs stay idempotent, and `--remove` drops the managed block (never your own
+entries).
 
 ## Configuration (`config/edge.php`, all env-driven)
 

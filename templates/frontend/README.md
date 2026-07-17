@@ -71,14 +71,14 @@ That's it — no `vite.config.ts` edit, no new npm script. Build/run it by name:
 
 ```bash
 npm run dev -- --mode storefront      # dev the storefront surface
-npm run build -- --mode storefront    # → ../public_html/build/storefront/ + manifest-storefront.json
+npm run build -- --mode storefront    # → ../app/public/build/storefront/ + manifest-storefront.json
 npm run build:all                     # every surface
 npm run surfaces                      # list discovered surfaces
 ```
 
 The PHP asset contract is unchanged: built files land in
-`../public_html/build/<surface>/[name].[hash].js` with
-`manifest-<surface>.json`, and dev writes `../public_html/<surface>-hot`.
+`../app/public/build/<surface>/[name].[hash].js` with
+`manifest-<surface>.json`, and dev writes `../app/public/<surface>-hot`.
 
 ## Plugin UIs (federation)
 
@@ -98,7 +98,7 @@ Never copy a plugin's UI by hand; re-run `hkm ui sync` after enabling/disabling.
 `vite/plugins.ts` exports `hkmPlugin` — the old `hkmPlugin` upgraded with the
 richer dev wiring that used to live in `src/index.ts`:
 
-- **Hot file** — dev writes `../public_html/<surface>-hot` = `<devUrl><base>`
+- **Hot file** — dev writes `../app/public/<surface>-hot` = `<devUrl><base>`
   (APP_URL host + HTTPS aware). A PHP `vite()`/Pageflow helper reads it to point
   `<script>`/`<link>` tags at the running Vite dev server; its absence means
   "use the built manifest".
