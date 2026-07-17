@@ -1,0 +1,3 @@
+/* Admin surface styles — pulls in the shared shadcn theme (tokens + @theme map
+ * + tw-animate). Add surface-specific overrides below the import. */
+@import "@shared/styles/theme.css";

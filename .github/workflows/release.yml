@@ -1,17 +1,30 @@
 name: Release
 
+# Two ways in:
+#   1. push a `v*` tag        → VERSION comes from the tag name.
+#   2. workflow_call (version) → VERSION comes from the caller (auto-release.yml),
+#                                so no PAT is needed to chain from a merge to main.
 "on":
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version without the leading v (e.g. 1.0.12)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 # Single source of truth for bundling is tools/bundle.sh. Each job sets up the
-# toolchain, then calls the script for its OS target. VERSION comes from the tag.
+# toolchain, then calls the script for its OS target. VERSION comes from the tag
+# (push) or the workflow_call input.
 env:
   ZIG_VERSION: "0.17.0-dev.657+2faf8debf"
+  # Resolved version for every job: the input when called, else the tag name.
+  RELEASE_VERSION: ${{ inputs.version || '' }}
 
 jobs:
   # ── Gate: run the PHPUnit suite. Nothing builds or publishes unless GREEN. ──
@@ -49,7 +62,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (linux)
-        run: VERSION="${GITHUB_REF_NAME#v}" ./tools/bundle.sh linux
+        run: VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}" ./tools/bundle.sh linux
       - uses: actions/upload-artifact@v5
         with: { name: linux-deb, path: dist/*.deb }
 
@@ -67,7 +80,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (windows)
-        run: VERSION="${GITHUB_REF_NAME#v}" ./tools/bundle.sh windows
+        run: VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}" ./tools/bundle.sh windows
       - uses: actions/upload-artifact@v5
         with: { name: windows-zip, path: dist/*.zip }
 
@@ -87,7 +100,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (macos)
-        run: VERSION="${GITHUB_REF_NAME#v}" ./tools/bundle.sh macos
+        run: VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}" ./tools/bundle.sh macos
       - uses: actions/upload-artifact@v5
         with: { name: macos-app, path: dist/*.tar.gz }
 
@@ -97,13 +110,14 @@ jobs:
     needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5      # need CHANGELOG.md at the tagged commit
+      - uses: actions/checkout@v5      # need CHANGELOG.md at the checked-out commit
       - uses: actions/download-artifact@v5
         with: { path: artifacts/ }
-      - name: Extract CHANGELOG section for this version
+      - name: Resolve version + extract CHANGELOG section
         id: notes
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # Pull the block between "## [VERSION]" and the next "## [" heading.
           awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\]" {grab=1; next}
@@ -117,6 +131,9 @@ jobs:
           fi
       - uses: softprops/action-gh-release@v2
         with:
+          # When called from auto-release the ref is a branch, so name the tag
+          # explicitly; on a tag push this matches GITHUB_REF_NAME anyway.
+          tag_name: v${{ steps.notes.outputs.version }}
           files: |
             artifacts/linux-deb/*.deb
             artifacts/windows-zip/*.zip
@@ -126,4 +143,4 @@ jobs:
           body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release-body.md' || '' }}
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(steps.notes.outputs.version, '-') }}

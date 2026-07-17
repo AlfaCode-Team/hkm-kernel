@@ -1,0 +1,7 @@
+{
+  "name": "project",
+  "entry": "index.tsx",
+  "style": "styles/index.css",
+  "base": "/build/",
+  "description": "Public-facing project (storefront/marketing) surface. A second buildable app alongside `admin` — vite discovered it with zero config changes. Build: `vite build --mode project`."
+}

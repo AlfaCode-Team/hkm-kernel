@@ -1,0 +1,22 @@
+{
+  "//": "Path aliases (shared kit + federated plugin UIs) are inherited from the GENERATED tsconfig.plugins.json via `extends`, so TypeScript and the bundler resolve them from one source. Regenerate it with `hkm ui sync`. Do not add a `paths` block here — TS `paths` do not merge across `extends` and it would shadow the plugin aliases.",
+  "extends": "./tsconfig.plugins.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "useDefineForClassFields": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "vite", "vite.config.ts", "plugins"],
+  "exclude": ["node_modules", "../public_html"]
+}

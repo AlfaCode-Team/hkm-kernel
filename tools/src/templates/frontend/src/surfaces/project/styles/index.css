@@ -1,0 +1,10 @@
+/* Project (public) surface styles — the shared shadcn theme. Override tokens
+ * here (e.g. a different --primary) to re-brand this surface independently. */
+@import "@shared/styles/theme.css";
+
+:root {
+  /* Public surface uses a sky-blue brand primary. */
+  --primary: 199 89% 48%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 199 89% 48%;
+}
