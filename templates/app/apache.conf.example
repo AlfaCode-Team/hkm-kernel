@@ -34,9 +34,23 @@
         Require all granted
     </Files>
 
-    # Environment for the app (match your deployment).
+    # ── Run-env: everything the project needs to BOOT ──
+    # The PHP process does NOT inherit your shell/`hkm` environment, so set it here.
+    # (`hkm … edge:apply` generates all of this for you, per dev/live.)
     SetEnv APP_ENV production
+    # Where persisted tenant data lives (uploads/reports/exports):
     # SetEnv HKM_USERDATA_DIR /var/lib/hkm
+    #
+    # LIVE — the installed kernel (values from `hkm-config print`):
+    # SetEnv HKM_KERNEL_HOME     /opt/hkm-kernel
+    # SetEnv PSP_PROJECTS_DIR    /opt/hkm-kernel/projects
+    # SetEnv PSP_GLOBAL_AUTOLOAD /opt/hkm-kernel/vendor/autoload.php
+    #
+    # DEV — against a checkout instead (HKM_DEV_HOME from config.env):
+    # SetEnv HKM_DEV_HOME        /path/to/checkout
+    # SetEnv HKM_KERNEL_HOME     /path/to/checkout
+    # SetEnv PSP_GLOBAL_AUTOLOAD /path/to/checkout/vendor/autoload.php
+    # SetEnv PSP_PROJECTS_DIR    /path/to/checkout/projects
 
     # Baseline security headers (SecurityFilters plugin also sets these at runtime).
     <IfModule mod_headers.c>

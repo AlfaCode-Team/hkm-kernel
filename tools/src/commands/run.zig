@@ -104,6 +104,12 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         }
     }
 
+    // Export the resolved project-registry dir so the kernel + plugins (Edge)
+    // read the SAME registry the launcher uses, without re-deriving it.
+    if (try services.resolveProjectsDir(allocator, io, env)) |projects_dir| {
+        try env.put("PSP_PROJECTS_DIR", projects_dir);
+    }
+
     const php = env.get("HKM_PHP_BIN") orelse "php";
 
     var argv: std.ArrayList([]const u8) = .empty;

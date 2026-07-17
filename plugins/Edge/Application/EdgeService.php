@@ -55,8 +55,24 @@ final class EdgeService implements EdgeServiceContract
         return new EdgePlan($stack, $strategy, $sites, $this->sites->localDomains($all), $path, $body);
     }
 
-    public function syncHosts(bool $remove = false, bool $dryRun = false, bool $all = false): array
+    /**
+     * /etc/hosts is a DEVELOPER-machine concern (local .local/.test domains) —
+     * a live server resolves its public domains through DNS. So this refuses to
+     * run unless the launcher marked the invocation as dev (`hkm … --dev`,
+     * which exports HKM_DEV=1), unless explicitly forced.
+     */
+    public function syncHosts(bool $remove = false, bool $dryRun = false, bool $all = false, bool $force = false): array
     {
+        if (!$force && !$this->isDev()) {
+            return [
+                'ok'      => false,
+                'path'    => (string) edge_config('hosts.path', '/etc/hosts'),
+                'count'   => 0,
+                'message' => 'refusing to touch the hosts file outside dev mode — run with `--dev` (or pass --force). '
+                           . 'On a live server public domains resolve via DNS, not /etc/hosts.',
+            ];
+        }
+
         return $this->hosts->sync(
             domains: $this->sites->localDomains($all),
             ip:      (string) edge_config('hosts.ip', '127.0.0.1'),
@@ -66,14 +82,21 @@ final class EdgeService implements EdgeServiceContract
         );
     }
 
+    /** Did the launcher run us in dev mode (`--dev` exports HKM_DEV=1)? */
+    private function isDev(): bool
+    {
+        return filter_var(env('HKM_DEV', 'false'), FILTER_VALIDATE_BOOL);
+    }
+
     public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false): array
     {
         $plan = $this->plan($all);
 
-        // 1. Local domains → /etc/hosts (independent of any web server, so it
-        //    still runs when the strategy is None).
+        // 1. Local domains → /etc/hosts. DEV ONLY: a live server resolves its
+        //    public domains via DNS, so outside dev we silently skip this step
+        //    rather than touching the machine's hosts file.
         $hosts = null;
-        if ($manageHosts ?? (bool) edge_config('manage_hosts', true)) {
+        if (($manageHosts ?? (bool) edge_config('manage_hosts', true)) && $this->isDev()) {
             $hosts = $this->syncHosts(dryRun: $dryRun, all: $all);
         }
 

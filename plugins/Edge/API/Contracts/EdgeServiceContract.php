@@ -46,7 +46,11 @@ interface EdgeServiceContract
      * loopback), or remove the managed block with $remove. $all=false (default)
      * scopes to the current project.
      *
-     * @return array{ok: bool, changed?: bool, dry_run?: bool, path: string, count: int, block?: string, message?: string}
+     * DEV ONLY: refuses unless the launcher ran with `--dev` (HKM_DEV=1), or
+     * $force is passed — a live server uses DNS, not /etc/hosts. A hostname
+     * already mapped elsewhere in the file is skipped, never duplicated.
+     *
+     * @return array{ok: bool, changed?: bool, dry_run?: bool, path: string, count: int, skipped?: list<string>, block?: string, message?: string}
      */
-    public function syncHosts(bool $remove = false, bool $dryRun = false, bool $all = false): array;
+    public function syncHosts(bool $remove = false, bool $dryRun = false, bool $all = false, bool $force = false): array;
 }

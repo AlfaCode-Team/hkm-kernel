@@ -125,6 +125,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
             try env_map.put("HKM_KERNEL_HOME", home);
             const cli = try std.fs.path.join(allocator, &.{ home, "bin", "hkm" });
             try env_map.put("HKM_CLI_PATH", cli);
+            // Explicit marker so commands can REQUIRE dev mode (e.g. anything that
+            // touches the developer's machine, like edge:hosts writing /etc/hosts).
+            try env_map.put("HKM_DEV", "1");
             prompt.muted(try std.fmt.allocPrint(allocator, "dev mode: using kernel at {s}", .{home}));
         } else {
             prompt.err("--dev: no development kernel found. Set HKM_DEV_HOME to your checkout, or run the repo-built tools/zig-out/bin/hkm from inside it.");
