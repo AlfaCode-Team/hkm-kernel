@@ -10,6 +10,26 @@ declare(strict_types=1);
  * generated files land under var/edge/ so no root is needed to write them —
  * point EDGE_*_PATH at /etc/nginx or /etc/apache2 in production).
  */
+$__edgeProjectsDir = (static function (): string {
+    // Edge is a HOST/control-plane tool: it must read the GLOBAL project registry
+    // (every project + its domains), which lives in the kernel home — NOT the
+    // per-project base_path. Resolution order: explicit override → PSP_PROJECTS_DIR
+    // → HKM_KERNEL_HOME/projects → base_path('projects').
+    $explicit = (string) env('EDGE_PROJECTS_DIR', '');
+    if ($explicit !== '') {
+        return rtrim($explicit, '/');
+    }
+    $psp = (string) env('PSP_PROJECTS_DIR', '');
+    if ($psp !== '') {
+        return rtrim($psp, '/');
+    }
+    $home = (string) env('HKM_KERNEL_HOME', '');
+    if ($home !== '') {
+        return rtrim($home, '/') . '/projects';
+    }
+    return base_path('projects');
+})();
+
 return [
     // The public TLS port the edge listens on.
     'listen' => (int) (env('EDGE_LISTEN_PORT') ?: 443),
@@ -53,8 +73,8 @@ return [
 
     // Domain sources. The registries are read automatically; extra/exclude let
     // you add or drop hostnames without editing the registry.
-    'projects_registry' => base_path('projects/projects.json'),
-    'platform_registry' => base_path('projects/platform.json'),
+    'projects_registry' => $__edgeProjectsDir . '/projects.json',
+    'platform_registry' => $__edgeProjectsDir . '/platform.json',
     'extra_domains'   => array_values(array_filter(array_map('trim', explode(',', (string) env('EDGE_EXTRA_DOMAINS', ''))))),
     'exclude_domains' => array_values(array_filter(array_map('trim', explode(',', (string) env('EDGE_EXCLUDE_DOMAINS', ''))))),
 
