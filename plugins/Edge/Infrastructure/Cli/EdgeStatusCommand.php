@@ -24,11 +24,13 @@ final class EdgeStatusCommand extends AbstractCommand
     {
         $this->name        = 'edge:status';
         $this->description = 'Detect nginx/Apache and show the edge routing strategy that would be applied';
+
+        $this->addOption('all', '', 'Include every registered project (default: only the current one)');
     }
 
     protected function handle(): int
     {
-        $plan  = $this->edge->plan();
+        $plan  = $this->edge->plan($this->hasOption('all'));
         $stack = $plan->stack;
 
         $this->section('Edge — detected stack');

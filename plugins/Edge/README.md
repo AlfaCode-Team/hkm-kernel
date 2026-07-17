@@ -50,16 +50,23 @@ layer never sees plaintext, so certificates live on the backends.
 
 ## Commands
 
+By default every command scopes to the **current project** (read from
+`base_path()/proj.json` — i.e. the project you run it in). Add **`--all`** to act
+on every registered project in the global `projects.json`.
+
 ```bash
-hkm edge:status              # probe host; show stack, strategy, server + local domains
-hkm edge:apply               # render + write server config + sync /etc/hosts + reload
-hkm edge:apply --dry-run     # print what WOULD be written; change nothing
-hkm edge:apply --no-reload   # write the file only; skip validate + reload
-hkm edge:apply --no-hosts    # skip the /etc/hosts sync
-hkm edge:hosts               # sync ONLY the local domains into /etc/hosts (needs sudo)
-hkm edge:hosts --dry-run     # show the hosts block that would be written
-hkm edge:hosts --remove      # remove the HKM-managed hosts block
+hkm cli -p <project> edge:status         # probe host; show THIS project's plan
+hkm cli -p <project> edge:status --all   # every registered project
+hkm cli -p <project> edge:apply          # render + write config + sync /etc/hosts + reload
+hkm cli -p <project> edge:apply --dry-run   # print what WOULD be written
+hkm cli -p <project> edge:apply --no-reload # write only; skip validate + reload
+hkm cli -p <project> edge:apply --no-hosts  # skip the /etc/hosts sync
+hkm cli -p <project> edge:apply --all       # render ALL projects into one file
+hkm cli -p <project> edge:hosts          # sync THIS project's local domains → /etc/hosts (sudo)
+hkm cli -p <project> edge:hosts --remove # remove the HKM-managed hosts block
 ```
+
+(During development add `--dev` so `hkm` uses your dev kernel checkout.)
 
 ## Per-project serving (the vhost model)
 

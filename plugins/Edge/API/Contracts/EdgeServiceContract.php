@@ -16,8 +16,11 @@ interface EdgeServiceContract
     /** Probe the host and return the detected web-server stack. */
     public function detect(): ServerStack;
 
-    /** Detect + collect domains + render — WITHOUT touching the filesystem. */
-    public function plan(): EdgePlan;
+    /**
+     * Detect + collect sites + render — WITHOUT touching the filesystem.
+     * $all=false (default) scopes to the CURRENT project; true = every project.
+     */
+    public function plan(bool $all = false): EdgePlan;
 
     /**
      * Write the rendered config, sync local domains to /etc/hosts, then
@@ -29,13 +32,14 @@ interface EdgeServiceContract
      *   hosts?: array<string, mixed>|null, message?: string
      * }
      */
-    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null): array;
+    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false): array;
 
     /**
-     * Sync the platform's LOCAL domains (.local / .test / …) into /etc/hosts
-     * (pointing at the loopback), or remove the managed block with $remove.
+     * Sync LOCAL domains (.local / .test / …) into /etc/hosts (pointing at the
+     * loopback), or remove the managed block with $remove. $all=false (default)
+     * scopes to the current project.
      *
      * @return array{ok: bool, changed?: bool, dry_run?: bool, path: string, count: int, block?: string, message?: string}
      */
-    public function syncHosts(bool $remove = false, bool $dryRun = false): array;
+    public function syncHosts(bool $remove = false, bool $dryRun = false, bool $all = false): array;
 }

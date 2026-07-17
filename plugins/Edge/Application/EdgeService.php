@@ -32,24 +32,24 @@ final class EdgeService implements EdgeServiceContract
         return $this->probe->detect();
     }
 
-    public function plan(): EdgePlan
+    public function plan(bool $all = false): EdgePlan
     {
         $stack    = $this->probe->detect();
         $strategy = $stack->strategy();
 
-        // Per-project sites (public domains → server config); local (.local/.test)
-        // domains ride along on each site but go to /etc/hosts, not the config.
-        $sites = $this->sites->sites();
+        // Default: ONLY the current project. --all renders every registered one.
+        // Public domains → server config; local (.local/.test) → /etc/hosts.
+        $sites = $this->sites->sites($all);
 
         [$path, $body] = $this->renderer->render($strategy, $sites);
 
-        return new EdgePlan($stack, $strategy, $sites, $this->sites->localDomains(), $path, $body);
+        return new EdgePlan($stack, $strategy, $sites, $this->sites->localDomains($all), $path, $body);
     }
 
-    public function syncHosts(bool $remove = false, bool $dryRun = false): array
+    public function syncHosts(bool $remove = false, bool $dryRun = false, bool $all = false): array
     {
         return $this->hosts->sync(
-            domains: $this->sites->localDomains(),
+            domains: $this->sites->localDomains($all),
             ip:      (string) edge_config('hosts.ip', '127.0.0.1'),
             path:    (string) edge_config('hosts.path', '/etc/hosts'),
             remove:  $remove,
@@ -57,15 +57,15 @@ final class EdgeService implements EdgeServiceContract
         );
     }
 
-    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null): array
+    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false): array
     {
-        $plan = $this->plan();
+        $plan = $this->plan($all);
 
         // 1. Local domains → /etc/hosts (independent of any web server, so it
         //    still runs when the strategy is None).
         $hosts = null;
         if ($manageHosts ?? (bool) edge_config('manage_hosts', true)) {
-            $hosts = $this->syncHosts(dryRun: $dryRun);
+            $hosts = $this->syncHosts(dryRun: $dryRun, all: $all);
         }
 
         if ($plan->strategy === Strategy::None) {

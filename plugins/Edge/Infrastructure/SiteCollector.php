@@ -19,51 +19,81 @@ use Plugins\Edge\Domain\Site;
  */
 final class SiteCollector
 {
-    /** @return list<Site> */
-    public function sites(): array
+    /**
+     * @param bool $all false (default) = ONLY the current project (read from
+     *                  base_path()/proj.json); true = every registered project.
+     * @return list<Site>
+     */
+    public function sites(bool $all = false): array
     {
+        if (!$all) {
+            $site = $this->currentSite();
+
+            return $site !== null ? [$site] : [];
+        }
+
         $sites = [];
         foreach ($this->projects() as $name => $project) {
-            $path    = rtrim((string) ($project['path'] ?? ''), '/');
-            $domains = $this->classify((array) ($project['domains'] ?? []));
-            if ($path === '' || ($domains['public'] === [] && $domains['local'] === [])) {
-                continue;
+            $site = $this->buildSite((string) $name, (string) ($project['path'] ?? ''), (array) ($project['domains'] ?? []));
+            if ($site !== null) {
+                $sites[] = $site;
             }
-
-            $proj  = $this->projJson($path);
-            $edge  = (array) ($proj['edge'] ?? []);
-            $model = ServeModel::from_((string) ($edge['serve'] ?? edge_config('serve.model', 'fpm')));
-
-            $sites[] = new Site(
-                name:          (string) $name,
-                docroot:       $path . '/app/public',
-                publicDomains: $domains['public'],
-                localDomains:  $domains['local'],
-                model:         $model,
-                upstream:      $this->upstream($model, $edge),
-                env:           $this->env($path, $edge),
-            );
         }
 
         return $sites;
     }
 
-    /** All local (dev-only) domains across every project + EDGE_EXTRA_DOMAINS. */
-    public function localDomains(): array
+    /** Local (dev-only) domains for the current project (or all projects). */
+    public function localDomains(bool $all = false): array
     {
         $local = [];
-        foreach ($this->sites() as $site) {
+        foreach ($this->sites($all) as $site) {
             foreach ($site->localDomains as $d) {
                 $local[] = $d;
             }
         }
-        foreach ($this->classify((array) edge_config('extra_domains', []))['local'] as $d) {
-            $local[] = $d;
+        if ($all) {
+            foreach ($this->classify((array) edge_config('extra_domains', []))['local'] as $d) {
+                $local[] = $d;
+            }
         }
         $local = array_values(array_unique($local));
         sort($local);
 
         return $local;
+    }
+
+    /** The project the command is running in — its own proj.json is the truth. */
+    private function currentSite(): ?Site
+    {
+        $path = rtrim((string) base_path(), '/');
+        $proj = $this->projJson($path);
+        $name = (string) ($proj['name'] ?? basename($path));
+
+        return $this->buildSite($name, $path, (array) ($proj['domains'] ?? []));
+    }
+
+    /** @param array<int, mixed> $domains */
+    private function buildSite(string $name, string $path, array $domains): ?Site
+    {
+        $path = rtrim($path, '/');
+        $cls  = $this->classify($domains);
+        if ($path === '' || ($cls['public'] === [] && $cls['local'] === [])) {
+            return null;
+        }
+
+        $edge  = (array) ($this->projJson($path)['edge'] ?? []);
+        $model = ServeModel::from_((string) ($edge['serve'] ?? edge_config('serve.model', 'fpm')));
+
+        return new Site(
+            name:          $name,
+            docroot:       $path . '/app/public',
+            publicDomains: $cls['public'],
+            localDomains:  $cls['local'],
+            model:         $model,
+            upstream:      $this->upstream($model, $edge),
+            env:           $this->env($path, $edge),
+        );
     }
 
     // ── registries ────────────────────────────────────────────────────────────

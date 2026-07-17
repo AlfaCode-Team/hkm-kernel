@@ -30,6 +30,7 @@ final class EdgeApplyCommand extends AbstractCommand
         $this->addOption('dry-run', '', 'Print the config that would be written; change nothing');
         $this->addOption('no-reload', '', 'Write the config file but do not validate or reload');
         $this->addOption('no-hosts', '', 'Skip writing local (.local/.test) domains to /etc/hosts');
+        $this->addOption('all', '', 'Include every registered project (default: only the current one)');
     }
 
     protected function handle(): int
@@ -37,8 +38,9 @@ final class EdgeApplyCommand extends AbstractCommand
         $dryRun = $this->hasOption('dry-run');
         $reload = !$this->hasOption('no-reload');
         $hosts  = $this->hasOption('no-hosts') ? false : null; // null = use config default
+        $all    = $this->hasOption('all');
 
-        $result = $this->edge->apply(reload: $reload, dryRun: $dryRun, manageHosts: $hosts);
+        $result = $this->edge->apply(reload: $reload, dryRun: $dryRun, manageHosts: $hosts, all: $all);
 
         $this->reportHosts($result['hosts'] ?? null);
 

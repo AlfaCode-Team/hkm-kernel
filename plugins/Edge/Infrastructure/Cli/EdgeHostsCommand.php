@@ -30,6 +30,7 @@ final class EdgeHostsCommand extends AbstractCommand
 
         $this->addOption('dry-run', '', 'Show what would change; write nothing');
         $this->addOption('remove', '', 'Remove the HKM-managed block from the hosts file');
+        $this->addOption('all', '', 'Include every registered project (default: only the current one)');
     }
 
     protected function handle(): int
@@ -37,6 +38,7 @@ final class EdgeHostsCommand extends AbstractCommand
         $result = $this->edge->syncHosts(
             remove: $this->hasOption('remove'),
             dryRun: $this->hasOption('dry-run'),
+            all:    $this->hasOption('all'),
         );
 
         $count = (int) ($result['count'] ?? 0);
