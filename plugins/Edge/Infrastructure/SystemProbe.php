@@ -26,7 +26,31 @@ final class SystemProbe
             nginxHasStream:  $nginxInstalled && $this->nginxHasStream(),
             apacheInstalled: $apacheInstalled,
             apacheActive:    $this->active('apache2') || $this->active('httpd'),
+            nginxHasBrotli:  $nginxInstalled && $this->nginxHasBrotli(),
+            apacheModules:   $apacheInstalled ? $this->apacheModules() : [],
         );
+    }
+
+    /**
+     * The Apache modules currently LOADED, as short names (no `_module` suffix),
+     * parsed from `apachectl -M`. Empty list = couldn't probe (caller treats
+     * that as "unknown", not "absent"). Tries the common front-ends in turn.
+     */
+    public function apacheModules(): array
+    {
+        foreach (['apache2ctl -M', 'apachectl -M', 'httpd -M'] as $cmd) {
+            [$code, $out] = $this->run($cmd);
+            if ($code !== 0 || trim($out) === '') {
+                continue;
+            }
+            // Lines look like "  headers_module (shared)"; grab the module name.
+            preg_match_all('/^\s*(\w+)_module\b/m', $out, $m);
+            if ($m[1] !== []) {
+                return array_values(array_unique($m[1]));
+            }
+        }
+
+        return [];
     }
 
     /** The PHP version running THIS command, e.g. "8.4". */
@@ -142,6 +166,27 @@ final class SystemProbe
             '/usr/lib/nginx/modules/ngx_stream_module.so',
             '/usr/lib64/nginx/modules/ngx_stream_module.so',
             '/etc/nginx/modules/ngx_stream_module.so',
+        ] as $path) {
+            if (is_file($path)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Was the installed nginx built with (or shipped) the ngx_brotli module? */
+    private function nginxHasBrotli(): bool
+    {
+        [, $banner] = $this->run('nginx -V');
+        if (str_contains($banner, 'brotli')) {
+            return true;
+        }
+
+        foreach ([
+            '/usr/lib/nginx/modules/ngx_http_brotli_filter_module.so',
+            '/usr/lib64/nginx/modules/ngx_http_brotli_filter_module.so',
+            '/etc/nginx/modules/ngx_http_brotli_filter_module.so',
         ] as $path) {
             if (is_file($path)) {
                 return true;

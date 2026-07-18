@@ -28,7 +28,26 @@ final readonly class Site
         public ServeModel $model,
         public string $upstream,      // fpm: fastcgi socket/addr · swoole: host:port
         public array $env,
+        /** OpenSwoole settings (ws/health routes, service unit); null for FPM. */
+        public ?SwooleOptions $swoole = null,
+        /** Project root (PROJECT_ROOT). Every other path derives from it. */
+        public string $root = '',
     ) {}
+
+    /**
+     * PROJECT_ROOT/app/public — the nginx `root`, where static assets live.
+     * Falls back to the explicit docroot for sites built without a project root.
+     */
+    public function publicRoot(): string
+    {
+        return $this->root !== '' ? $this->root . '/app/public' : $this->docroot;
+    }
+
+    /** PROJECT_ROOT/app/swoole — the OpenSwoole runtime directory. */
+    public function swooleRoot(): string
+    {
+        return ($this->root !== '' ? $this->root : dirname($this->docroot, 2)) . '/app/swoole';
+    }
 
     /** Does this site have anything to put in the server config? */
     public function servesPublic(): bool

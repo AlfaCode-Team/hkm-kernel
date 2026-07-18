@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace Plugins\Edge\Application;
 
 use Plugins\Edge\API\Contracts\EdgeServiceContract;
+use Plugins\Edge\Domain\CacheProfile;
 use Plugins\Edge\Domain\EdgePlan;
 use Plugins\Edge\Domain\ServerStack;
 use Plugins\Edge\Domain\Strategy;
+use Plugins\Edge\Domain\TlsConfig;
+use Plugins\Edge\Domain\TlsMode;
 use Plugins\Edge\Infrastructure\ConfigRenderer;
 use Plugins\Edge\Infrastructure\HostsFileWriter;
+use Plugins\Edge\Infrastructure\ServiceRenderer;
 use Plugins\Edge\Infrastructure\SiteCollector;
 use Plugins\Edge\Infrastructure\SystemProbe;
 
@@ -25,7 +29,31 @@ final class EdgeService implements EdgeServiceContract
         private readonly SiteCollector $sites,
         private readonly ConfigRenderer $renderer,
         private readonly HostsFileWriter $hosts,
+        private readonly ServiceRenderer $services = new ServiceRenderer(),
     ) {}
+
+    /**
+     * Render process-manager units for the OpenSwoole projects in scope. PHP-FPM
+     * projects are skipped — php-fpm already supervises those workers.
+     *
+     * @return array<string, string> unit/program name => file contents
+     */
+    public function serviceUnits(string $format = 'systemd', bool $all = false, ?string $appEnv = null, string $user = 'www-data'): array
+    {
+        $env  = $appEnv ?? (string) edge_config('app_env', 'production');
+        $out  = [];
+        foreach ($this->sites->sites($all, $env) as $site) {
+            if (!$this->services->supports($site)) {
+                continue;
+            }
+            $name = $this->services->unitName($site);
+            $out[$name] = $format === 'supervisor'
+                ? $this->services->supervisor($site, $user)
+                : $this->services->systemd($site, $user, $user);
+        }
+
+        return $out;
+    }
 
     public function detect(): ServerStack
     {
@@ -41,18 +69,42 @@ final class EdgeService implements EdgeServiceContract
         ];
     }
 
-    public function plan(bool $all = false): EdgePlan
+    public function plan(bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): EdgePlan
     {
         $stack    = $this->probe->detect();
         $strategy = $stack->strategy();
 
+        // The application environment is chosen EXPLICITLY (CLI flag, else the
+        // configured/exported APP_ENV) and is what the cache profile derives from
+        // — never the kernel mode. Keeps kernel selection and app env independent.
+        $env     = $appEnv ?? (string) edge_config('app_env', 'production');
+        $profile = CacheProfile::fromAppEnv($env);
+
         // Default: ONLY the current project. --all renders every registered one.
         // Public domains → server config; local (.local/.test) → /etc/hosts.
-        $sites = $this->sites->sites($all);
+        $sites = $this->sites->sites($all, $env);
 
-        [$path, $body] = $this->renderer->render($strategy, $sites);
+        [$path, $body] = $this->renderer->render($strategy, $sites, $this->resolveTls($tlsMode, $sslCert, $sslKey), $stack, $profile);
 
         return new EdgePlan($stack, $strategy, $sites, $this->sites->localDomains($all), $path, $body);
+    }
+
+    /**
+     * Merge the CLI's TLS overrides with the config defaults into a concrete
+     * TlsConfig. An unknown/empty mode falls back to the configured default, and
+     * that to `ssl`. cert/key default to the config's ssl.* paths.
+     */
+    private function resolveTls(?string $tlsMode, ?string $sslCert, ?string $sslKey): TlsConfig
+    {
+        $mode = TlsMode::tryFrom((string) ($tlsMode ?? ''))
+            ?? TlsMode::tryFrom((string) edge_config('tls.mode', 'ssl'))
+            ?? TlsMode::Ssl;
+
+        return new TlsConfig(
+            $mode,
+            (string) ($sslCert ?? edge_config('ssl.cert')),
+            (string) ($sslKey ?? edge_config('ssl.key')),
+        );
     }
 
     /**
@@ -88,9 +140,9 @@ final class EdgeService implements EdgeServiceContract
         return filter_var(env('HKM_DEV', 'false'), FILTER_VALIDATE_BOOL);
     }
 
-    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false): array
+    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): array
     {
-        $plan = $this->plan($all);
+        $plan = $this->plan($all, $tlsMode, $sslCert, $sslKey, $appEnv);
 
         // 1. Local domains → /etc/hosts. DEV ONLY: a live server resolves its
         //    public domains via DNS, so outside dev we silently skip this step

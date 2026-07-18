@@ -14,9 +14,11 @@ use Plugins\Edge\API\Contracts\EdgeServiceContract;
 use Plugins\Edge\Application\EdgeService;
 use Plugins\Edge\Infrastructure\Cli\EdgeApplyCommand;
 use Plugins\Edge\Infrastructure\Cli\EdgeHostsCommand;
+use Plugins\Edge\Infrastructure\Cli\EdgeServiceCommand;
 use Plugins\Edge\Infrastructure\Cli\EdgeStatusCommand;
 use Plugins\Edge\Infrastructure\ConfigRenderer;
 use Plugins\Edge\Infrastructure\HostsFileWriter;
+use Plugins\Edge\Infrastructure\ServiceRenderer;
 use Plugins\Edge\Infrastructure\SiteCollector;
 use Plugins\Edge\Infrastructure\SystemProbe;
 
@@ -62,6 +64,7 @@ final class Provider implements ModuleContract
             $cli->command(new EdgeStatusCommand($service));
             $cli->command(new EdgeApplyCommand($service));
             $cli->command(new EdgeHostsCommand($service));
+            $cli->command(new EdgeServiceCommand($service));
         });
     }
 
@@ -74,6 +77,7 @@ final class Provider implements ModuleContract
             new SiteCollector($probe),
             new ConfigRenderer(),
             new HostsFileWriter(),
+            new ServiceRenderer(),
         );
     }
 }
