@@ -1,0 +1,12 @@
+/vendor/
+/var/logs/*
+/var/cache/*
+/var/tmp/*
+/var/locks/*
+/var/sessions/*
+/var/queue/*
+!/var/**/.gitkeep
+/userdata/storage/*
+!/userdata/.gitkeep
+.env
+/database/*.sqlite

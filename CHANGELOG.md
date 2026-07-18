@@ -6,6 +6,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.15] - 2026-07-17
+
+### Fixed
+- **Edge now serves local (`.local`/`.test`) domains in dev.** The
+  `EDGE_LOCAL_IN_SERVER` flag was defined but never read, so a project whose
+  domains are all local rendered an empty vhost (header comment only). Dev mode
+  (`hkm … --dev`, which exports `HKM_DEV=1`) now folds local domains into the
+  generated nginx/Apache vhost automatically — `hkm cli -p <project> --dev
+  edge:apply` produces a working local site with no extra flag. A production
+  (non `--dev`) run still keeps local domains out of the server config (they
+  resolve through DNS); `EDGE_LOCAL_IN_SERVER=true` forces local-in-server
+  outside dev. Local domains continue to sync to `/etc/hosts` in both cases.
+
+## [1.0.13] - 2026-07-17
+
+### Added
+- **Edge plugin (`Plugins\Edge`, solves `edge.routing`).** Generates this host's
+  web-server front config from the platform's registered domains and adapts to
+  what is actually running: nginx **SNI stream splitter** (raw-TLS `ssl_preread`
+  routing to nginx `:444` / Apache `:8443`) when both run, else a plain
+  **nginx-only** or **Apache-only** vhost. Project-aware: one vhost per project
+  (docroot `<project>/app/public`), served via **PHP-FPM** or **OpenSwoole**
+  (configurable per project in `proj.json` `"edge"`). The **run-env** the
+  launcher exports (`APP_ENV`, `HKM_KERNEL_HOME`, `HKM_DEV_HOME`,
+  `HKM_USERDATA_DIR`, `PSP_GLOBAL_AUTOLOAD`, `PSP_PROJECTS_DIR`) is passed through
+  into each vhost so FPM workers boot the correct kernel. The PHP-FPM socket is
+  auto-resolved to the **CLI PHP version** (multi-PHP hosts). Local (`.local`/
+  `.test`) domains are excluded from the server config and synced to `/etc/hosts`
+  (dev only, `--dev` required; never duplicates an existing entry). CLI:
+  `edge:status`, `edge:apply`, `edge:hosts` (default-scoped to the current
+  project, `--all` for the whole registry). See `plugins/Edge/README.md`.
+- **`PSP_PROJECTS_DIR` is now exported by `hkm run` / `hkm cli`** — resolved to
+  the same project registry the launcher uses (`HKM_USERDATA_DIR` → `PSP_PROJECTS_DIR`
+  → `HKM_KERNEL_HOME/projects`), so the kernel and plugins read one registry
+  without re-deriving it. `--dev` also exports `HKM_DEV=1` as an explicit marker.
+
+### Fixed
+- **Frontend build output path.** Vite wrote hashed assets + manifests to
+  `<project>/public_html/build/`, but the docroot and `ViteManifest` both use
+  `<project>/app/public` — so built assets landed outside the web root and were
+  never found. The frontend template now builds to `app/public/build/`.
+- **`hkm … --dev` under `sudo`.** The launcher read its config from root's home
+  (`/root/.config/hkm/config.env`) and lost `HKM_DEV_HOME`; it now honours
+  `SUDO_USER` and reads the invoking user's `config.env`, so `sudo hkm … --dev`
+  resolves the dev kernel.
+
 ## [1.0.12] - 2026-07-16
 
 ### Changed

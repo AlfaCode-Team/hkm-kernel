@@ -12,8 +12,8 @@
 //         dependency), so editing a server-rendered page refreshes the browser
 //   • gzipPlugin  — per-build gzip of only the files THIS run emitted.
 //
-// PHP reads:  public_html/build/manifest-<surface>.json  (hashed asset names)
-//             public_html/<surface>-hot                    (dev server URL; dev only)
+// PHP reads:  app/public/build/manifest-<surface>.json  (hashed asset names)
+//             app/public/<surface>-hot                    (dev server URL; dev only)
 
 import fs from "fs";
 import { resolve } from "path";
@@ -37,7 +37,7 @@ const PLACEHOLDER = "__hkm_vite_placeholder__";
 
 export function hkmPlugin(frontendRoot: string, surface: Surface, options: HkmPluginOptions = {}): Plugin {
   const project = resolve(frontendRoot, "..");
-  const publicDir = resolve(project, "public_html");
+  const publicDir = resolve(project, "app", "public");
   const outDir = resolve(publicDir, "build");
   const hotFile = resolve(publicDir, `${surface.name}-hot`);
 
@@ -161,7 +161,7 @@ function matches(file: string, roots: string[]): boolean {
 }
 
 export function gzipPlugin(frontendRoot: string, threshold = 1024): Plugin {
-  const outDir = resolve(frontendRoot, "..", "public_html", "build");
+  const outDir = resolve(frontendRoot, "..", "app", "public", "build");
   const emitted = new Set<string>();
 
   return {

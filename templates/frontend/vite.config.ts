@@ -99,7 +99,7 @@ export default defineConfig((config) => {
 
     build: {
       manifest: `manifest-${surface.name}.json`,
-      outDir: resolve(PROJECT, "public_html", "build"),
+      outDir: resolve(PROJECT, "app", "public", "build"),
       emptyOutDir: false, // per-surface cleanup handled by surfacePlugin
       rollupOptions: {
         input: resolve(ROOT, surface.entry),

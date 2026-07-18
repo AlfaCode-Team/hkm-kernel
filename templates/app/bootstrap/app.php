@@ -315,6 +315,14 @@ return Kernel::configure()
         // routes. Needs http.client (above) for its network actions.
         SiteSeoModule::class,
 
+        // Edge (solves: edge.routing) — generates this host's web-server front
+        // config from the project's domains: an nginx SNI stream splitter when
+        // nginx+Apache both run, else a plain nginx/Apache vhost (docroot
+        // app/public, PHP-FPM or Swoole) with the run-env injected. Local
+        // (.local/.test) domains go to /etc/hosts instead (dev only).
+        // CLI: `hkm cli -p <project> edge:status | edge:apply | edge:hosts`.
+        \Plugins\Edge\Provider::class,
+
         // Identity stack (enable together in an app that needs accounts):
         //   \Plugins\User\Provider::class,      // user.management (identity + settings)
         //   \Plugins\Feedback\Provider::class,  // feedback.management (/ajx/feedback)

@@ -1,0 +1,21 @@
+{
+    "name": "psp/{{PROJECT_NAME}}",
+    "description": "A PhpServicePlatform project.",
+    "type": "project",
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "{{STUDLY}}\\": "src/",
+            "Plugins\\": "plugins/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
