@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Plugins\Edge\Infrastructure;
 
 use Plugins\Edge\Domain\ServeModel;
+use Plugins\Edge\Domain\SwooleOptions;
 use Plugins\Edge\Domain\Site;
 
 /**
@@ -26,17 +27,17 @@ final class SiteCollector
      *                  base_path()/proj.json); true = every registered project.
      * @return list<Site>
      */
-    public function sites(bool $all = false): array
+    public function sites(bool $all = false, ?string $appEnv = null): array
     {
         if (!$all) {
-            $site = $this->currentSite();
+            $site = $this->currentSite($appEnv);
 
             return $site !== null ? [$site] : [];
         }
 
         $sites = [];
         foreach ($this->projects() as $name => $project) {
-            $site = $this->buildSite((string) $name, (string) ($project['path'] ?? ''), (array) ($project['domains'] ?? []));
+            $site = $this->buildSite((string) $name, (string) ($project['path'] ?? ''), (array) ($project['domains'] ?? []), $appEnv);
             if ($site !== null) {
                 $sites[] = $site;
             }
@@ -66,17 +67,17 @@ final class SiteCollector
     }
 
     /** The project the command is running in — its own proj.json is the truth. */
-    private function currentSite(): ?Site
+    private function currentSite(?string $appEnv = null): ?Site
     {
         $path = rtrim((string) base_path(), '/');
         $proj = $this->projJson($path);
         $name = (string) ($proj['name'] ?? basename($path));
 
-        return $this->buildSite($name, $path, (array) ($proj['domains'] ?? []));
+        return $this->buildSite($name, $path, (array) ($proj['domains'] ?? []), $appEnv);
     }
 
     /** @param array<int, mixed> $domains */
-    private function buildSite(string $name, string $path, array $domains): ?Site
+    private function buildSite(string $name, string $path, array $domains, ?string $appEnv = null): ?Site
     {
         $path = rtrim($path, '/');
         $cls  = $this->classify($domains);
@@ -84,8 +85,13 @@ final class SiteCollector
             return null;
         }
 
-        $edge  = (array) ($this->projJson($path)['edge'] ?? []);
-        $model = ServeModel::from_((string) ($edge['serve'] ?? edge_config('serve.model', 'fpm')));
+        $edge = (array) ($this->projJson($path)['edge'] ?? []);
+        // `runtime` is the current spelling; `serve` is kept for older proj.json
+        // files. Both accept php-fpm|openswoole as well as fpm|swoole.
+        $model = ServeModel::from_((string) (
+            $edge['runtime'] ?? $edge['serve'] ?? edge_config('serve.model', 'fpm')
+        ));
+        $swoole = $model === ServeModel::Swoole ? $this->swooleOptions($edge) : null;
 
         // In dev mode (`hkm … --dev` → HKM_DEV=1) — or when EDGE_LOCAL_IN_SERVER
         // is forced — the local (.local/.test) domains are ALSO served by the
@@ -102,8 +108,10 @@ final class SiteCollector
             publicDomains: $public,
             localDomains:  $cls['local'],
             model:         $model,
-            upstream:      $this->upstream($model, $edge),
-            env:           $this->env($edge),
+            upstream:      $swoole?->upstream() ?? $this->upstream($model, $edge),
+            env:           $this->env($edge, $appEnv),
+            swoole:        $swoole,
+            root:          $path,
         );
     }
 
@@ -150,12 +158,61 @@ final class SiteCollector
         return (bool) edge_config('include_local_in_server', false);
     }
 
+    /**
+     * Per-project OpenSwoole settings: config defaults, overridden by the
+     * project's proj.json `edge.openswoole` block (or the flat `edge.port`).
+     *
+     * @param array<string, mixed> $edge
+     */
+    private function swooleOptions(array $edge): SwooleOptions
+    {
+        $o = (array) ($edge['openswoole'] ?? $edge['swoole'] ?? []);
+
+        // A null/empty path disables the block; omitted falls back to config.
+        $ws = array_key_exists('websocket', $o)
+            ? (is_string($o['websocket']) && trim($o['websocket']) !== '' ? trim($o['websocket']) : null)
+            : (string) edge_config('serve.websocket_path', '/ws');
+        $health = array_key_exists('health', $o)
+            ? (is_string($o['health']) && trim($o['health']) !== '' ? trim($o['health']) : null)
+            : ((bool) edge_config('serve.health.enabled', false)
+                ? (string) edge_config('serve.health.path', '/health')
+                : null);
+
+        // `ports: [9501, 9502, 9503]` spins one upstream server per port; the
+        // first is the primary, the rest become extra backends.
+        $host  = (string) ($o['host'] ?? edge_config('serve.swoole_host', '127.0.0.1'));
+        $ports = array_values(array_filter(array_map('intval', (array) ($o['ports'] ?? []))));
+        $port  = $ports[0] ?? (int) ($o['port'] ?? $edge['port'] ?? edge_config('serve.swoole_port', 9501));
+        $extra = array_map(static fn (int $p): string => "{$host}:{$p}", array_slice($ports, 1));
+
+        return new SwooleOptions(
+            host:          $host,
+            port:          $port,
+            websocketPath: $ws === '' ? null : $ws,
+            healthPath:    $health === '' ? null : $health,
+            php:           (string) ($o['php'] ?? edge_config('serve.swoole_php', '/usr/bin/php')),
+            command:       (string) ($o['command'] ?? edge_config('serve.swoole_command', 'bin/server.php')),
+            workers:       (string) ($o['workers'] ?? edge_config('serve.swoole_workers', 'auto')),
+            extraServers:  array_values(array_unique([...$extra, ...array_filter(array_map(
+                static fn ($v): string => trim((string) $v),
+                (array) ($o['servers'] ?? [])
+            ))])),
+            balance:           (string) ($o['balance'] ?? edge_config('serve.swoole_balance', 'least_conn')),
+            maxFails:          (int) ($o['max_fails'] ?? edge_config('serve.swoole_max_fails', 3)),
+            failTimeout:       (string) ($o['fail_timeout'] ?? edge_config('serve.swoole_fail_timeout', '30s')),
+            keepalive:         (int) ($o['keepalive'] ?? edge_config('serve.swoole_keepalive', 32)),
+            keepaliveTimeout:  (string) ($o['keepalive_timeout'] ?? edge_config('serve.swoole_keepalive_timeout', '60s')),
+            keepaliveRequests: (int) ($o['keepalive_requests'] ?? edge_config('serve.swoole_keepalive_requests', 1000)),
+        );
+    }
+
     /** @param array<string, mixed> $edge */
     private function upstream(ServeModel $model, array $edge): string
     {
         if ($model === ServeModel::Swoole) {
+            // Normally supplied by SwooleOptions::upstream(); kept as a fallback.
             $host = (string) edge_config('serve.swoole_host', '127.0.0.1');
-            $port = (int) ($edge['port'] ?? edge_config('serve.swoole_base_port', 9500));
+            $port = (int) ($edge['port'] ?? edge_config('serve.swoole_port', 9501));
 
             return "{$host}:{$port}";
         }
@@ -174,11 +231,11 @@ final class SiteCollector
      * @param array<string, mixed> $edge
      * @return array<string, string>
      */
-    private function env(array $edge): array
+    private function env(array $edge, ?string $appEnv = null): array
     {
         $env = [];
 
-        $appEnv = (string) edge_config('app_env', 'production');
+        $appEnv = (string) ($appEnv ?? edge_config('app_env', 'production'));
         if ($appEnv !== '') {
             $env['APP_ENV'] = $appEnv;
         }

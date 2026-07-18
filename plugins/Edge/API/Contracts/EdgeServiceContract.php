@@ -26,8 +26,12 @@ interface EdgeServiceContract
     /**
      * Detect + collect sites + render — WITHOUT touching the filesystem.
      * $all=false (default) scopes to the CURRENT project; true = every project.
+     *
+     * TLS overrides (null = use config): $tlsMode is one of ssl|none|both,
+     * $sslCert/$sslKey override the certificate paths. $appEnv overrides APP_ENV
+     * (local|development|production), which is what the cache profile derives from.
      */
-    public function plan(bool $all = false): EdgePlan;
+    public function plan(bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): EdgePlan;
 
     /**
      * Write the rendered config, sync local domains to /etc/hosts, then
@@ -38,8 +42,19 @@ interface EdgeServiceContract
      *   dry_run?: bool, contents?: string, steps?: list<string>,
      *   hosts?: array<string, mixed>|null, message?: string
      * }
+     *
+     * TLS overrides (null = use config): $tlsMode is one of ssl|none|both,
+     * $sslCert/$sslKey override the certificate paths.
      */
-    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false): array;
+    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): array;
+
+    /**
+     * Render process-manager units (systemd | supervisor) for the OpenSwoole
+     * projects in scope. PHP-FPM projects yield nothing — php-fpm supervises them.
+     *
+     * @return array<string, string> unit/program name => file contents
+     */
+    public function serviceUnits(string $format = 'systemd', bool $all = false, ?string $appEnv = null, string $user = 'www-data'): array;
 
     /**
      * Sync LOCAL domains (.local / .test / …) into /etc/hosts (pointing at the
