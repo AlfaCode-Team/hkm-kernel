@@ -34,6 +34,112 @@ return [
     // The public TLS port the edge listens on.
     'listen' => (int) (env('EDGE_LISTEN_PORT') ?: 443),
 
+    // The public plain-HTTP port (used by tls=none, and the redirect vhost of
+    // tls=both).
+    'http' => (int) (env('EDGE_HTTP_PORT') ?: 80),
+
+    // Default TLS mode for the rendered vhosts (overridable per `edge:apply` run):
+    //   ssl  — HTTPS only (:443)                       [default]
+    //   none — plain HTTP only (:80, no certificate)
+    //   both — plain :80 that 301-redirects to HTTPS (:443)
+    'tls' => [
+        'mode' => (string) (env('EDGE_TLS_MODE') ?: 'ssl'),
+    ],
+
+    // Browser-cache strategy for the generated nginx vhost.
+    //
+    // The DEVELOPMENT vs PRODUCTION profile is derived from APP_ENV alone
+    // (local/development → DEVELOPMENT, production → PRODUCTION, anything
+    // unknown → DEVELOPMENT) — see Domain\CacheProfile. It is deliberately NOT
+    // configurable here and never inferred from the kernel mode (HKM_DEV).
+    //
+    //   DEVELOPMENT → HTML, index.php AND every asset are no-store, so a refresh
+    //                 always refetches the latest CSS/JS/JSON/images.
+    //   PRODUCTION  → never cache HTML/index.php, but cache the fingerprinted
+    //                 static assets long-term & immutable.
+    //
+    // These are independent knobs so the generator adapts without code changes:
+    //   browser_assets      cache versioned static assets at all (prod)
+    //   browser_assets_ttl  how long, in seconds (default 1 year)
+    //   browser_html        cache HTML/dynamic responses (almost always false)
+    //   cloudflare          add `immutable` to asset Cache-Control (CDN-friendly)
+    'cache' => [
+        'browser_assets'     => filter_var(env('EDGE_CACHE_ASSETS', 'true'), FILTER_VALIDATE_BOOL),
+        'browser_assets_ttl' => (int) (env('EDGE_CACHE_ASSETS_TTL') ?: 31536000),
+        'browser_html'       => filter_var(env('EDGE_CACHE_HTML', 'false'), FILTER_VALIDATE_BOOL),
+        'cloudflare'         => filter_var(env('EDGE_CACHE_CLOUDFLARE', 'true'), FILTER_VALIDATE_BOOL),
+    ],
+
+    // HTTP-context prerequisites emitted ONCE at the top of the generated file:
+    // the log_format, the rate-limit zones and the Cloudflare real-IP ranges that
+    // the vhost directives below depend on.
+    //
+    // OPT-IN (default off): if your nginx.conf already declares `log_format
+    // cf_realip` or `limit_req_zone … zone=general`, emitting them again is a
+    // duplicate-definition error. Turn this on only when Edge owns those.
+    'http_prelude' => [
+        'enabled' => filter_var(env('EDGE_HTTP_PRELUDE', 'false'), FILTER_VALIDATE_BOOL),
+
+        // log_format + the per-vhost access_log that uses it.
+        'log_format'      => (string) (env('EDGE_LOG_FORMAT') ?: 'cf_realip'),
+        'log_buffer'      => (string) (env('EDGE_LOG_BUFFER') ?: '32k'),
+        'log_flush'       => (string) (env('EDGE_LOG_FLUSH') ?: '5s'),
+
+        // limit_req_zone / limit_conn_zone + the vhost limit_req / limit_conn.
+        'rate_limit' => [
+            'enabled'    => filter_var(env('EDGE_RATE_LIMIT', 'true'), FILTER_VALIDATE_BOOL),
+            'req_zone'   => (string) (env('EDGE_RATE_REQ_ZONE') ?: 'general'),
+            'req_size'   => (string) (env('EDGE_RATE_REQ_SIZE') ?: '10m'),
+            'req_rate'   => (string) (env('EDGE_RATE_REQ_RATE') ?: '10r/s'),
+            'req_burst'  => (int) (env('EDGE_RATE_REQ_BURST') ?: 50),
+            'req_nodelay' => filter_var(env('EDGE_RATE_REQ_NODELAY', 'true'), FILTER_VALIDATE_BOOL),
+            'conn_zone'  => (string) (env('EDGE_RATE_CONN_ZONE') ?: 'perip'),
+            'conn_size'  => (string) (env('EDGE_RATE_CONN_SIZE') ?: '10m'),
+            'conn_limit' => (int) (env('EDGE_RATE_CONN_LIMIT') ?: 100),
+        ],
+
+        // Cloudflare: restore the visitor IP from CF-Connecting-IP so logs, rate
+        // limits and deny rules see the real client instead of a CF edge node.
+        // Ranges default to Cloudflare's published list (www.cloudflare.com/ips);
+        // override with a comma-separated EDGE_CLOUDFLARE_RANGES.
+        'cloudflare' => [
+            'enabled' => filter_var(env('EDGE_CLOUDFLARE_REAL_IP', 'true'), FILTER_VALIDATE_BOOL),
+            'header'  => (string) (env('EDGE_CLOUDFLARE_HEADER') ?: 'CF-Connecting-IP'),
+            'ranges'  => array_values(array_filter(array_map('trim', explode(',', (string) env('EDGE_CLOUDFLARE_RANGES', ''))))),
+        ],
+    ],
+
+    // Dev-only nginx vhost extras (verbose debug logging, permissive CORS,
+    // Disallow-all robots.txt, /nginx-status). NULL (the default) means "follow
+    // the APP_ENV cache profile" — set EDGE_DEV_VHOST=1/0 to force. Deliberately
+    // NOT derived from HKM_DEV: kernel selection and app environment are
+    // independent concerns.
+    'dev_vhost' => ((string) env('EDGE_DEV_VHOST', '')) === ''
+        ? null
+        : filter_var(env('EDGE_DEV_VHOST'), FILTER_VALIDATE_BOOL),
+
+    // Response compression preference. `auto` is resolved PER SERVER at render
+    // time from that server's own capability — nginx from its ngx_brotli build,
+    // Apache from its loaded mod_brotli — falling back to gzip; force with
+    // EDGE_COMPRESSION = brotli | gzip | off. Brotli mode also emits a gzip block
+    // as a fallback for clients without `br`. An explicit `brotli` still degrades
+    // to gzip on a server that lacks the module, so a bad choice never breaks the
+    // config test. An unrecognised value is treated as `auto`.
+    'compression' => (static function (): string {
+        $mode = strtolower(trim((string) env('EDGE_COMPRESSION', 'auto')));
+        return in_array($mode, ['auto', 'brotli', 'gzip', 'off'], true) ? $mode : 'auto';
+    })(),
+
+    // HTTP Strict Transport Security. Emitted ONLY for TLS modes (ssl / both) —
+    // never for plain HTTP. `preload` is a long-lived commitment; enable only
+    // when you're sure. max_age is in seconds (default 1 year).
+    'hsts' => [
+        'enabled'            => filter_var(env('EDGE_HSTS', 'true'), FILTER_VALIDATE_BOOL),
+        'max_age'            => (int) (env('EDGE_HSTS_MAX_AGE') ?: 31536000),
+        'include_subdomains' => filter_var(env('EDGE_HSTS_SUBDOMAINS', 'true'), FILTER_VALIDATE_BOOL),
+        'preload'            => filter_var(env('EDGE_HSTS_PRELOAD', 'false'), FILTER_VALIDATE_BOOL),
+    ],
+
     // Backends the traffic is routed to.
     'upstreams' => [
         // Where nginx terminates TLS for the platform's own domains.
@@ -97,14 +203,48 @@ return [
     // resolve through DNS. Local domains are written to /etc/hosts regardless.
     'include_local_in_server' => filter_var(env('EDGE_LOCAL_IN_SERVER', 'false'), FILTER_VALIDATE_BOOL),
 
-    // How each project is served (per-project override via proj.json "edge").
+    // How each project is served. Per-project override via proj.json:
+    //   { "edge": { "runtime": "openswoole",
+    //               "openswoole": { "host": "127.0.0.1", "port": 9501,
+    //                               "websocket": "/ws", "health": "/health",
+    //                               "php": "/usr/bin/php8.3",
+    //                               "command": "bin/server.php",
+    //                               "workers": "auto" } } }
+    // `runtime` accepts php-fpm | openswoole (and the legacy fpm | swoole).
+    // Projects with no runtime set stay on PHP-FPM — existing configs are unchanged.
     'serve' => [
-        'model'            => (string) (env('EDGE_SERVE_MODEL') ?: 'fpm'),   // fpm | swoole
+        'model'            => (string) (env('EDGE_SERVE_MODEL') ?: 'php-fpm'), // php-fpm | openswoole
         // Empty = auto-resolve the FPM socket matching the CLI PHP version
         // (multi-PHP hosts). Set explicitly to pin a socket/addr.
         'fpm_socket'       => (string) env('EDGE_FPM_SOCKET', ''),
+
+        // ── OpenSwoole ────────────────────────────────────────────────────────
+        // Where the app's Swoole HTTP server listens — nginx reverse-proxies here.
         'swoole_host'      => (string) (env('EDGE_SWOOLE_HOST') ?: '127.0.0.1'),
-        'swoole_base_port' => (int) (env('EDGE_SWOOLE_BASE_PORT') ?: 9500),
+        'swoole_port'      => (int) (env('EDGE_SWOOLE_PORT') ?: env('EDGE_SWOOLE_BASE_PORT') ?: 9501),
+        // Dedicated WebSocket location. Empty disables the extra block (the `/`
+        // proxy still carries the Upgrade headers).
+        'websocket_path'   => (string) (env('EDGE_SWOOLE_WS_PATH') ?: '/ws'),
+        // Values used by the generated systemd/supervisor unit (`edge:service`).
+        'swoole_php'       => (string) (env('EDGE_SWOOLE_PHP') ?: PHP_BINARY ?: '/usr/bin/php'),
+        // Entry script, relative to PROJECT_ROOT (absolute paths are used as-is).
+        // Matches what `hkm run <project> --swoole` executes.
+        'swoole_command'   => (string) (env('EDGE_SWOOLE_COMMAND') ?: 'app/swoole/index.php'),
+        'swoole_workers'   => (string) (env('EDGE_SWOOLE_WORKERS') ?: 'auto'),
+        // Upstream pool for the OpenSwoole backend(s). Extra backends are added
+        // per project via proj.json: "openswoole": { "servers": ["127.0.0.1:9502"] }
+        'swoole_balance'            => (string) (env('EDGE_SWOOLE_BALANCE') ?: 'least_conn'), // '' = round-robin
+        'swoole_max_fails'          => (int) (env('EDGE_SWOOLE_MAX_FAILS') ?: 3),
+        'swoole_fail_timeout'       => (string) (env('EDGE_SWOOLE_FAIL_TIMEOUT') ?: '10s'),
+        'swoole_keepalive'          => (int) (env('EDGE_SWOOLE_KEEPALIVE') ?: 64),   // 0 disables the pool
+        'swoole_keepalive_timeout'  => (string) env('EDGE_SWOOLE_KEEPALIVE_TIMEOUT', ''),   // '' = omit
+        'swoole_keepalive_requests' => (int) env('EDGE_SWOOLE_KEEPALIVE_REQUESTS', 0),      // 0 = omit
+
+        // Optional health endpoint proxied to the app (off by default).
+        'health'           => [
+            'enabled' => filter_var(env('EDGE_HEALTH_CHECK', 'false'), FILTER_VALIDATE_BOOL),
+            'path'    => (string) (env('EDGE_HEALTH_PATH') ?: '/health'),
+        ],
     ],
 
     // Inject the kernel-resolution env into each vhost so FPM workers (which do

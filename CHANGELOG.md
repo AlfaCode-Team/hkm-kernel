@@ -6,6 +6,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.16] - 2026-07-18
+
+### Added
+- **TLS modes for `edge:apply`.** `--tls=ssl|none|both` (plus `--no-ssl` as an
+  alias for `none`) picks how each vhost terminates TLS: HTTPS only, plain HTTP
+  on `:80`, or `:80` that 301-redirects to `:443`. `--ssl-cert` / `--ssl-key`
+  override the certificate paths per run. Default comes from `EDGE_TLS_MODE`
+  (`ssl`), so existing behaviour is unchanged.
+- **Cache profiles derived from `APP_ENV`.** `local` / `development` →
+  DEVELOPMENT (nothing is browser-cached: HTML, the front controller and every
+  asset are `no-store`, so a rebuild is picked up without clearing the browser
+  cache); `production` → PRODUCTION (dynamic responses stay uncached,
+  fingerprinted assets get `expires 1y` + `public, immutable`). Anything
+  unrecognised falls back to DEVELOPMENT — never production. The profile is
+  written into the file as a `# HKM Edge cache profile: …` banner.
+- **Environment flags on `edge:apply` / `edge:service`.** `--local` (alias
+  `--dev`), `--development` / `-d`, and `--production` set `APP_ENV` for the
+  run. They are command-scoped, not launcher-global.
+- **OpenSwoole runtime.** A project can now set `"edge": { "runtime":
+  "openswoole" }` in its `proj.json` and Edge renders nginx as a reverse proxy
+  instead of a PHP-FPM vhost: a dedicated `upstream` (least_conn, `max_fails` /
+  `fail_timeout`, keepalive pool, multiple workers via `"ports": [9501, 9502]`),
+  a `$connection_upgrade` map, a separate `/ws` WebSocket location with long
+  timeouts, an optional `/health` endpoint, and Cloudflare's `CF-Connecting-IP`
+  forwarded upstream. Static assets are still served straight off disk.
+- **`edge:service` command.** Generates the systemd unit (or supervisor program
+  block with `--supervisor`) that keeps a project's OpenSwoole server alive.
+  `--write[=dir]` writes it out; PHP-FPM projects are skipped since php-fpm
+  already supervises those workers. PHP binary, entry script, port and worker
+  count are configurable.
+- **Response compression.** `EDGE_COMPRESSION=auto` (default) prefers Brotli
+  when the server actually supports it and falls back to gzip — resolved per
+  server from nginx's `ngx_brotli` build and Apache's loaded `mod_brotli`, so an
+  Apache-only host no longer inherits nginx's answer. Brotli mode also emits a
+  gzip block for clients without `br`.
+- **HSTS.** Emitted only for the TLS modes (`ssl` / `both`), never for plain
+  HTTP, with configurable `max-age`, `includeSubDomains` and `preload`.
+- **Optional http-context prelude** (`EDGE_HTTP_PRELUDE=1`, off by default):
+  the `log_format`, `limit_req_zone` / `limit_conn_zone` and Cloudflare
+  `set_real_ip_from` ranges that the vhost directives depend on. Off by default
+  because re-declaring a zone that already exists in `nginx.conf` is a
+  duplicate-definition error.
+
+### Changed
+- **Cache mode is no longer inferred from the kernel mode.** Nothing in vhost
+  generation reads `HKM_DEV` any more — the cache profile comes from `APP_ENV`
+  alone, so choosing which kernel to run against (`hkm … --dev`) and choosing
+  how assets are cached are independent. `dev_vhost` defaults to "follow the
+  cache profile"; set `EDGE_DEV_VHOST` to force it either way.
+- **All generated paths derive from the project root.** The vhost records its
+  provenance (`# HKM Edge project root: …` / `public root: …` / `swoole root:
+  …`) and the OpenSwoole entry script now defaults to `app/swoole/index.php`
+  relative to the project root — matching what `hkm run <project> --swoole`
+  actually executes (it previously defaulted to a `bin/server.php` that no HKM
+  project has).
+- **Security headers are repeated inside `location` blocks that set their own
+  `add_header`.** nginx drops every inherited `add_header` as soon as a location
+  adds one, which silently stripped `nosniff` / `X-Frame-Options` /
+  `Referrer-Policy` / HSTS from static assets and the front controller.
+- Static assets resolve only under the public root; a miss is a hard `404` and
+  is never forwarded to the application.
+
+### Fixed
+- **Generated nginx failed `nginx -t`.** The PHP-FPM vhost nested `location =
+  /index.php` inside `location ~ \.php$`, which nginx rejects ("location … is
+  outside location …"), so `edge:apply` could never pass its own config test.
+  Replaced with the flat front-controller pair (`location = /index.php` for
+  FastCGI, `location ~ \.php$ { return 404; }` for everything else).
+- **`.well-known` was denied, breaking ACME/Let's Encrypt.** A blanket
+  `location ~ /\.` shadowed the later negative-lookahead rule, so HTTP-01
+  challenges 404'd and certificates could not be issued or renewed.
+- **Apache vhosts failed `apachectl configtest`.** `ServerTokens` is a
+  server-level directive and is rejected inside `<VirtualHost>`; it is no longer
+  emitted (`ServerSignature` / `LimitRequestBody` are valid there and remain).
+- **Apache no longer emits directives for modules that are not loaded.** The
+  loaded module set is probed from `apachectl -M`, and HSTS (`mod_headers`) and
+  compression (`mod_filter` + `mod_brotli` / `mod_deflate`) degrade to whatever
+  the host supports instead of failing the config test.
+
 ## [1.0.15] - 2026-07-17
 
 ### Fixed
