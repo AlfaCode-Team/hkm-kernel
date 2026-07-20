@@ -27,6 +27,19 @@ const skip_dirs = [_][]const u8{
     "vendor", "node_modules", "var", ".git", "dist", "zig-out", ".zig-cache",
 };
 
+/// Ephemeral runtime directories every project needs at boot but which are
+/// gitignored — so a freshly cloned or moved project is usually missing them.
+/// `discover` recreates any that are absent (mirrors what `hkm new` scaffolds).
+const runtime_dirs = [_][]const u8{
+    "var/logs",
+    "var/cache/manifests",
+    "var/tmp",
+    "var/locks",
+    "var/sessions",
+    "var/queue",
+    "userdata/storage",
+};
+
 const Options = struct {
     /// Root directory to scan (default: current directory).
     root: []const u8,
@@ -100,6 +113,16 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
             if (f.domains.len > 0) try util.joinList(allocator, f.domains) else "(no domains)",
         }));
 
+        // Report (dry-run) or restore (real run) the gitignored runtime folders
+        // a clone/move typically lacks, so the project can boot straight away.
+        const missing = try ensureRuntimeDirs(allocator, io, f.path, opts.dry_run);
+        if (missing > 0) {
+            prompt.muted(try std.fmt.allocPrint(allocator, "    runtime dirs: {d} {s}", .{
+                missing,
+                if (opts.dry_run) "missing" else "created",
+            }));
+        }
+
         if (!opts.dry_run) {
             try registry.upsert(allocator, io, jsonPath, .{
                 .name = f.name,
@@ -119,6 +142,21 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         prompt.outro(try std.fmt.allocPrint(allocator, "{s}", .{jsonPath}));
     }
     return 0;
+}
+
+/// Ensure every runtime directory exists under the project root. Returns the
+/// count that were absent — created when `dry_run` is false, only counted when
+/// true. Uses `createDirPath` so parent segments (e.g. `var/cache`) are made too.
+fn ensureRuntimeDirs(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8, dry_run: bool) !usize {
+    const cwd = Dir.cwd();
+    var missing: usize = 0;
+    for (runtime_dirs) |sub| {
+        const path = try util.join(allocator, projectRoot, sub);
+        if (util.dirExists(cwd, io, path)) continue;
+        missing += 1;
+        if (!dry_run) cwd.createDirPath(io, path) catch {};
+    }
+    return missing;
 }
 
 /// Recursively look for `proj.json` under `dir`. When a folder IS a project
