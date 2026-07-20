@@ -6,7 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-07-20
+
 ### Added
+- **`hkm discover [root]` — find projects on disk and register them (alias
+  `hkm scan`).** Walks a directory tree, finds every folder holding a
+  `proj.json`, and upserts each into the kernel registry (`projects.json`) with
+  its name, version, ABSOLUTE path, and domains read straight from that project's
+  own `proj.json`. The bulk counterpart to `hkm update <path>` (one project):
+  use it to adopt projects scaffolded with `--no-register`, cloned from git, or
+  moved on disk. Reports each match as `new` / `moved` / `up-to-date` against the
+  current registry; `--dry-run` (`-n`) previews without writing; `--depth=N`
+  (default 4) caps descent. Skips `vendor`, `node_modules`, `var`, `.git`,
+  `dist`, `zig-out`, `.zig-cache` and dotfolders, and stops descending once a
+  folder is identified as a project root. Implemented natively in Zig (no PHP
+  required), reusing the same registry resolver as `new`/`update`/`list`.
 - **`TENANCY_CONTROL_PLANE` — serve a super-admin host with Tenancy enabled.**
   `Tenancy::boot()` previously registered `TenantContextStage` unconditionally,
   which made a central control-plane deployment unservable: every request either
