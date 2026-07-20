@@ -6,6 +6,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-07-20
+
+### Added
+- **`hkm discover [root]` — find projects on disk and register them (alias
+  `hkm scan`).** Walks a directory tree, finds every folder holding a
+  `proj.json`, and upserts each into the kernel registry (`projects.json`) with
+  its name, version, ABSOLUTE path, and domains read straight from that project's
+  own `proj.json`. The bulk counterpart to `hkm update <path>` (one project):
+  use it to adopt projects scaffolded with `--no-register`, cloned from git, or
+  moved on disk. Reports each match as `new` / `moved` / `up-to-date` against the
+  current registry; `--dry-run` (`-n`) previews without writing; `--depth=N`
+  (default 4) caps descent. Skips `vendor`, `node_modules`, `var`, `.git`,
+  `dist`, `zig-out`, `.zig-cache` and dotfolders, and stops descending once a
+  folder is identified as a project root. Implemented natively in Zig (no PHP
+  required), reusing the same registry resolver as `new`/`update`/`list`.
+- **`TENANCY_CONTROL_PLANE` — serve a super-admin host with Tenancy enabled.**
+  `Tenancy::boot()` previously registered `TenantContextStage` unconditionally,
+  which made a central control-plane deployment unservable: every request either
+  500'd (route did not load Tenancy, so `TenantIdentifier` was unbound and the
+  stage threw) or 404'd (loaded, but no tenant resolves on an admin host). Set
+  `TENANCY_CONTROL_PLANE=true` and the `after.load` hook is skipped, so
+  `DatabasePort` stays on central. Everything else the plugin publishes — the
+  registry, connection resolver, admin/membership/invitation services and the
+  `tenant:*` provisioning commands — is unaffected. Defaults to **false**, so a
+  tenant-serving deployment cannot lose tenant isolation by omission.
+
+### Changed
+- **`tenant:migrate` is scoped to the calling project by default.** It now
+  migrates only the tenants recorded in that project's `var/tenants.json`,
+  instead of every active tenant in the registry. Several projects may share one
+  central registry, and a sibling's tenant is encrypted with that project's
+  `APP_KEY` — so it surfaced on every run as a spurious "Could not decrypt
+  payload (invalid key or tampered data)" failure. Pass `--all` for the previous
+  fleet-wide behaviour; a project with no `var/tenants.json` still migrates every
+  active tenant, so single-project deployments are unchanged. Skipped tenants are
+  reported rather than silently dropped.
+
 ## [1.0.16] - 2026-07-18
 
 ### Added
