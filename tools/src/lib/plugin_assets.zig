@@ -744,3 +744,107 @@ pub fn publishEnabled(allocator: std.mem.Allocator, io: Io, env: *EnvMap, projec
     }
     if (total > 0) prompt.muted(try std.fmt.allocPrint(allocator, "published {d} plugin asset(s)", .{total}));
 }
+
+/// The result of a manifest recovery pass.
+pub const RecoverResult = struct {
+    /// plugins with at least one recovered (on-disk) asset.
+    plugins: usize = 0,
+    /// total asset files recorded across all plugins.
+    files: usize = 0,
+    /// enabled plugins whose source folder could not be located on disk.
+    unresolved: usize = 0,
+};
+
+/// One recovered plugin, reported back to the caller for display.
+pub const RecoveredPlugin = struct {
+    name: []const u8,
+    files: usize,
+    source: sources.Source,
+};
+
+/// Rebuild `var/plugin-assets.json` from ground truth: for every plugin ENABLED
+/// in the project bootstrap, compute the assets its source folder WOULD publish
+/// and record the subset that actually exists in the project. Recovers a lost,
+/// truncated, or drifted manifest without copying or overwriting any asset.
+///
+/// Migration `batch` numbers cannot be derived from the filesystem (they come
+/// from the migrate CLI), so any batch recorded in the CURRENT manifest is
+/// preserved for a plugin that still resolves. `dry_run` computes + reports but
+/// writes nothing. Discovered plugins are appended to `found` for the caller to
+/// print; the returned tally summarises the pass.
+pub fn recoverEnabled(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    projectRoot: []const u8,
+    dry_run: bool,
+    found: *std.ArrayList(RecoveredPlugin),
+) !RecoverResult {
+    var result: RecoverResult = .{};
+
+    const bootstrap = try std.fmt.allocPrint(allocator, "{s}/app/bootstrap/app.php", .{util.trimSlash(projectRoot)});
+    const source = Dir.cwd().readFileAlloc(io, bootstrap, allocator, .limited(4 * 1024 * 1024)) catch return result;
+
+    var aliases: std.ArrayList(boot.Alias) = .empty;
+    try boot.collectAliases(allocator, source, &aliases);
+    var enabled: std.ArrayList(boot.Enabled) = .empty;
+    try boot.collectEnabled(allocator, source, aliases.items, &enabled);
+    if (enabled.items.len == 0) return result;
+
+    // Existing manifest — consulted ONLY to carry a known migration batch across
+    // the rebuild (the filesystem cannot tell us which batch a migration ran in).
+    const old = try readManifest(allocator, io, projectRoot);
+
+    const srcs = try sources.discoverSources(allocator, io, env, projectRoot);
+    var entries: std.ArrayList(Entry) = .empty;
+
+    for (enabled.items) |e| {
+        // Locate the plugin's source folder (project copy wins over kernel).
+        var folder: ?[]const u8 = null;
+        var src_kind: sources.Source = .project;
+        for ([_]sources.Source{ .project, .kernel }) |src| {
+            const dir = srcs.dirFor(src) orelse continue;
+            const candidate = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir, e.name });
+            if (util.dirExists(Dir.cwd(), io, candidate)) {
+                folder = candidate;
+                src_kind = src;
+                break;
+            }
+        }
+        const plugin_folder = folder orelse {
+            result.unresolved += 1;
+            continue;
+        };
+
+        // Every relative path this plugin publishes, filtered to those present.
+        var candidates: std.ArrayList([]const u8) = .empty;
+        try collectPublishable(allocator, io, plugin_folder, &candidates);
+
+        var present: std.ArrayList([]const u8) = .empty;
+        for (candidates.items) |rel| {
+            const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ util.trimSlash(projectRoot), rel });
+            if (util.fileExists(io, full)) try present.append(allocator, rel);
+        }
+        if (present.items.len == 0) continue;
+
+        try entries.append(allocator, .{
+            .name = e.name,
+            .paths = try present.toOwnedSlice(allocator),
+            .batch = batchFor(old.items, e.name),
+        });
+        try found.append(allocator, .{ .name = e.name, .files = entries.items[entries.items.len - 1].paths.len, .source = src_kind });
+        result.plugins += 1;
+        result.files += entries.items[entries.items.len - 1].paths.len;
+    }
+
+    if (!dry_run) try writeManifest(allocator, io, projectRoot, entries.items);
+    return result;
+}
+
+/// The migration batch recorded for `name` in the previous manifest, if any.
+fn batchFor(old: []const Entry, name: []const u8) ?i64 {
+    for (old) |e| {
+        if (util.eqlIgnoreCase(e.name, name)) return e.batch;
+    }
+    return null;
+}

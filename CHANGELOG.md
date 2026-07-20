@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.18] - 2026-07-20
+
+### Added
+- **`hkm plugins recover [proj]` — rebuild a lost/drifted `var/plugin-assets.json`
+  (aliases `rebuild` / `reindex`).** Reconstructs the plugin-assets manifest from
+  ground truth: for every plugin ENABLED in the project bootstrap it records the
+  published assets that actually exist on disk, healing a manifest that was
+  deleted, truncated, or fell out of sync. It copies nothing (use
+  `hkm plugins update` to re-publish physically-missing assets) and preserves any
+  migration `batch` already recorded, since batch numbers cannot be derived from
+  the filesystem. `--dry-run` (`-n`) previews the rebuild; unresolvable enabled
+  plugins are reported and skipped. Implemented natively in Zig.
+
+### Changed
+- **`hkm discover` now restores each project's gitignored runtime folders.**
+  After locating a project it ensures `var/logs`, `var/cache/manifests`,
+  `var/tmp`, `var/locks`, `var/sessions`, `var/queue` and `userdata/storage`
+  exist — a freshly cloned or moved project is usually missing them, which would
+  otherwise fail at boot. `--dry-run` reports how many are missing without
+  creating them; a real run creates them (idempotent — an already-complete
+  project reports nothing).
+
 ## [1.0.17] - 2026-07-20
 
 ### Added
