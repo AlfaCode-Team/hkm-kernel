@@ -287,7 +287,26 @@ final class Provider implements ModuleContract
         // stays OUTER of the cookie-flush stage so the remembered-tenant cookie it
         // queues is still written to the response. All after.load hooks run before
         // the dedicated RouteFilterStage regardless of priority.
-        $http->hook('after.load', TenantContextStage::class, priority: 10);
+        // CONTROL-PLANE DEPLOYMENTS (TENANCY_CONTROL_PLANE=true) skip this hook.
+        //
+        // A super-admin / control-plane host administers the tenant fleet from
+        // the CENTRAL database: it lists tenants, provisions them, and reaches
+        // into any one of them explicitly. It is never itself scoped to a
+        // tenant. Registering the stage there would make every request either
+        // 500 (route did not load Tenancy → TenantIdentifier unbound → the
+        // guard below throws) or 404 (loaded, but no tenant resolves on an
+        // admin host) — so a control plane could not serve HTTP at all.
+        //
+        // Everything else the plugin publishes stays available: the registry,
+        // the connection resolver, the admin/membership/invitation services and
+        // the provisioning commands. Only per-request tenant ROUTING is off, so
+        // DatabasePort keeps pointing at central — which is exactly what
+        // control-plane code already pins explicitly.
+        //
+        // Leave it false (the default) for any tenant-serving deployment.
+        if (!self::controlPlane()) {
+            $http->hook('after.load', TenantContextStage::class, priority: 10);
+        }
 
         // Reusable declarative guard: a route that touches tenant-only tables
         // opts in with "filters": ["auth", "tenant"] to fail clean (409) when no
@@ -368,6 +387,18 @@ final class Provider implements ModuleContract
     private static function mode(): string
     {
         return strtolower((string) (env('TENANCY_MODE') ?: 'claim'));
+    }
+
+    /**
+     * TENANCY_CONTROL_PLANE — this deployment ADMINISTERS the tenant fleet
+     * rather than serving one, so per-request tenant routing is switched off
+     * (see boot()). Defaults to false: a deployment is tenant-serving unless it
+     * says otherwise, so an operator can never lose tenant isolation by
+     * forgetting to set something.
+     */
+    private static function controlPlane(): bool
+    {
+        return filter_var(env('TENANCY_CONTROL_PLANE') ?? false, \FILTER_VALIDATE_BOOL);
     }
 
     /**
