@@ -15,6 +15,7 @@ use Plugins\Edge\Infrastructure\ConfigRenderer;
 use Plugins\Edge\Infrastructure\HostsFileWriter;
 use Plugins\Edge\Infrastructure\ServiceRenderer;
 use Plugins\Edge\Infrastructure\SiteCollector;
+use Plugins\Edge\Infrastructure\StreamConfigWriter;
 use Plugins\Edge\Infrastructure\SystemProbe;
 
 /**
@@ -30,6 +31,7 @@ final class EdgeService implements EdgeServiceContract
         private readonly ConfigRenderer $renderer,
         private readonly HostsFileWriter $hosts,
         private readonly ServiceRenderer $services = new ServiceRenderer(),
+        private readonly StreamConfigWriter $streamWriter = new StreamConfigWriter(),
     ) {}
 
     /**
@@ -69,10 +71,17 @@ final class EdgeService implements EdgeServiceContract
         ];
     }
 
-    public function plan(bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): EdgePlan
+    public function plan(bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null, ?string $force = null): EdgePlan
     {
         $stack    = $this->probe->detect();
-        $strategy = $stack->strategy();
+        $strategy = $stack->strategy($this->forcedStrategy($force));
+
+        // When both servers run and nginx already has an SNI stream splitter,
+        // reuse it (default) rather than writing a second `stream {}` block. A
+        // forced single-server strategy never renders a stream block at all.
+        $reuseStream = $strategy === Strategy::NginxStream
+            && (bool) edge_config('reuse_stream', true)
+            && $stack->nginxHasStreamConfig;
 
         // The application environment is chosen EXPLICITLY (CLI flag, else the
         // configured/exported APP_ENV) and is what the cache profile derives from
@@ -84,9 +93,26 @@ final class EdgeService implements EdgeServiceContract
         // Public domains → server config; local (.local/.test) → /etc/hosts.
         $sites = $this->sites->sites($all, $env);
 
-        [$path, $body] = $this->renderer->render($strategy, $sites, $this->resolveTls($tlsMode, $sslCert, $sslKey), $stack, $profile);
+        [$path, $body] = $this->renderer->render($strategy, $sites, $this->resolveTls($tlsMode, $sslCert, $sslKey), $stack, $profile, $reuseStream);
 
-        return new EdgePlan($stack, $strategy, $sites, $this->sites->localDomains($all), $path, $body);
+        return new EdgePlan($stack, $strategy, $sites, $this->sites->localDomains($all), $path, $body, $reuseStream);
+    }
+
+    /**
+     * Resolve an EXPLICIT strategy override into a Strategy, or null for
+     * auto-detection. Accepts the CLI value ($force) first, then the
+     * EDGE_FORCE_STRATEGY config default. `nginx-only` and `apache-only` pin a
+     * single server with NO fallback; anything else means "auto-detect".
+     */
+    private function forcedStrategy(?string $force): ?Strategy
+    {
+        $value = strtolower(trim($force ?? (string) edge_config('force_strategy', '')));
+
+        return match ($value) {
+            'nginx-only', 'nginx'   => Strategy::NginxOnly,
+            'apache-only', 'apache' => Strategy::ApacheOnly,
+            default                 => null,
+        };
     }
 
     /**
@@ -140,9 +166,9 @@ final class EdgeService implements EdgeServiceContract
         return filter_var(env('HKM_DEV', 'false'), FILTER_VALIDATE_BOOL);
     }
 
-    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): array
+    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null, ?string $force = null): array
     {
-        $plan = $this->plan($all, $tlsMode, $sslCert, $sslKey, $appEnv);
+        $plan = $this->plan($all, $tlsMode, $sslCert, $sslKey, $appEnv, $force);
 
         // 1. Local domains → /etc/hosts. DEV ONLY: a live server resolves its
         //    public domains via DNS, so outside dev we silently skip this step
@@ -170,6 +196,7 @@ final class EdgeService implements EdgeServiceContract
                 'sites'    => \count($plan->sites),
                 'contents' => $plan->contents,
                 'hosts'    => $hosts,
+                'stream'   => $this->mergeExistingStream($plan, dryRun: true),
             ];
         }
 
@@ -187,6 +214,20 @@ final class EdgeService implements EdgeServiceContract
 
         $siteCount = \count($plan->sites);
         $steps = ["wrote {$plan->targetPath} ({$siteCount} project site(s))"];
+
+        // 3. Reusing an existing SNI splitter → merge our domains into ITS map,
+        //    editing that host file (e.g. nginx.conf) in place. Fail loudly: a
+        //    write we cannot complete (usually a missing sudo) must not look ok.
+        $stream = $this->mergeExistingStream($plan, dryRun: false);
+        if ($stream !== null) {
+            if (($stream['ok'] ?? false) !== true) {
+                return ['ok' => false, 'strategy' => $plan->strategy->value, 'path' => $plan->targetPath, 'steps' => $steps, 'hosts' => $hosts, 'stream' => $stream, 'message' => 'stream map update failed: ' . ($stream['message'] ?? 'unknown error')];
+            }
+            $added = \count($stream['added'] ?? []);
+            $steps[] = ($stream['changed'] ?? false)
+                ? "stream: merged {$added} domain(s) into {$stream['file']}"
+                : "stream: {$stream['file']} already current";
+        }
 
         if ($reload) {
             $isApache = $plan->strategy === Strategy::ApacheOnly;
@@ -213,6 +254,51 @@ final class EdgeService implements EdgeServiceContract
             'sites'    => \count($plan->sites),
             'steps'    => $steps,
             'hosts'    => $hosts,
+            'stream'   => $stream,
         ];
+    }
+
+    /**
+     * When the plan reuses an existing nginx SNI splitter, merge the plan's public
+     * domains into that host file's `map $ssl_preread_server_name` in place
+     * (pointing them at the nginx backend). Returns null when there is nothing to
+     * merge (not a reuse plan, or the splitter file could not be located).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function mergeExistingStream(EdgePlan $plan, bool $dryRun): ?array
+    {
+        if (!$plan->reuseStream) {
+            return null;
+        }
+        $file = $this->probe->nginxStreamConfigFile((string) edge_config('paths.stream', ''));
+        if ($file === null) {
+            return null;
+        }
+
+        return $this->streamWriter->merge(
+            file:    $file,
+            domains: $this->planPublicDomains($plan),
+            backend: (string) edge_config('stream_backend', 'nginx_backend'),
+            dryRun:  $dryRun,
+        );
+    }
+
+    /**
+     * Every public domain across the plan's sites (deduplicated, order-preserved)
+     * — the hostnames that must route SNI → nginx.
+     *
+     * @return list<string>
+     */
+    private function planPublicDomains(EdgePlan $plan): array
+    {
+        $domains = [];
+        foreach ($plan->sites as $site) {
+            foreach ($site->publicDomains as $d) {
+                $domains[$d] = true;
+            }
+        }
+
+        return array_keys($domains);
     }
 }
