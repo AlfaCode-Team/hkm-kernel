@@ -1,0 +1,24 @@
+parameters:
+    level: 5
+    paths:
+        - src
+        - plugins
+        - projects
+    scanDirectories:
+        - modules
+    excludePaths:
+        - */vendor/*
+        - */__dev__/*
+        - projects/*/var/*
+        - projects/*/userdata/*
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: false
+    # Optional Swoole/OpenSwoole coroutine calls — runtime-guarded by
+    # class_exists()/method_exists(); the extension is absent in CI, so PHPStan
+    # cannot verify them statically. Behaviour is correct at runtime.
+    ignoreErrors:
+        - '#static method (Swoole|OpenSwoole)\\Coroutine::(usleep|getCid)\(\)#'
+        - "#function (method_exists|class_exists)\\(\\) with .*(Swoole|OpenSwoole).* will always evaluate to false#"
+
+includes:
+    - phpstan-baseline.neon

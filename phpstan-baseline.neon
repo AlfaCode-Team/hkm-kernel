@@ -1,0 +1,2365 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$action\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$eventId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$ip\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$meta\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$occurredAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Audit\\Domain\\Entities\\AuditEntry\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Audit/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Method Plugins\\Audit\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/Audit/Provider.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$roles$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/Auth/Application/Auth/AuthUserProxy.php
+
+		-
+			message: '#^Property Plugins\\Auth\\Application\\Auth\\AuthUserProxy\:\:\$joinedAt is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: plugins/Auth/Application/Auth/AuthUserProxy.php
+
+		-
+			message: '#^Call to function method_exists\(\) with \$this\(Plugins\\Auth\\Application\\Auth\\StatefulSessionGuard\) and ''getName'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: plugins/Auth/Application/Auth/StatefulSessionGuard.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Auth\\Domain\\Entities\\RefreshTokenRecord\:\:\$familyId\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Auth/Application/Services/RefreshTokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Auth\\Domain\\Entities\\RefreshTokenRecord\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Auth/Application/Services/RefreshTokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Auth\\Domain\\Entities\\RefreshTokenRecord\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Auth/Application/Services/RefreshTokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Auth\\Domain\\Entities\\RefreshTokenRecord\:\:\$tokenId\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Auth/Application/Services/RefreshTokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Auth\\Domain\\Entities\\RefreshTokenRecord\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Auth/Application/Services/RefreshTokenService.php
+
+		-
+			message: '#^While loop condition is always true\.$#'
+			identifier: while.alwaysTrue
+			count: 1
+			path: plugins/Auth/Infrastructure/Cli/PruneAccessTokensCommand.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\Auth\\Application\\Auth\\GuardAccessor\:\:attempt\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: plugins/Auth/Infrastructure/Http/Controllers/SessionAuthController.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\Auth\\Application\\Auth\\GuardAccessor\:\:logout\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: plugins/Auth/Infrastructure/Http/Controllers/SessionAuthController.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\Auth\\Application\\Auth\\GuardAccessor\:\:logoutOtherDevices\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: plugins/Auth/Infrastructure/Http/Controllers/SessionAuthController.php
+
+		-
+			message: '#^Method Plugins\\Auth\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management'', ''crypto\.services'', ''user\.management'', ''authorization\.policy''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/Auth/Provider.php
+
+		-
+			message: '#^Instanceof between Plugins\\Authorization\\Engine\\Interfaces\\Persist\\Adapter and Plugins\\Authorization\\Engine\\Interfaces\\Persist\\Adapter will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: plugins/Authorization/Engine/CoreEnforcer.php
+
+		-
+			message: '#^Function arrayRemoveDuplicates not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/Authorization/Engine/Enforcer.php
+
+		-
+			message: '#^Function arrayToCommaSeparatedStr not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/Authorization/Engine/Enforcer.php
+
+		-
+			message: '#^Function arrayRemoveDuplicates not found\.$#'
+			identifier: function.notFound
+			count: 3
+			path: plugins/Authorization/Engine/Model/Policy.php
+
+		-
+			message: '#^Function arrayToCommaSeparatedStr not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/Authorization/Engine/Persist/Adapters/FileAdapter.php
+
+		-
+			message: '#^Function array_uniqueness not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/Authorization/Engine/RBAC/Role.php
+
+		-
+			message: '#^Function isIpInCidrRange not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/Authorization/Engine/Util/BuiltinOperations.php
+
+		-
+			message: '#^Offset 1 on array\{list\<string\>, list\<string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: plugins/Authorization/Engine/functions.php
+
+		-
+			message: '#^Method Plugins\\Authorization\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/Authorization/Provider.php
+
+		-
+			message: '#^Call to protected method hasOption\(\) of class AlfacodeTeam\\PhpIoCli\\AbstractCommand\.$#'
+			identifier: method.protected
+			count: 2
+			path: plugins/Commands/API/DTOs/MigrateRequest.php
+
+		-
+			message: '#^Call to protected method option\(\) of class AlfacodeTeam\\PhpIoCli\\AbstractCommand\.$#'
+			identifier: method.protected
+			count: 5
+			path: plugins/Commands/API/DTOs/MigrateRequest.php
+
+		-
+			message: '#^Call to protected method option\(\) of class AlfacodeTeam\\PhpIoCli\\AbstractCommand\.$#'
+			identifier: method.protected
+			count: 2
+			path: plugins/Commands/API/DTOs/MigrateStatusRequest.php
+
+		-
+			message: '#^Call to protected method argument\(\) of class AlfacodeTeam\\PhpIoCli\\AbstractCommand\.$#'
+			identifier: method.protected
+			count: 3
+			path: plugins/Commands/API/DTOs/ModuleAddRequest.php
+
+		-
+			message: '#^Call to protected method hasOption\(\) of class AlfacodeTeam\\PhpIoCli\\AbstractCommand\.$#'
+			identifier: method.protected
+			count: 1
+			path: plugins/Commands/API/DTOs/ModuleAddRequest.php
+
+		-
+			message: '#^Call to protected method argument\(\) of class AlfacodeTeam\\PhpIoCli\\AbstractCommand\.$#'
+			identifier: method.protected
+			count: 1
+			path: plugins/Commands/API/DTOs/ModuleRemoveRequest.php
+
+		-
+			message: '#^Call to protected method hasOption\(\) of class AlfacodeTeam\\PhpIoCli\\AbstractCommand\.$#'
+			identifier: method.protected
+			count: 1
+			path: plugins/Commands/API/DTOs/ModuleRemoveRequest.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\Commands\\Approval\\MigrationApprovalManager\:\:checkApproval\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: plugins/Commands/Application/Services/MigrationService.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\Commands\\Validation\\PreFlightReport\:\:getErrors\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: plugins/Commands/Application/Services/MigrationService.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\Commands\\Validation\\PreFlightReport\:\:hasErrors\(\)\.$#'
+			identifier: method.notFound
+			count: 2
+			path: plugins/Commands/Application/Services/MigrationService.php
+
+		-
+			message: '#^Method Plugins\\Commands\\Logging\\CommandExecutionLogger\:\:logMigration\(\) invoked with 3 parameters, 4\-5 required\.$#'
+			identifier: arguments.count
+			count: 2
+			path: plugins/Commands/Application/Services/MigrationService.php
+
+		-
+			message: '#^Parameter \#2 \$details of method Plugins\\Commands\\Logging\\CommandExecutionLogger\:\:logDestructiveOperation\(\) expects array, string given\.$#'
+			identifier: argument.type
+			count: 2
+			path: plugins/Commands/Application/Services/MigrationService.php
+
+		-
+			message: '#^Parameter \#4 \$duration of method Plugins\\Commands\\Logging\\CommandExecutionLogger\:\:logMigration\(\) expects float, string given\.$#'
+			identifier: argument.type
+			count: 1
+			path: plugins/Commands/Application/Services/MigrationService.php
+
+		-
+			message: '#^Method Plugins\\Commands\\Infrastructure\\Gateways\\LetMigrateGateway\:\:getMigrationCommands\(\) should return array\<string, object\> but returns list\<AlfacodeTeam\\PhpServicePlatform\\Commands\\Migrate\\LetMigrateCommand\>\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/Commands/Infrastructure/Gateways/LetMigrateGateway.php
+
+		-
+			message: '#^Dead catch \- Throwable is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 1
+			path: plugins/Commands/Infrastructure/Persistence/MigrationRepository.php
+
+		-
+			message: '#^Static method Plugins\\Commands\\Configuration\\EnvironmentConfigurationLoader\:\:load\(\) invoked with 1 parameter, 0 required\.$#'
+			identifier: arguments.count
+			count: 1
+			path: plugins/Commands/Infrastructure/Persistence/MigrationRepository.php
+
+		-
+			message: '#^Method Plugins\\Commands\\Secrets\\SecretsManager\:\:get\(\) never returns null so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: plugins/Commands/Secrets/SecretsManager.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-empty\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: plugins/Crypto/Infrastructure/PasswordHasher.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>healthPath" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: plugins/Edge/Infrastructure/ConfigRenderer.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>websocketPath" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: plugins/Edge/Infrastructure/ConfigRenderer.php
+
+		-
+			message: '#^Method Plugins\\Feedback\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management'', ''audit\.trail''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/Feedback/Provider.php
+
+		-
+			message: '#^Offset 1 on array\{non\-falsy\-string, '''', numeric\-string, ''\*''\|numeric\-string\}\|array\{non\-falsy\-string, numeric\-string\} in isset\(\) always exists and is not nullable\.$#'
+			identifier: isset.offset
+			count: 1
+			path: plugins/I18n/Translator.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>email" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: plugins/Mail/Application/Mailer.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/AuthorizationRequest.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/AuthorizationService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$redirectUris\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/AuthorizationService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/AuthorizationService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/DeviceService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/DeviceService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/IntrospectionService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/IntrospectionService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$familyId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/IntrospectionService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/IntrospectionService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/IntrospectionService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/IntrospectionService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/OAuth2/Application/Services/ScopeValidator.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$codeChallenge\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$codeChallengeMethod\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$nonce\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$redirectUri\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$confidential\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 8
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$secretHash\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$interval\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$lastPolledAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$familyId\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Application/Services/TokenService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/AuthCode.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$confidential\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/OAuth2/Domain/Entities/Client.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$grantTypes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/Client.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/Client.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$name\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/Client.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$redirectUris\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/Client.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/Client.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$secretHash\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/Client.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/DeviceCode.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Domain/Entities/RefreshToken.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$confidential\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Cli/ListClientsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$grantTypes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Cli/ListClientsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Cli/ListClientsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$name\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Cli/ListClientsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Cli/ListClientsCommand.php
+
+		-
+			message: '#^While loop condition is always true\.$#'
+			identifier: while.alwaysTrue
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Cli/PruneCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$name\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/AuthorizationController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/AuthorizedTokenController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/AuthorizedTokenController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$familyId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/AuthorizedTokenController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/AuthorizedTokenController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$name\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/ClientController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/DeviceVerificationController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/DeviceVerificationController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$revoked\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/IntrospectionController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\Client\:\:\$secretHash\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Http/Controllers/IntrospectionController.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$codeChallenge\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$codeChallengeMethod\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$nonce\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$redirectUri\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\AuthCode\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/AuthCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$interval\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$userCode\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\DeviceCode\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/DeviceCodeRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$clientId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/RefreshTokenRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/RefreshTokenRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$familyId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/RefreshTokenRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/RefreshTokenRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$scopes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/RefreshTokenRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\OAuth2\\Domain\\Entities\\RefreshToken\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/OAuth2/Infrastructure/Persistence/RefreshTokenRepository.php
+
+		-
+			message: '#^Method Plugins\\OAuth2\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management'', ''crypto\.services'', ''user\.management'', ''view\.rendering''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/OAuth2/Provider.php
+
+		-
+			message: '#^Static method Plugins\\OAuth2\\Provider\:\:central\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: plugins/OAuth2/Provider.php
+
+		-
+			message: '#^Call to function method_exists\(\) with ''\\\\OpenSwoole…'' and ''usleep'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: plugins/Pageflow/Http/PageflowStream.php
+
+		-
+			message: '#^Call to function method_exists\(\) with ''\\\\Swoole\\\\Coroutine'' and ''usleep'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: plugins/Pageflow/Http/PageflowStream.php
+
+		-
+			message: '#^Method Plugins\\Pageflow\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''vite\.manifest''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/Pageflow/Provider.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between non\-falsy\-string and '''' will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: plugins/Pageflow/Provider.php
+
+		-
+			message: '#^Method Plugins\\Session\\Infrastructure\\Handlers\\ArraySessionHandler\:\:gc\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: plugins/Session/Infrastructure/Handlers/ArraySessionHandler.php
+
+		-
+			message: '#^Method Plugins\\Session\\Infrastructure\\Handlers\\ArraySessionHandler\:\:read\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: plugins/Session/Infrastructure/Handlers/ArraySessionHandler.php
+
+		-
+			message: '#^Method Plugins\\Session\\Infrastructure\\Handlers\\CookieSessionHandler\:\:gc\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: plugins/Session/Infrastructure/Handlers/CookieSessionHandler.php
+
+		-
+			message: '#^Method Plugins\\Session\\Infrastructure\\Handlers\\CookieSessionHandler\:\:read\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: plugins/Session/Infrastructure/Handlers/CookieSessionHandler.php
+
+		-
+			message: '#^Method Plugins\\Session\\Infrastructure\\Handlers\\FileSessionHandler\:\:gc\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: plugins/Session/Infrastructure/Handlers/FileSessionHandler.php
+
+		-
+			message: '#^Method Plugins\\Session\\Infrastructure\\Handlers\\FileSessionHandler\:\:read\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: plugins/Session/Infrastructure/Handlers/FileSessionHandler.php
+
+		-
+			message: '#^Property Plugins\\Session\\Infrastructure\\Store\:\:\$started is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: plugins/Session/Infrastructure/Store.php
+
+		-
+			message: '#^Method Plugins\\Settings\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management'', ''validation\.rules''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/Settings/Provider.php
+
+		-
+			message: '#^PHPDoc tag @var with type Plugins\\SiteSEO\\Type is not subtype of native type Plugins\\SiteSEO\\Types\\Article\|Plugins\\SiteSEO\\Types\\Book\|Plugins\\SiteSEO\\Types\\Music\\Album\|Plugins\\SiteSEO\\Types\\Music\\Playlist\|Plugins\\SiteSEO\\Types\\Music\\RadioStation\|Plugins\\SiteSEO\\Types\\Music\\Song\|Plugins\\SiteSEO\\Types\\Profile\|Plugins\\SiteSEO\\Types\\Video\\Episode\|Plugins\\SiteSEO\\Types\\Video\\Movie\|Plugins\\SiteSEO\\Types\\Video\\Other\|Plugins\\SiteSEO\\Types\\Video\\TvShow\|Plugins\\SiteSEO\\Types\\Website\.$#'
+			identifier: varTag.nativeType
+			count: 1
+			path: plugins/SiteSEO/Application/Services/SeoService.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between array\{\} and array\{\} will always evaluate to true\.$#'
+			identifier: identical.alwaysTrue
+			count: 1
+			path: plugins/SiteSEO/Application/Services/SeoService.php
+
+		-
+			message: '#^Unreachable statement \- code above always terminates\.$#'
+			identifier: deadCode.unreachable
+			count: 1
+			path: plugins/SiteSEO/Application/Services/SeoService.php
+
+		-
+			message: '#^Function do_action not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SiteSEO/Channel.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$options \(array\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Interfaces/SitemapIndexInterface.php
+
+		-
+			message: '#^Parameter \#3 \$value of function curl_setopt expects bool, int given\.$#'
+			identifier: argument.type
+			count: 1
+			path: plugins/SiteSEO/Ping.php
+
+		-
+			message: '#^Unsafe usage of new static\(\)\.$#'
+			identifier: new.static
+			count: 1
+			path: plugins/SiteSEO/Property.php
+
+		-
+			message: '#^Method Plugins\\SiteSEO\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''http\.client''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/SiteSEO/Provider.php
+
+		-
+			message: '#^Constant ABSPATH not found\.$#'
+			identifier: constant.notFound
+			count: 2
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function apply_filters not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function array_merge_unique not found\.$#'
+			identifier: function.notFound
+			count: 3
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function check_function_and_include_file not found\.$#'
+			identifier: function.notFound
+			count: 5
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function check_loader_function_and_include_file not found\.$#'
+			identifier: function.notFound
+			count: 3
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function current_time not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function do_action not found\.$#'
+			identifier: function.notFound
+			count: 3
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function execute_with_temp_permission not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function generateRobotsTxtContentArray not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function get_option not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function is_site_installed not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function removeArrays not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Function update_option not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/SiteSEO/RobotsTxtEditor.php
+
+		-
+			message: '#^Negated boolean expression is always false\.$#'
+			identifier: booleanNot.alwaysFalse
+			count: 1
+			path: plugins/SiteSEO/RobotsTxtValidator.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$data$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SiteSEO/Schema.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$parent$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SiteSEO/Schema.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$root$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SiteSEO/Schema.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$type$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SiteSEO/Schema.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$options \(array\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Sitemap.php
+
+		-
+			message: '#^Function site_url not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SiteSEO/Sitemap.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$path$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SiteSEO/Sitemap.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$url$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SiteSEO/Sitemap/SitemapBuilder.php
+
+		-
+			message: '#^Function site_url not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SiteSEO/Sitemap/SitemapIndex.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$name$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SiteSEO/Sitemap/SitemapIndex.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:setProperty\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 2
+			path: plugins/SiteSEO/StructuredProperties/Image.php
+
+		-
+			message: '#^Access to undefined constant static\(Plugins\\SiteSEO\\StructuredProperties\\StructuredProperty\)\:\:PREFIX\.$#'
+			identifier: classConstant.notFound
+			count: 2
+			path: plugins/SiteSEO/StructuredProperties/StructuredProperty.php
+
+		-
+			message: '#^Unsafe usage of new static\(\)\.$#'
+			identifier: new.static
+			count: 1
+			path: plugins/SiteSEO/StructuredProperties/StructuredProperty.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:setProperty\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 2
+			path: plugins/SiteSEO/StructuredProperties/Video.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\SiteSEO\\TwitterType\:\:\$type\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/SiteSEO/TwitterType.php
+
+		-
+			message: '#^Unsafe usage of new static\(\)\.$#'
+			identifier: new.static
+			count: 1
+			path: plugins/SiteSEO/TwitterType.php
+
+		-
+			message: '#^Unsafe usage of new static\(\)\.$#'
+			identifier: new.static
+			count: 1
+			path: plugins/SiteSEO/Type.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$disc \(int\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Music/Album.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#3 \$track \(int\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Music/Album.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:addProperty\(\) expects string, int\|null given\.$#'
+			identifier: argument.type
+			count: 2
+			path: plugins/SiteSEO/Types/Music/Album.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$disc \(int\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Music/Playlist.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#3 \$track \(int\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Music/Playlist.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:addProperty\(\) expects string, int\|null given\.$#'
+			identifier: argument.type
+			count: 2
+			path: plugins/SiteSEO/Types/Music/Playlist.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$disc \(int\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Music/Song.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#3 \$track \(int\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Music/Song.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:addProperty\(\) expects string, int\|null given\.$#'
+			identifier: argument.type
+			count: 2
+			path: plugins/SiteSEO/Types/Music/Song.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:setProperty\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 1
+			path: plugins/SiteSEO/Types/Music/Song.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#1 \$county \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Twitter/App.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#3 \$googlePlayAppUrl \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Twitter/App.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#3 \$iPadAppUrl \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Twitter/App.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#3 \$iPhoneAppUrl \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Twitter/App.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\TwitterType\:\:setProperty\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 2
+			path: plugins/SiteSEO/Types/Twitter/Player.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$role \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Video/Episode.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:setProperty\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 1
+			path: plugins/SiteSEO/Types/Video/Episode.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$role \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Video/Movie.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:setProperty\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 1
+			path: plugins/SiteSEO/Types/Video/Movie.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$role \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Video/Other.php
+
+		-
+			message: '#^Parameter \#3 \$content of method Plugins\\SiteSEO\\BaseObject\:\:setProperty\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 1
+			path: plugins/SiteSEO/Types/Video/Other.php
+
+		-
+			message: '#^Deprecated in PHP 8\.4\: Parameter \#2 \$role \(string\) is implicitly nullable via default value null\.$#'
+			identifier: parameter.implicitlyNullable
+			count: 1
+			path: plugins/SiteSEO/Types/Video/TvShow.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management'', ''user\.management'', ''auth\.identity'', ''http\.client''\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/SocialAuth/Provider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\AbstractUser\:\:__get\(\) with return type void returns mixed but should not return anything\.$#'
+			identifier: return.void
+			count: 1
+			path: plugins/SocialAuth/Socialite/AbstractUser.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\SocialAuth\\Socialite\\Http\\Request\:\:get\(\)\.$#'
+			identifier: method.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\SocialAuth\\Socialite\\Http\\Request\:\:has\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method getAuthorizationUrl\(\) on an unknown class League\\OAuth1\\Client\\Server\\Server\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method getIdentifier\(\) on an unknown class League\\OAuth1\\Client\\Credentials\\TokenCredentials\.$#'
+			identifier: class.notFound
+			count: 3
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method getSecret\(\) on an unknown class League\\OAuth1\\Client\\Credentials\\TokenCredentials\.$#'
+			identifier: class.notFound
+			count: 3
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method getTemporaryCredentials\(\) on an unknown class League\\OAuth1\\Client\\Server\\Server\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method getTokenCredentials\(\) on an unknown class League\\OAuth1\\Client\\Server\\Server\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method getUserDetails\(\) on an unknown class League\\OAuth1\\Client\\Server\\Server\.$#'
+			identifier: class.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method setIdentifier\(\) on an unknown class League\\OAuth1\\Client\\Credentials\\TokenCredentials\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method setSecret\(\) on an unknown class League\\OAuth1\\Client\\Credentials\\TokenCredentials\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Instantiated class League\\OAuth1\\Client\\Credentials\\TokenCredentials not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\One\\AbstractProvider\:\:getToken\(\) has invalid return type League\\OAuth1\\Client\\Credentials\\TokenCredentials\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Parameter \$server of method Plugins\\SocialAuth\\Socialite\\One\\AbstractProvider\:\:__construct\(\) has invalid type League\\OAuth1\\Client\\Server\\Server\.$#'
+			identifier: class.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Property Plugins\\SocialAuth\\Socialite\\One\\AbstractProvider\:\:\$server has unknown class League\\OAuth1\\Client\\Server\\Server as its type\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/AbstractProvider.php
+
+		-
+			message: '#^Call to method getIdentifier\(\) on an unknown class League\\OAuth1\\Client\\Credentials\\TokenCredentials\.$#'
+			identifier: class.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/One/TwitterProvider.php
+
+		-
+			message: '#^Call to method getSecret\(\) on an unknown class League\\OAuth1\\Client\\Credentials\\TokenCredentials\.$#'
+			identifier: class.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/One/TwitterProvider.php
+
+		-
+			message: '#^Call to method getUserDetails\(\) on an unknown class League\\OAuth1\\Client\\Server\\Server\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/TwitterProvider.php
+
+		-
+			message: '#^Call to method setApplicationScope\(\) on an unknown class League\\OAuth1\\Client\\Server\\Server\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/One/TwitterProvider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\Ports\\Factory\:\:driver\(\) has invalid return type Plugins\\SocialAuth\\Socialite\\Interfaces\\Provider\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/Ports/Factory.php
+
+		-
+			message: '#^Call to an undefined method Plugins\\SocialAuth\\Socialite\\Two\\AbstractProvider\:\:setHost\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/SocialiteManager.php
+
+		-
+			message: '#^Instantiated class League\\OAuth1\\Client\\Server\\Twitter not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/SocialiteManager.php
+
+		-
+			message: '#^Parameter \#2 \$server of class Plugins\\SocialAuth\\Socialite\\One\\TwitterProvider constructor expects League\\OAuth1\\Client\\Server\\Server, League\\OAuth1\\Client\\Server\\Twitter given\.$#'
+			identifier: argument.type
+			count: 1
+			path: plugins/SocialAuth/Socialite/SocialiteManager.php
+
+		-
+			message: '#^Constant SUPPORTED_SOCIAL_STATELESS_ALLOW not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/AbstractProvider.php
+
+		-
+			message: '#^Function str_random not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/Two/AbstractProvider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\Two\\BitbucketProvider\:\:getEmailByToken\(\) should return string\|null but empty return statement found\.$#'
+			identifier: return.empty
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/BitbucketProvider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\Two\\BitbucketProvider\:\:getEmailByToken\(\) should return string\|null but return statement is missing\.$#'
+			identifier: return.missing
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/BitbucketProvider.php
+
+		-
+			message: '#^Call to static method load\(\) on an unknown class phpseclib3\\Crypt\\RSA\.$#'
+			identifier: class.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^Function array_add not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^Function array_first invoked with 2 parameters, 1 required\.$#'
+			identifier: arguments.count
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^Function array_pull not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^Function throw_if not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^Instantiated class phpseclib3\\Math\\BigInteger not found\.$#'
+			identifier: class.notFound
+			count: 2
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\Two\\FacebookProvider\:\:getUserByOIDCToken\(\) should return array but returns null\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$id$#'
+			identifier: parameter.notFound
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/FacebookProvider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\Two\\GithubProvider\:\:getEmailByToken\(\) should return string\|null but empty return statement found\.$#'
+			identifier: return.empty
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/GithubProvider.php
+
+		-
+			message: '#^Method Plugins\\SocialAuth\\Socialite\\Two\\GithubProvider\:\:getEmailByToken\(\) should return string\|null but return statement is missing\.$#'
+			identifier: return.missing
+			count: 1
+			path: plugins/SocialAuth/Socialite/Two/GithubProvider.php
+
+		-
+			message: '#^Function array_first invoked with 2 parameters, 1 required\.$#'
+			identifier: arguments.count
+			count: 2
+			path: plugins/SocialAuth/Socialite/Two/LinkedInProvider.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbDriver\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbHost\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbName\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPort\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbUsername\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$name\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$schemaVersion\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$slug\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantDetail.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$role\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantSummary.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantSummary.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantSummary.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$tenantName\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantSummary.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$tenantSlug\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/API/DTOs/TenantSummary.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Invitation\:\:\$email\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Application/Services/InvitationService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Invitation\:\:\$inviteId\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Tenancy/Application/Services/InvitationService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Invitation\:\:\$role\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Application/Services/InvitationService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Invitation\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 5
+			path: plugins/Tenancy/Application/Services/InvitationService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$role\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Application/Services/MembershipService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 4
+			path: plugins/Tenancy/Application/Services/TenantAdminService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$hostname\.$#'
+			identifier: property.notFound
+			count: 12
+			path: plugins/Tenancy/Application/Services/TenantHostService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$ipAddress\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Application/Services/TenantHostService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$verificationToken\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Application/Services/TenantHostService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$action\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$eventId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$ip\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$meta\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$occurredAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\AuditEntry\:\:\$userId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/AuditEntry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Invitation\:\:\$expiresAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/Invitation.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Invitation\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/Invitation.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/Membership.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Membership\:\:\$tenantStatus\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/Membership.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/Tenant.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$createdAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$hostId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$hostname\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$ipAddress\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$isPrimary\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$updatedAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$verificationToken\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\TenantHost\:\:\$verifiedAt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Domain/Entities/TenantHost.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbDriver\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Tenancy/Infrastructure/Cli/DeleteTenantCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbHost\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Infrastructure/Cli/DeleteTenantCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbName\.$#'
+			identifier: property.notFound
+			count: 4
+			path: plugins/Tenancy/Infrastructure/Cli/DeleteTenantCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbUsername\.$#'
+			identifier: property.notFound
+			count: 4
+			path: plugins/Tenancy/Infrastructure/Cli/DeleteTenantCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$slug\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Infrastructure/Cli/DeleteTenantCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Tenancy/Infrastructure/Cli/DeleteTenantCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbDriver\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbHost\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbName\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPasswordEnc\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPort\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbUsername\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$schemaVersion\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$slug\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Tenancy/Infrastructure/Cli/MigrateTenantsCommand.php
+
+		-
+			message: '#^Dead catch \- Plugins\\Tenancy\\Domain\\Exceptions\\HostQuotaExceededException is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Http/Controllers/TenantHostController.php
+
+		-
+			message: '#^Argument for parameter \$url has already been passed\.$#'
+			identifier: argument.duplicate
+			count: 7
+			path: plugins/Tenancy/Infrastructure/Http/Controllers/TenantPageController.php
+
+		-
+			message: '#^Missing parameter \$rent \(array\<string, float\|string\>\) in call to method Project\\Support\\Seo\\RichGraph\:\:realEstate\(\)\.$#'
+			identifier: argument.missing
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Http/Controllers/TenantPageController.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>tenantId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Http/Identification/ClaimTenantIdentifier.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>userId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Http/Stages/TenantContextStage.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbDriver\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbHost\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbName\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPasswordEnc\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPort\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbUsername\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$name\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$schemaVersion\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$slug\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantAdminRepository.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Persistence/TenantRegistry.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbDriver\.$#'
+			identifier: property.notFound
+			count: 4
+			path: plugins/Tenancy/Infrastructure/Provisioning/DdlTenantProvisioner.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbHost\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Tenancy/Infrastructure/Provisioning/DdlTenantProvisioner.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbName\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Tenancy/Infrastructure/Provisioning/DdlTenantProvisioner.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPort\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/Provisioning/DdlTenantProvisioner.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbUsername\.$#'
+			identifier: property.notFound
+			count: 3
+			path: plugins/Tenancy/Infrastructure/Provisioning/DdlTenantProvisioner.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbDriver\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbHost\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbName\.$#'
+			identifier: property.notFound
+			count: 4
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPasswordEnc\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbPort\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$dbUsername\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\Tenancy\\Domain\\Entities\\Tenant\:\:\$tenantId\.$#'
+			identifier: property.notFound
+			count: 4
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Match expression does not handle remaining value\: mixed$#'
+			identifier: match.unhandled
+			count: 1
+			path: plugins/Tenancy/Infrastructure/TenantConnectionResolver.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between Plugins\\User\\Domain\\Entities\\User and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: plugins/User/Application/Services/UserService.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type Plugins\\User\\Domain\\Entities\\User\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 2
+			path: plugins/User/Application/Services/UserService.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$email\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$email_verification_expires_at\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$email_verification_token_hash\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$email_verified_at\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$password_hash\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$remember_token\.$#'
+			identifier: property.notFound
+			count: 2
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$username\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\User\\Domain\\Entities\\User\:\:\$version\.$#'
+			identifier: property.notFound
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^PHPDoc tag @param for parameter \$membership with type mixed is not subtype of native type Plugins\\Tenancy\\API\\DTOs\\TenantSummary\|null\.$#'
+			identifier: parameter.phpDocType
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^PHPDoc tag @param for parameter \$profile with type mixed is not subtype of native type Plugins\\User\\Domain\\Entities\\UserProfile\|null\.$#'
+			identifier: parameter.phpDocType
+			count: 1
+			path: plugins/User/Domain/Entities/User.php
+
+		-
+			message: '#^Variable \$token might not be defined\.$#'
+			identifier: variable.undefined
+			count: 1
+			path: plugins/User/Infrastructure/Http/Controllers/UserController.php
+
+		-
+			message: '#^Argument for parameter \$url has already been passed\.$#'
+			identifier: argument.duplicate
+			count: 7
+			path: plugins/User/Infrastructure/Http/Controllers/UserFlowController.php
+
+		-
+			message: '#^Missing parameter \$rent \(array\<string, float\|string\>\) in call to method Project\\Support\\Seo\\RichGraph\:\:realEstate\(\)\.$#'
+			identifier: argument.missing
+			count: 1
+			path: plugins/User/Infrastructure/Http/Controllers/UserFlowController.php
+
+		-
+			message: '#^Argument for parameter \$url has already been passed\.$#'
+			identifier: argument.duplicate
+			count: 7
+			path: plugins/User/Infrastructure/Http/Controllers/UserPageController.php
+
+		-
+			message: '#^Missing parameter \$rent \(array\<string, float\|string\>\) in call to method Project\\Support\\Seo\\RichGraph\:\:realEstate\(\)\.$#'
+			identifier: argument.missing
+			count: 1
+			path: plugins/User/Infrastructure/Http/Controllers/UserPageController.php
+
+		-
+			message: '#^Method Plugins\\User\\Provider\:\:requires\(\) should return list\<class\-string\> but returns array\{''database\.management'', ''crypto\.services'', ''cache\.redis'', ''view\.rendering'', ''http\.client'', ''validation\.rules'', ''mail\.delivery'', ''feedback\.management'', \.\.\.\}\.$#'
+			identifier: return.type
+			count: 1
+			path: plugins/User/Provider.php
+
+		-
+			message: '#^Binary operation "%%" between non\-falsy\-string and 97 results in an error\.$#'
+			identifier: binaryOp.invalid
+			count: 1
+			path: plugins/Validation/Rules/FinancialRules.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between non\-falsy\-string and '''' will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: projects/Bootstrap/Domain/DomainResolver.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between mixed and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: projects/Bootstrap/Environment/ErrorGuard.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between mixed and null will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: projects/Bootstrap/Environment/LoadEnvironment.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>host" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: projects/Bootstrap/Environment/LoadEnvironment.php
+
+		-
+			message: '#^Trait Project\\Http\\Controllers\\Concerns\\InteractsWithAuth is used zero times and is not analysed\.$#'
+			identifier: trait.unused
+			count: 1
+			path: projects/Http/Controllers/Concerns/InteractsWithAuth.php
+
+		-
+			message: '#^Trait Project\\Http\\Controllers\\Concerns\\InteractsWithProject is used zero times and is not analysed\.$#'
+			identifier: trait.unused
+			count: 1
+			path: projects/Http/Controllers/Concerns/InteractsWithProject.php
+
+		-
+			message: '#^Trait Project\\Http\\Controllers\\Concerns\\InteractsWithStorage is used zero times and is not analysed\.$#'
+			identifier: trait.unused
+			count: 1
+			path: projects/Http/Controllers/Concerns/InteractsWithStorage.php
+
+		-
+			message: '#^Unsafe usage of new static\(\)\.$#'
+			identifier: new.static
+			count: 1
+			path: projects/Support/Resource.php
+
+		-
+			message: '#^Access to an undefined property Plugins\\SiteSEO\\Schema\\Thing\:\:\$about\.$#'
+			identifier: property.notFound
+			count: 1
+			path: projects/Support/Seo/RichGraph.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between array\{''@type''\: ''UnitPriceSpecificat…'', price\: string, priceCurrency\: mixed, unitText\: mixed\}\|string and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: projects/Support/Seo/RichGraph.php
+
+		-
+			message: '#^Call to an undefined method AlfaCode\\LetMigrate\\Contract\\MigrationServiceInterface\:\:seed\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Commands/Migrate/DbSeedCommand.php
+
+		-
+			message: '#^Call to an undefined method AlfaCode\\LetMigrate\\Contract\\MigrationServiceInterface\:\:driver\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Commands/Migrate/MigrateBreakpointCommand.php
+
+		-
+			message: '#^Call to an undefined method AlfaCode\\LetMigrate\\Contract\\MigrationServiceInterface\:\:seed\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Commands/Migrate/MigrateFreshCommand.php
+
+		-
+			message: '#^Call to an undefined method AlfaCode\\LetMigrate\\Contract\\MigrationServiceInterface\:\:driver\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Commands/Migrate/MigrateRollbackCommand.php
+
+		-
+			message: '#^Call to an undefined method AlfaCode\\LetMigrate\\Contract\\MigrationServiceInterface\:\:driver\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Commands/Migrate/MigrateRunCommand.php
+
+		-
+			message: '#^Parameter \#2 \$listener of method AlfaCode\\LetMigrate\\Event\\MigrationEventDispatcher\:\:on\(\) expects callable\(AlfaCode\\LetMigrate\\Event\\MigrationEvent\)\: void, Closure\(AlfaCode\\LetMigrate\\Event\\MigrationFailed\)\: void given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Commands/Migrate/MigrateRunCommand.php
+
+		-
+			message: '#^Parameter \#2 \$listener of method AlfaCode\\LetMigrate\\Event\\MigrationEventDispatcher\:\:on\(\) expects callable\(AlfaCode\\LetMigrate\\Event\\MigrationEvent\)\: void, Closure\(AlfaCode\\LetMigrate\\Event\\MigrationFinished\)\: void given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Commands/Migrate/MigrateRunCommand.php
+
+		-
+			message: '#^Parameter \#2 \$listener of method AlfaCode\\LetMigrate\\Event\\MigrationEventDispatcher\:\:on\(\) expects callable\(AlfaCode\\LetMigrate\\Event\\MigrationEvent\)\: void, Closure\(AlfaCode\\LetMigrate\\Event\\MigrationStarted\)\: void given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Commands/Migrate/MigrateRunCommand.php
+
+		-
+			message: '#^Property AlfacodeTeam\\PhpServicePlatform\\Commands\\Migrate\\MigrateRunCommand\:\:\$succeeded is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Commands/Migrate/MigrateRunCommand.php
+
+		-
+			message: '#^Call to an undefined method AlfaCode\\LetMigrate\\Contract\\MigrationServiceInterface\:\:inspector\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Commands/Migrate/MigrateSquashCommand.php
+
+		-
+			message: '#^Call to method toData\(\) on an unknown class AlfaCode\\LetMigrate\\Support\\StatusRenderer\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Commands/Migrate/MigrateStatusCommand.php
+
+		-
+			message: '#^Instantiated class AlfaCode\\LetMigrate\\Support\\StatusRenderer not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: src/Commands/Migrate/MigrateStatusCommand.php
+
+		-
+			message: '#^Offset 1 on array\{non\-falsy\-string, non\-empty\-string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Kernel/Http/UserAgent.php
+
+		-
+			message: '#^PHPDoc tag @param for parameter \$default with type mixed is not subtype of native type array\.$#'
+			identifier: parameter.phpDocType
+			count: 1
+			path: src/Kernel/Pipelines/Http/HttpPipeline.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: src/Kernel/Pipelines/Http/Stages/ErrorStage.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between mixed and null will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: src/Kernel/Support/helpers.php

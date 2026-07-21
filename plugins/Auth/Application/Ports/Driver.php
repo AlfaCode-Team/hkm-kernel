@@ -21,7 +21,7 @@ interface Driver
     /**
      * Get the currently authenticated user.
      *
-     * @return \HKMCode\Application\Auth\Ports\Authenticatable|null
+     * @return Authenticatable|null
      */
     public function user(): ?Authenticatable;
 
@@ -59,7 +59,7 @@ interface Driver
     /**
      * Set the current user.
      *
-     * @param  \HKMCode\Application\Auth\Ports\Authenticatable  $user
+     * @param  Authenticatable  $user
      * @return static
      */
     public function setUser(Authenticatable $user): static;

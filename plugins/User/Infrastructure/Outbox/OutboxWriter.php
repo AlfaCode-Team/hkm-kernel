@@ -28,7 +28,7 @@ final class OutboxWriter implements OutboxPort
         private readonly DatabasePort $db,
     ) {}
 
-    public function write(IntegrationEventContract $event): void
+    public function write(IntegrationEventContract $event): int
     {
         try {
             $this->db->execute(
@@ -47,11 +47,32 @@ final class OutboxWriter implements OutboxPort
                     'created_at'    => self::now(),
                 ],
             );
+
+            return (int) $this->db->lastInsertId();
         } catch (\Throwable $e) {
             throw new RepositoryException(
                 'Failed to enqueue outbox event.',
                 layer: 'repository.user.outbox',
                 context: ['event' => $event->name()],
+                previous: $e,
+            );
+        }
+    }
+
+    public function markDispatched(int $id): void
+    {
+        try {
+            $this->db->execute(
+                'UPDATE user_outbox
+                    SET status = 1, dispatched_at = :dispatched_at
+                  WHERE id = :id',
+                ['dispatched_at' => self::now(), 'id' => $id],
+            );
+        } catch (\Throwable $e) {
+            throw new RepositoryException(
+                'Failed to mark outbox event dispatched.',
+                layer: 'repository.user.outbox',
+                context: ['id' => $id],
                 previous: $e,
             );
         }
