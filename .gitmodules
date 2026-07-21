@@ -7,12 +7,6 @@
 [submodule "modules/php-io-cli"]
 	path = modules/php-io-cli
 	url = https://github.com/AlfaCode-Team/php-io-cli.git
-[submodule "modules/module-template"]
-	path = modules/module-template
-	url = https://github.com/AlfaCode-Team/module-template.git
-[submodule "modules/pulse-engine"]
-	path = modules/pulse-engine
-	url = https://github.com/AlfaCode-Team/Pulse-Engine.git
 [submodule "modules/let-migrate"]
 	path = modules/let-migrate
 	url = https://github.com/AlfaCode-Team/Let-Migrate.git
