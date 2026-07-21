@@ -462,8 +462,12 @@ Each plugin ships its own `README.md` — e.g. [Auth](plugins/Auth/README.md),
 ```bash
 git clone --recurse-submodules git@github.com:AlfaCode-Team/php-service-platform.git
 cd php-service-platform
-composer install
+composer install                           # also wires the git hooks (core.hooksPath=.githooks)
 vendor/bin/phpunit                         # run the test suite
+
+# If you skip composer, enable the repo git hooks manually (strips AI co-author
+# trailers from commit messages):
+git config core.hooksPath .githooks
 
 # Build the native launcher (needs Zig — see tools/.zig-version):
 cd tools && zig build --release=small      # → ../bin/hkm + ../bin/hkm-config

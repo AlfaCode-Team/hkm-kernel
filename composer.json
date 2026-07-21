@@ -96,6 +96,14 @@
     ],
     "minimum-stability": "dev",
     "prefer-stable": true,
+    "scripts": {
+        "post-install-cmd": [
+            "git config core.hooksPath .githooks || true"
+        ],
+        "post-update-cmd": [
+            "git config core.hooksPath .githooks || true"
+        ]
+    },
     "extra": {
         "php-io-cli": {
             "commands": [
