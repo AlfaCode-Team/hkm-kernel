@@ -53,7 +53,7 @@ gh api -X PUT "repos/$REPO/branches/$BRANCH/protection" \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["PHPUnit (PHP 8.4)", "Zig build (all targets)"]
+    "contexts": ["PHPUnit (PHP 8.4)", "Zig build (all targets)", "PHPStan", "composer audit"]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {
