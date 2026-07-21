@@ -80,9 +80,16 @@ final class NginxSyntaxTest extends TestCase
             [$this->dir . '/logs/', 'include ' . $this->dir . '/fastcgi_params;'],
             $body,
         );
+        // `http2 on;` is valid only on nginx >= 1.25.1; strip it so the syntax
+        // check tolerates the older nginx that CI/distros ship (its presence is
+        // asserted separately by the behavioral test).
+        $body = (string) preg_replace('/^\s*http2 on;\R/m', '', $body);
+        // pid + error_log are supplied via -g (universally supported) rather than
+        // written into the config body or the newer -e flag (older nginx rejects
+        // -e), and kept OUT of the body so there is no duplicate directive.
         $conf = $this->dir . '/site.conf';
         file_put_contents($conf, sprintf(
-            "events {}\npid %1\$s/logs/nginx.pid;\nerror_log %1\$s/logs/main.log;\nhttp {\n"
+            "events {}\nhttp {\n"
             . "  access_log %1\$s/logs/access.log;\n  client_body_temp_path %1\$s/logs/body;\n"
             . "  proxy_temp_path %1\$s/logs/proxy;\n  fastcgi_temp_path %1\$s/logs/fcgi;\n"
             . "  limit_req_zone \$binary_remote_addr zone=general:10m rate=10r/s;\n"
@@ -92,11 +99,11 @@ final class NginxSyntaxTest extends TestCase
         ));
 
         exec(sprintf(
-            '%s -t -c %s -p %s -e %s/logs/main.log 2>&1',
+            '%s -t -c %s -p %s -g %s 2>&1',
             $this->nginxBinary(),
             escapeshellarg($conf),
             escapeshellarg($this->dir),
-            $this->dir,
+            escapeshellarg("pid {$this->dir}/logs/nginx.pid; error_log {$this->dir}/logs/main.log;"),
         ), $out, $code);
         $output = implode("\n", $out);
 
