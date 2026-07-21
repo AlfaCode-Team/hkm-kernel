@@ -11,11 +11,6 @@ parameters:
         - */__dev__/*
         - projects/*/var/*
         - projects/*/userdata/*
-        # Pre-existing bugs (tracked separately, not analysable until fixed):
-        #   - MigrateListCommand extends a non-existent AbstractMigrateCommand
-        #   - OutboxWriter does not satisfy OutboxPort (missing markDispatched, wrong write() return)
-        - src/Commands/Migrate/MigrateListCommand.php
-        - plugins/User/Infrastructure/Outbox/OutboxWriter.php
     treatPhpDocTypesAsCertain: false
     reportUnmatchedIgnoredErrors: false
 
