@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress
       - name: Audit dependencies for known vulnerabilities
-        run: composer audit --no-dev=false
+        run: composer audit
 
   # ── Static analysis (PHPStan) ──────────────────────────────────────────────
   phpstan:
