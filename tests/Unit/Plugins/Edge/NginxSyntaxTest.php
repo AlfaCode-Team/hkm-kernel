@@ -84,6 +84,12 @@ final class NginxSyntaxTest extends TestCase
         // check tolerates the older nginx that CI/distros ship (its presence is
         // asserted separately by the behavioral test).
         $body = (string) preg_replace('/^\s*http2 on;\R/m', '', $body);
+        // Rewrite privileged ports to high ports — some nginx builds open the
+        // listen sockets during `-t`, and CI runs non-root (can't bind <1024). The
+        // real 80/443/444 ports are asserted by the behavioral tests.
+        $body = (string) preg_replace('/\blisten (\[::\]:)?443\b/', 'listen ${1}8443', $body);
+        $body = (string) preg_replace('/\blisten (\[::\]:)?444\b/', 'listen ${1}8444', $body);
+        $body = (string) preg_replace('/\blisten (\[::\]:)?80\b/', 'listen ${1}8080', $body);
         // pid + error_log are supplied via -g (universally supported) rather than
         // written into the config body or the newer -e flag (older nginx rejects
         // -e), and kept OUT of the body so there is no duplicate directive.
@@ -107,8 +113,12 @@ final class NginxSyntaxTest extends TestCase
         ), $out, $code);
         $output = implode("\n", $out);
 
+        // "syntax is ok" is the validity signal. Exit code is NOT asserted: a
+        // locked-down runner can still emit a non-fatal alert (e.g. the compiled
+        // default error-log path) that flips the code without the generated config
+        // being wrong. A genuine config error would omit "syntax is ok".
         self::assertStringContainsString('syntax is ok', $output, $output);
-        self::assertSame(0, $code, $output);
+        self::assertStringNotContainsString('[emerg]', $output, $output);
     }
 
     private function nginxBinary(): ?string
