@@ -52,15 +52,9 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress
       - name: Run PHPStan
-        # Non-blocking for now: the codebase has no baseline yet. Remove
-        # continue-on-error once phpstan.neon + a baseline are committed.
-        continue-on-error: true
-        run: |
-          if [ -f phpstan.neon ] || [ -f phpstan.neon.dist ]; then
-            vendor/bin/phpstan analyse --no-progress --error-format=github
-          else
-            vendor/bin/phpstan analyse src --level=5 --no-progress --error-format=github
-          fi
+        # Blocking gate: 542 pre-existing errors are captured in
+        # phpstan-baseline.neon, so only NEW errors fail the build.
+        run: php -d memory_limit=2G vendor/bin/phpstan analyse --no-progress --error-format=github
 
   # ── Semgrep → code scanning (SARIF) ────────────────────────────────────────
   semgrep:
