@@ -12,11 +12,9 @@
         "phpshots/common-type-alias": "0.1.1",
         "phpshots/bind-it": "*",
         "alfacode-team/php-io-cli": "*",
-        "alfacode-team/module-template": "*",
-        "alfacode-team/pulse-engine": "*",
         "alfacode-team/let-migrate": "*",
         "symfony/expression-language": "^7.0",
-        "guzzlehttp/guzzle": "^7.11",
+        "guzzlehttp/guzzle": "^7.15.1",
         "firebase/php-jwt": "^7.0",
         "league/flysystem": "^3.34",
         "league/flysystem-aws-s3-v3": "^3.34",
@@ -46,14 +44,6 @@
         },
         {
             "type": "path",
-            "url": "modules/module-template"
-        },
-        {
-            "type": "path",
-            "url": "modules/pulse-engine"
-        },
-        {
-            "type": "path",
             "url": "modules/let-migrate"
         }
     ],
@@ -71,7 +61,8 @@
             "plugins/Auth/Support/helpers.php",
             "plugins/Authorization/Engine/functions.php",
             "plugins/Cookie/Support/helpers.php",
-            "plugins/Pageflow/Support/helpers.php"
+            "plugins/Pageflow/Support/helpers.php",
+            "plugins/Edge/Support/helpers.php"
         ],
         "exclude-from-classmap": [
             "**/database/seeders/**",
@@ -95,6 +86,14 @@
     ],
     "minimum-stability": "dev",
     "prefer-stable": true,
+    "scripts": {
+        "post-install-cmd": [
+            "git config core.hooksPath .githooks || true"
+        ],
+        "post-update-cmd": [
+            "git config core.hooksPath .githooks || true"
+        ]
+    },
     "extra": {
         "php-io-cli": {
             "commands": [

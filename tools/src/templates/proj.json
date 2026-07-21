@@ -1,0 +1,11 @@
+{
+    "name": "{{PROJECT_NAME}}",
+    "version": "1.0.0",
+    "domains": {{DOMAINS_JSON}},
+    "features": [],
+    "views": "resources",
+    "routes": [
+        { "method": "GET", "path": "/",     "handler": "{{STUDLY}}\\Infrastructure\\Http\\HomeController@index" },
+        { "method": "GET", "path": "/ping", "handler": "{{STUDLY}}\\Infrastructure\\Http\\HomeController@ping"  }
+    ]
+}

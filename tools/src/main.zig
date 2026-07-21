@@ -3,6 +3,7 @@ const new_cmd = @import("commands/new.zig");
 const update_cmd = @import("commands/update.zig");
 const run_cmd = @import("commands/run.zig");
 const list_cmd = @import("commands/list.zig");
+const discover_cmd = @import("commands/discover.zig");
 const plugins_cmd = @import("commands/plugins.zig");
 const ui_cmd = @import("commands/ui.zig");
 const cli_cmd = @import("commands/cli.zig");
@@ -23,6 +24,7 @@ fn printHelp() void {
     prompt.item("hkm cli [command]", "run a project's console interactively");
     prompt.item("hkm worker [args]", "run a project's queue worker");
     prompt.item("hkm list", "list registered projects (alias: ls)");
+    prompt.item("hkm discover [root]", "find projects on disk and register them (alias: scan)");
     prompt.item("hkm plugins [path|name]", "analyse a project's enabled plugins/modules");
     prompt.item("hkm ui [sync|list|link|clean]", "federate enabled plugins' UIs into the frontend");
     prompt.item("hkm update <path|name>", "refresh a project's kernel registry entry");
@@ -125,6 +127,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
             try env_map.put("HKM_KERNEL_HOME", home);
             const cli = try std.fs.path.join(allocator, &.{ home, "bin", "hkm" });
             try env_map.put("HKM_CLI_PATH", cli);
+            // Explicit marker so commands can REQUIRE dev mode (e.g. anything that
+            // touches the developer's machine, like edge:hosts writing /etc/hosts).
+            try env_map.put("HKM_DEV", "1");
             prompt.muted(try std.fmt.allocPrint(allocator, "dev mode: using kernel at {s}", .{home}));
         } else {
             prompt.err("--dev: no development kernel found. Set HKM_DEV_HOME to your checkout, or run the repo-built tools/zig-out/bin/hkm from inside it.");
@@ -170,6 +175,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
     if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "ls")) {
         const code = try list_cmd.run(allocator, io, &env_map, args);
+        std.process.exit(code);
+    }
+    if (std.mem.eql(u8, cmd, "discover") or std.mem.eql(u8, cmd, "scan")) {
+        const code = try discover_cmd.run(allocator, io, &env_map, args);
         std.process.exit(code);
     }
     if (std.mem.eql(u8, cmd, "plugins") or std.mem.eql(u8, cmd, "modules")) {

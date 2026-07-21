@@ -28,7 +28,7 @@ const Located = sources.Located;
 const Enabled = boot.Enabled;
 const Activation = boot.Activation;
 
-const Action = enum { analyze, verify, enable, disable, update, upgrade, create, delete, make_migration, make_seeder, make_factory };
+const Action = enum { analyze, verify, recover, enable, disable, update, upgrade, create, delete, make_migration, make_seeder, make_factory };
 
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
     var action: Action = .analyze;
@@ -72,6 +72,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     switch (action) {
         .analyze => return analyze(allocator, io, env, op(ops, 0), show_all),
         .verify => return verifyPlugins(allocator, io, env, op(ops, 0), fix),
+        .recover => return recoverAssets(allocator, io, env, op(ops, 0), dry_run),
         .enable, .disable => {
             if (ops.len == 0) {
                 prompt.err("Usage: hkm plugins enable|disable <plugin> [path|name] [--essential] [--dry-run]");
@@ -150,6 +151,8 @@ fn actionFromWordOpt(a: []const u8) ?Action {
     if (std.mem.eql(u8, a, "list") or std.mem.eql(u8, a, "ls")) return .analyze;
     if (std.mem.eql(u8, a, "verify") or std.mem.eql(u8, a, "check") or std.mem.eql(u8, a, "doctor") or
         std.mem.eql(u8, a, "scan") or std.mem.eql(u8, a, "audit")) return .verify;
+    if (std.mem.eql(u8, a, "recover") or std.mem.eql(u8, a, "recover-assets") or
+        std.mem.eql(u8, a, "rebuild") or std.mem.eql(u8, a, "reindex")) return .recover;
     return null;
 }
 
@@ -470,6 +473,47 @@ fn verifyPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []c
     prompt.note("Unmet requires need:  hkm plugins enable <dependency>");
     prompt.outro(try std.fmt.allocPrint(allocator, "{d} plugin(s) need attention", .{with_issues}));
     return 1;
+}
+
+// ── recover (rebuild var/plugin-assets.json from the filesystem) ───────────────
+
+/// `hkm plugins recover [path|name] [--dry-run]` — rebuild the project's
+/// `var/plugin-assets.json` manifest from ground truth. For every ENABLED
+/// plugin, it records the published assets that actually exist in the project,
+/// healing a lost, truncated, or drifted manifest. It copies nothing; use
+/// `hkm plugins update` to re-publish assets that are physically missing.
+fn recoverAssets(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []const u8, dry_run: bool) !u8 {
+    const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
+
+    prompt.intro(try std.fmt.allocPrint(allocator, "Recover plugin-assets manifest for {s}", .{root}));
+
+    var found: std.ArrayList(assets.RecoveredPlugin) = .empty;
+    const res = try assets.recoverEnabled(allocator, io, env, root, dry_run, &found);
+
+    if (found.items.len == 0) {
+        prompt.muted("No enabled plugins with on-disk assets were found.");
+        prompt.note("Is the project bootstrap wiring plugins in withModules()/withEssentialModules()?");
+        prompt.outro(try std.fmt.allocPrint(allocator, "{s}/var/plugin-assets.json", .{root}));
+        return 0;
+    }
+
+    for (found.items) |p| {
+        prompt.item(p.name, sources.sourceLabel(p.source));
+        prompt.muted(try std.fmt.allocPrint(allocator, "    {d} asset(s)", .{p.files}));
+    }
+
+    if (res.unresolved > 0) {
+        prompt.warn(try std.fmt.allocPrint(allocator, "{d} enabled plugin(s) could not be located on disk — skipped.", .{res.unresolved}));
+    }
+
+    if (dry_run) {
+        prompt.note("--dry-run: manifest left unchanged.");
+        prompt.outro(try std.fmt.allocPrint(allocator, "{d} plugin(s), {d} asset(s) would be recorded", .{ res.plugins, res.files }));
+    } else {
+        prompt.ok(try std.fmt.allocPrint(allocator, "Rebuilt manifest: {d} plugin(s), {d} asset(s)", .{ res.plugins, res.files }));
+        prompt.outro(try std.fmt.allocPrint(allocator, "{s}/var/plugin-assets.json", .{root}));
+    }
+    return 0;
 }
 
 /// The name of the first ENABLED plugin whose solves domain equals `domain`.
@@ -1509,6 +1553,7 @@ fn printHelp() void {
     prompt.section("Usage");
     prompt.item("hkm plugins [path|name]", "show the plugins/modules a project enables");
     prompt.item("hkm plugins verify [proj]", "audit enabled plugins: wiring, deps + copied assets/views/migrations/configs");
+    prompt.item("hkm plugins recover [proj]", "rebuild var/plugin-assets.json from on-disk assets (aliases: rebuild/reindex)");
     prompt.item("hkm plugins enable <plugin> [proj]", "wire a plugin into the project bootstrap");
     prompt.item("hkm plugins disable <plugin> [proj]", "remove a plugin from the project bootstrap");
     prompt.item("hkm plugins update [plugin] [proj]", "analyse enabled plugin(s) vs the project (config/database/resources/ui): publish new + refresh changed assets, re-sync a drifted ui mirror, migrate central + tenant DBs; wire any missing Support/helpers.php require");

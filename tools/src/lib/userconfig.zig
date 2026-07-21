@@ -11,7 +11,18 @@ const EnvMap = std.process.Environ.Map;
 const Dir = std.Io.Dir;
 
 /// Absolute path to the config file, honouring XDG_CONFIG_HOME then HOME.
+///
+/// Under `sudo`, HOME is root's (/root) but the config was written by the
+/// invoking user — so `sudo hkm --dev` would otherwise lose HKM_DEV_HOME and
+/// everything else in config.env. When SUDO_USER is set we resolve the config in
+/// that user's home instead, so a privileged run (e.g. editing /etc/hosts) still
+/// sees the same configuration as a normal run.
 pub fn path(allocator: std.mem.Allocator, env: *EnvMap) !?[]const u8 {
+    if (env.get("SUDO_USER")) |user| {
+        if (user.len > 0 and !std.mem.eql(u8, user, "root")) {
+            return try std.fmt.allocPrint(allocator, "/home/{s}/.config/hkm/config.env", .{user});
+        }
+    }
     if (env.get("XDG_CONFIG_HOME")) |x| {
         if (x.len > 0) return try std.fmt.allocPrint(allocator, "{s}/hkm/config.env", .{x});
     }

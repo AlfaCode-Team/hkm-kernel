@@ -6,6 +6,246 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.19] - 2026-07-21
+
+### Added
+- **Edge reuses & updates an existing nginx SNI stream splitter.** When both nginx
+  and Apache run and the host already declares a `map $ssl_preread_server_name`
+  splitter (located via `nginx -T`), Edge no longer writes a second, conflicting
+  `stream {}` block. It emits only the internal backend vhosts AND **merges the
+  platform's public domains into the existing `map` in place** — inside a marked,
+  idempotent sub-block, leaving hand-written entries untouched and never
+  duplicating a domain. New `StreamConfigWriter`; `EDGE_REUSE_STREAM` (default on),
+  `EDGE_STREAM_BACKEND` (default `nginx_backend`).
+- **Force a single-server strategy with no fallback.** `edge:apply --nginx-only` /
+  `--apache-only` (and `edge:status` preview) bypass host auto-detection;
+  `EDGE_FORCE_STRATEGY` sets a deploy default.
+- **Behind-SNI-router awareness.** The nginx-only vhost now listens on the internal
+  backend port (e.g. 444) instead of `:443` when the host runs an SNI stream router
+  that already owns `:443` — auto-detected, or forced via `EDGE_BEHIND_SNI_ROUTER`
+  / pinned with `EDGE_NGINX_SSL_PORT`. Prevents nginx failing to start with
+  "Address already in use". The `:80→HTTPS` redirect still targets the public port.
+- **Configurable CORS, TLS pinning, method guard and deny lists** for generated
+  vhosts: `EDGE_CORS` (off/allowlist/wildcard — wildcard opt-in, allowlist echoed
+  via a `$http_origin` map), `EDGE_SSL_PROTOCOLS`/`EDGE_SSL_CIPHERS`/
+  `EDGE_SSL_STAPLING`, `EDGE_ALLOWED_METHODS`, `EDGE_DENY_DIRS`.
+- **`plugins/Edge/USAGE.md`** — full command + environment reference.
+
+### Fixed
+- **CLI parser rejects unknown/misspelled options** instead of silently ignoring
+  them (e.g. a typo'd `--tsl=both` no longer produces the wrong config with a zero
+  exit). In a script/CI it exits non-zero with a Damerau-Levenshtein "did you
+  mean?" suggestion; on an interactive terminal it auto-applies the obvious
+  correction with a visible notice. Launcher-injected globals stay tolerated.
+- **`--tls=both` emits the port-80 redirect block** (with ACME/Let's-Encrypt
+  HTTP-01 passthrough before the redirect) alongside the `:443` block.
+- **Security/CORS headers are no longer dropped inside location blocks.** Header
+  emission is centralised so every location that declares an `add_header` re-emits
+  the full set — headers now land on real app/API responses, not just static
+  paths.
+- **DEVELOPMENT profile emits short-lived HSTS** (`max-age=300`, no
+  `includeSubDomains`, never `preload`); production keeps long-form HSTS with
+  `preload` opt-in.
+- **`/nginx-status` is dev-only** — removed from production, where the SNI stream
+  proxy makes `allow 127.0.0.1` world-open.
+- **Production denies source maps.** `.map` is added to the deny list (not merely
+  dropped from the static-asset rule, which `location /` would still serve via
+  `try_files`); development keeps serving maps for debugging.
+- **Deny rules are ordered before the static-asset regex** and directories use
+  `^~` prefix locations, so a denied path (e.g. `vendor/composer/installed.json`)
+  can no longer be served through a whitelisted extension.
+- **Per-site access/error logs are emitted in production** (previously dev-only,
+  silently falling back to the global log).
+- **IPv4/IPv6 listeners are consistent** — `listen [::]:443 ssl` now mirrors the
+  `:80` block.
+- **Production static-asset regex drops `map`/`json`**, and explicit TLS
+  protocol/cipher pinning + session settings are emitted for every TLS listener;
+  `error_log … debug` is opt-in (`EDGE_NGINX_DEBUG_LOG`), default `warn`.
+
+## [1.0.18] - 2026-07-20
+
+### Added
+- **`hkm plugins recover [proj]` — rebuild a lost/drifted `var/plugin-assets.json`
+  (aliases `rebuild` / `reindex`).** Reconstructs the plugin-assets manifest from
+  ground truth: for every plugin ENABLED in the project bootstrap it records the
+  published assets that actually exist on disk, healing a manifest that was
+  deleted, truncated, or fell out of sync. It copies nothing (use
+  `hkm plugins update` to re-publish physically-missing assets) and preserves any
+  migration `batch` already recorded, since batch numbers cannot be derived from
+  the filesystem. `--dry-run` (`-n`) previews the rebuild; unresolvable enabled
+  plugins are reported and skipped. Implemented natively in Zig.
+
+### Changed
+- **`hkm discover` now restores each project's gitignored runtime folders.**
+  After locating a project it ensures `var/logs`, `var/cache/manifests`,
+  `var/tmp`, `var/locks`, `var/sessions`, `var/queue` and `userdata/storage`
+  exist — a freshly cloned or moved project is usually missing them, which would
+  otherwise fail at boot. `--dry-run` reports how many are missing without
+  creating them; a real run creates them (idempotent — an already-complete
+  project reports nothing).
+
+## [1.0.17] - 2026-07-20
+
+### Added
+- **`hkm discover [root]` — find projects on disk and register them (alias
+  `hkm scan`).** Walks a directory tree, finds every folder holding a
+  `proj.json`, and upserts each into the kernel registry (`projects.json`) with
+  its name, version, ABSOLUTE path, and domains read straight from that project's
+  own `proj.json`. The bulk counterpart to `hkm update <path>` (one project):
+  use it to adopt projects scaffolded with `--no-register`, cloned from git, or
+  moved on disk. Reports each match as `new` / `moved` / `up-to-date` against the
+  current registry; `--dry-run` (`-n`) previews without writing; `--depth=N`
+  (default 4) caps descent. Skips `vendor`, `node_modules`, `var`, `.git`,
+  `dist`, `zig-out`, `.zig-cache` and dotfolders, and stops descending once a
+  folder is identified as a project root. Implemented natively in Zig (no PHP
+  required), reusing the same registry resolver as `new`/`update`/`list`.
+- **`TENANCY_CONTROL_PLANE` — serve a super-admin host with Tenancy enabled.**
+  `Tenancy::boot()` previously registered `TenantContextStage` unconditionally,
+  which made a central control-plane deployment unservable: every request either
+  500'd (route did not load Tenancy, so `TenantIdentifier` was unbound and the
+  stage threw) or 404'd (loaded, but no tenant resolves on an admin host). Set
+  `TENANCY_CONTROL_PLANE=true` and the `after.load` hook is skipped, so
+  `DatabasePort` stays on central. Everything else the plugin publishes — the
+  registry, connection resolver, admin/membership/invitation services and the
+  `tenant:*` provisioning commands — is unaffected. Defaults to **false**, so a
+  tenant-serving deployment cannot lose tenant isolation by omission.
+
+### Changed
+- **`tenant:migrate` is scoped to the calling project by default.** It now
+  migrates only the tenants recorded in that project's `var/tenants.json`,
+  instead of every active tenant in the registry. Several projects may share one
+  central registry, and a sibling's tenant is encrypted with that project's
+  `APP_KEY` — so it surfaced on every run as a spurious "Could not decrypt
+  payload (invalid key or tampered data)" failure. Pass `--all` for the previous
+  fleet-wide behaviour; a project with no `var/tenants.json` still migrates every
+  active tenant, so single-project deployments are unchanged. Skipped tenants are
+  reported rather than silently dropped.
+
+## [1.0.16] - 2026-07-18
+
+### Added
+- **TLS modes for `edge:apply`.** `--tls=ssl|none|both` (plus `--no-ssl` as an
+  alias for `none`) picks how each vhost terminates TLS: HTTPS only, plain HTTP
+  on `:80`, or `:80` that 301-redirects to `:443`. `--ssl-cert` / `--ssl-key`
+  override the certificate paths per run. Default comes from `EDGE_TLS_MODE`
+  (`ssl`), so existing behaviour is unchanged.
+- **Cache profiles derived from `APP_ENV`.** `local` / `development` →
+  DEVELOPMENT (nothing is browser-cached: HTML, the front controller and every
+  asset are `no-store`, so a rebuild is picked up without clearing the browser
+  cache); `production` → PRODUCTION (dynamic responses stay uncached,
+  fingerprinted assets get `expires 1y` + `public, immutable`). Anything
+  unrecognised falls back to DEVELOPMENT — never production. The profile is
+  written into the file as a `# HKM Edge cache profile: …` banner.
+- **Environment flags on `edge:apply` / `edge:service`.** `--local` (alias
+  `--dev`), `--development` / `-d`, and `--production` set `APP_ENV` for the
+  run. They are command-scoped, not launcher-global.
+- **OpenSwoole runtime.** A project can now set `"edge": { "runtime":
+  "openswoole" }` in its `proj.json` and Edge renders nginx as a reverse proxy
+  instead of a PHP-FPM vhost: a dedicated `upstream` (least_conn, `max_fails` /
+  `fail_timeout`, keepalive pool, multiple workers via `"ports": [9501, 9502]`),
+  a `$connection_upgrade` map, a separate `/ws` WebSocket location with long
+  timeouts, an optional `/health` endpoint, and Cloudflare's `CF-Connecting-IP`
+  forwarded upstream. Static assets are still served straight off disk.
+- **`edge:service` command.** Generates the systemd unit (or supervisor program
+  block with `--supervisor`) that keeps a project's OpenSwoole server alive.
+  `--write[=dir]` writes it out; PHP-FPM projects are skipped since php-fpm
+  already supervises those workers. PHP binary, entry script, port and worker
+  count are configurable.
+- **Response compression.** `EDGE_COMPRESSION=auto` (default) prefers Brotli
+  when the server actually supports it and falls back to gzip — resolved per
+  server from nginx's `ngx_brotli` build and Apache's loaded `mod_brotli`, so an
+  Apache-only host no longer inherits nginx's answer. Brotli mode also emits a
+  gzip block for clients without `br`.
+- **HSTS.** Emitted only for the TLS modes (`ssl` / `both`), never for plain
+  HTTP, with configurable `max-age`, `includeSubDomains` and `preload`.
+- **Optional http-context prelude** (`EDGE_HTTP_PRELUDE=1`, off by default):
+  the `log_format`, `limit_req_zone` / `limit_conn_zone` and Cloudflare
+  `set_real_ip_from` ranges that the vhost directives depend on. Off by default
+  because re-declaring a zone that already exists in `nginx.conf` is a
+  duplicate-definition error.
+
+### Changed
+- **Cache mode is no longer inferred from the kernel mode.** Nothing in vhost
+  generation reads `HKM_DEV` any more — the cache profile comes from `APP_ENV`
+  alone, so choosing which kernel to run against (`hkm … --dev`) and choosing
+  how assets are cached are independent. `dev_vhost` defaults to "follow the
+  cache profile"; set `EDGE_DEV_VHOST` to force it either way.
+- **All generated paths derive from the project root.** The vhost records its
+  provenance (`# HKM Edge project root: …` / `public root: …` / `swoole root:
+  …`) and the OpenSwoole entry script now defaults to `app/swoole/index.php`
+  relative to the project root — matching what `hkm run <project> --swoole`
+  actually executes (it previously defaulted to a `bin/server.php` that no HKM
+  project has).
+- **Security headers are repeated inside `location` blocks that set their own
+  `add_header`.** nginx drops every inherited `add_header` as soon as a location
+  adds one, which silently stripped `nosniff` / `X-Frame-Options` /
+  `Referrer-Policy` / HSTS from static assets and the front controller.
+- Static assets resolve only under the public root; a miss is a hard `404` and
+  is never forwarded to the application.
+
+### Fixed
+- **Generated nginx failed `nginx -t`.** The PHP-FPM vhost nested `location =
+  /index.php` inside `location ~ \.php$`, which nginx rejects ("location … is
+  outside location …"), so `edge:apply` could never pass its own config test.
+  Replaced with the flat front-controller pair (`location = /index.php` for
+  FastCGI, `location ~ \.php$ { return 404; }` for everything else).
+- **`.well-known` was denied, breaking ACME/Let's Encrypt.** A blanket
+  `location ~ /\.` shadowed the later negative-lookahead rule, so HTTP-01
+  challenges 404'd and certificates could not be issued or renewed.
+- **Apache vhosts failed `apachectl configtest`.** `ServerTokens` is a
+  server-level directive and is rejected inside `<VirtualHost>`; it is no longer
+  emitted (`ServerSignature` / `LimitRequestBody` are valid there and remain).
+- **Apache no longer emits directives for modules that are not loaded.** The
+  loaded module set is probed from `apachectl -M`, and HSTS (`mod_headers`) and
+  compression (`mod_filter` + `mod_brotli` / `mod_deflate`) degrade to whatever
+  the host supports instead of failing the config test.
+
+## [1.0.15] - 2026-07-17
+
+### Fixed
+- **Edge now serves local (`.local`/`.test`) domains in dev.** The
+  `EDGE_LOCAL_IN_SERVER` flag was defined but never read, so a project whose
+  domains are all local rendered an empty vhost (header comment only). Dev mode
+  (`hkm … --dev`, which exports `HKM_DEV=1`) now folds local domains into the
+  generated nginx/Apache vhost automatically — `hkm cli -p <project> --dev
+  edge:apply` produces a working local site with no extra flag. A production
+  (non `--dev`) run still keeps local domains out of the server config (they
+  resolve through DNS); `EDGE_LOCAL_IN_SERVER=true` forces local-in-server
+  outside dev. Local domains continue to sync to `/etc/hosts` in both cases.
+
+## [1.0.13] - 2026-07-17
+
+### Added
+- **Edge plugin (`Plugins\Edge`, solves `edge.routing`).** Generates this host's
+  web-server front config from the platform's registered domains and adapts to
+  what is actually running: nginx **SNI stream splitter** (raw-TLS `ssl_preread`
+  routing to nginx `:444` / Apache `:8443`) when both run, else a plain
+  **nginx-only** or **Apache-only** vhost. Project-aware: one vhost per project
+  (docroot `<project>/app/public`), served via **PHP-FPM** or **OpenSwoole**
+  (configurable per project in `proj.json` `"edge"`). The **run-env** the
+  launcher exports (`APP_ENV`, `HKM_KERNEL_HOME`, `HKM_DEV_HOME`,
+  `HKM_USERDATA_DIR`, `PSP_GLOBAL_AUTOLOAD`, `PSP_PROJECTS_DIR`) is passed through
+  into each vhost so FPM workers boot the correct kernel. The PHP-FPM socket is
+  auto-resolved to the **CLI PHP version** (multi-PHP hosts). Local (`.local`/
+  `.test`) domains are excluded from the server config and synced to `/etc/hosts`
+  (dev only, `--dev` required; never duplicates an existing entry). CLI:
+  `edge:status`, `edge:apply`, `edge:hosts` (default-scoped to the current
+  project, `--all` for the whole registry). See `plugins/Edge/README.md`.
+- **`PSP_PROJECTS_DIR` is now exported by `hkm run` / `hkm cli`** — resolved to
+  the same project registry the launcher uses (`HKM_USERDATA_DIR` → `PSP_PROJECTS_DIR`
+  → `HKM_KERNEL_HOME/projects`), so the kernel and plugins read one registry
+  without re-deriving it. `--dev` also exports `HKM_DEV=1` as an explicit marker.
+
+### Fixed
+- **Frontend build output path.** Vite wrote hashed assets + manifests to
+  `<project>/public_html/build/`, but the docroot and `ViteManifest` both use
+  `<project>/app/public` — so built assets landed outside the web root and were
+  never found. The frontend template now builds to `app/public/build/`.
+- **`hkm … --dev` under `sudo`.** The launcher read its config from root's home
+  (`/root/.config/hkm/config.env`) and lost `HKM_DEV_HOME`; it now honours
+  `SUDO_USER` and reads the invoking user's `config.env`, so `sudo hkm … --dev`
+  resolves the dev kernel.
+
 ## [1.0.12] - 2026-07-16
 
 ### Changed
