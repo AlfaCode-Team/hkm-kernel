@@ -6,6 +6,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.19] - 2026-07-21
+
+### Added
+- **Edge reuses & updates an existing nginx SNI stream splitter.** When both nginx
+  and Apache run and the host already declares a `map $ssl_preread_server_name`
+  splitter (located via `nginx -T`), Edge no longer writes a second, conflicting
+  `stream {}` block. It emits only the internal backend vhosts AND **merges the
+  platform's public domains into the existing `map` in place** — inside a marked,
+  idempotent sub-block, leaving hand-written entries untouched and never
+  duplicating a domain. New `StreamConfigWriter`; `EDGE_REUSE_STREAM` (default on),
+  `EDGE_STREAM_BACKEND` (default `nginx_backend`).
+- **Force a single-server strategy with no fallback.** `edge:apply --nginx-only` /
+  `--apache-only` (and `edge:status` preview) bypass host auto-detection;
+  `EDGE_FORCE_STRATEGY` sets a deploy default.
+- **Behind-SNI-router awareness.** The nginx-only vhost now listens on the internal
+  backend port (e.g. 444) instead of `:443` when the host runs an SNI stream router
+  that already owns `:443` — auto-detected, or forced via `EDGE_BEHIND_SNI_ROUTER`
+  / pinned with `EDGE_NGINX_SSL_PORT`. Prevents nginx failing to start with
+  "Address already in use". The `:80→HTTPS` redirect still targets the public port.
+- **Configurable CORS, TLS pinning, method guard and deny lists** for generated
+  vhosts: `EDGE_CORS` (off/allowlist/wildcard — wildcard opt-in, allowlist echoed
+  via a `$http_origin` map), `EDGE_SSL_PROTOCOLS`/`EDGE_SSL_CIPHERS`/
+  `EDGE_SSL_STAPLING`, `EDGE_ALLOWED_METHODS`, `EDGE_DENY_DIRS`.
+- **`plugins/Edge/USAGE.md`** — full command + environment reference.
+
+### Fixed
+- **CLI parser rejects unknown/misspelled options** instead of silently ignoring
+  them (e.g. a typo'd `--tsl=both` no longer produces the wrong config with a zero
+  exit). In a script/CI it exits non-zero with a Damerau-Levenshtein "did you
+  mean?" suggestion; on an interactive terminal it auto-applies the obvious
+  correction with a visible notice. Launcher-injected globals stay tolerated.
+- **`--tls=both` emits the port-80 redirect block** (with ACME/Let's-Encrypt
+  HTTP-01 passthrough before the redirect) alongside the `:443` block.
+- **Security/CORS headers are no longer dropped inside location blocks.** Header
+  emission is centralised so every location that declares an `add_header` re-emits
+  the full set — headers now land on real app/API responses, not just static
+  paths.
+- **DEVELOPMENT profile emits short-lived HSTS** (`max-age=300`, no
+  `includeSubDomains`, never `preload`); production keeps long-form HSTS with
+  `preload` opt-in.
+- **`/nginx-status` is dev-only** — removed from production, where the SNI stream
+  proxy makes `allow 127.0.0.1` world-open.
+- **Production denies source maps.** `.map` is added to the deny list (not merely
+  dropped from the static-asset rule, which `location /` would still serve via
+  `try_files`); development keeps serving maps for debugging.
+- **Deny rules are ordered before the static-asset regex** and directories use
+  `^~` prefix locations, so a denied path (e.g. `vendor/composer/installed.json`)
+  can no longer be served through a whitelisted extension.
+- **Per-site access/error logs are emitted in production** (previously dev-only,
+  silently falling back to the global log).
+- **IPv4/IPv6 listeners are consistent** — `listen [::]:443 ssl` now mirrors the
+  `:80` block.
+- **Production static-asset regex drops `map`/`json`**, and explicit TLS
+  protocol/cipher pinning + session settings are emitted for every TLS listener;
+  `error_log … debug` is opt-in (`EDGE_NGINX_DEBUG_LOG`), default `warn`.
+
 ## [1.0.18] - 2026-07-20
 
 ### Added

@@ -22,5 +22,8 @@ final readonly class EdgePlan
         public array $localDomains,
         public string $targetPath,
         public string $contents,
+        // NginxStream only: an existing nginx stream splitter was found and is
+        // being reused, so this file emits ONLY the internal backend vhosts.
+        public bool $reuseStream = false,
     ) {}
 }

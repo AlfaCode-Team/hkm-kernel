@@ -28,7 +28,71 @@ final class SystemProbe
             apacheActive:    $this->active('apache2') || $this->active('httpd'),
             nginxHasBrotli:  $nginxInstalled && $this->nginxHasBrotli(),
             apacheModules:   $apacheInstalled ? $this->apacheModules() : [],
+            nginxHasStreamConfig: $nginxInstalled && $this->nginxStreamConfigExists((string) edge_config('paths.stream', '')),
         );
+    }
+
+    /**
+     * Does the RUNNING nginx already declare an SNI stream splitter (a `stream {}`
+     * block using `ssl_preread`) in a config file OTHER than the one Edge manages?
+     */
+    private function nginxStreamConfigExists(string $ownPath): bool
+    {
+        return $this->nginxStreamConfigFile($ownPath) !== null;
+    }
+
+    /**
+     * The ON-DISK path of the config file that holds the RUNNING nginx's SNI
+     * stream splitter (the `map $ssl_preread_server_name … { … }`), or null when
+     * none exists — so Edge can UPDATE that file's map in place instead of writing
+     * a second, conflicting splitter.
+     *
+     * `nginx -T` dumps the full, resolved config, prefixing each file with a
+     * `# configuration file <path>:` marker. We walk it file-by-file, skip Edge's
+     * own managed file (so re-runs never match themselves), and return the first
+     * OTHER file that declares the ssl_preread map. `ssl_preread` and that map only
+     * ever appear inside a stream server, so their presence is a reliable signal.
+     */
+    public function nginxStreamConfigFile(string $ownPath): ?string
+    {
+        [$code, $dump] = $this->run('nginx -T');
+        if ($code !== 0 || trim($dump) === '') {
+            return null;
+        }
+
+        $own = ($ownPath !== '' ? (realpath($ownPath) ?: $ownPath) : '');
+
+        $current = '';
+        $byFile  = [];
+        foreach (explode("\n", $dump) as $line) {
+            if (preg_match('/^#\s*configuration file\s+(.+):\s*$/', $line, $m)) {
+                $current = trim($m[1]);
+                $byFile[$current] ??= '';
+                continue;
+            }
+            if ($current !== '') {
+                $byFile[$current] .= $line . "\n";
+            }
+        }
+
+        foreach ($byFile as $path => $body) {
+            if ($own !== '' && (realpath($path) ?: $path) === $own) {
+                continue; // Edge's own managed file — not a pre-existing config
+            }
+            // The map is the splitter's routing table; ssl_preread confirms it's a
+            // real SNI stream server and not an incidental mention.
+            if (str_contains($body, 'ssl_preread') && preg_match('/map\s+\$ssl_preread_server_name\s+\$\w+\s*\{/', $body)) {
+                // Only files that still exist on disk can be updated in place.
+                if (is_file($path) && is_writable($path)) {
+                    return $path;
+                }
+                if (is_file($path)) {
+                    return $path; // exists but not writable — caller reports "need sudo"
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
