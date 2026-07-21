@@ -1,0 +1,81 @@
+name: 🧩 Plugin proposal
+description: Propose a new first-party plugin (bounded domain module).
+title: "[Plugin]: "
+labels: ["plugin", "enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this to propose a new plugin under `plugins/` (namespace `Plugins\`).
+        Plugins own **exactly one** business domain and follow the full Gated
+        Demand Architecture. See `docs/ai-context/16_PLUGINS.md`.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: This plugin owns exactly one business domain (`solves`).
+          required: true
+        - label: I have checked no existing plugin already covers this domain.
+          required: true
+
+  - type: input
+    id: name
+    attributes:
+      label: Plugin name
+      placeholder: "Notifications"
+    validations:
+      required: true
+
+  - type: input
+    id: solves
+    attributes:
+      label: Domain it solves
+      description: The single domain string this plugin owns.
+      placeholder: "notification.delivery"
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      description: What does this plugin do and why is it needed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Published contracts & routes
+      description: Which contracts would it expose, and what routes/events would it declare in module.json?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: activation
+    attributes:
+      label: Activation model
+      options:
+        - On-demand (loaded only by routes that require it)
+        - Essential (loaded on every request)
+        - Port adapter (provides a kernel Port implementation)
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Which module domains (`requires[]`) or ports would it depend on?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to implement this plugin in a pull request.
+          required: false
