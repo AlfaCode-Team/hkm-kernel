@@ -13,6 +13,7 @@
   <a href="https://www.php.net/"><img src="https://img.shields.io/badge/PHP-8.4%2B-777bb4" alt="PHP"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
   <img src="https://img.shields.io/badge/runtime-FPM%20%7C%20OpenSwoole-orange" alt="Runtime">
+  <img src="https://img.shields.io/badge/status-active%20development-blue" alt="Status">
 </p>
 
 It ships as a **native cross-platform CLI** (`hkm`) built with Zig, so you install and
@@ -22,18 +23,115 @@ upgrade it like a Go/Rust binary — no Composer needed to get started.
 
 ## Table of contents
 
-1. [Why GDA?](#why-gda)
-2. [Install](#install)
-3. [The `hkm` CLI](#the-hkm-cli)
-4. [Your first project](#your-first-project)
-5. [Core concepts](#core-concepts)
-6. [The request lifecycle](#the-request-lifecycle)
-7. [Building a feature — end to end](#building-a-feature--end-to-end)
-8. [The five access rules](#the-five-access-rules)
-9. [Batteries included (plugins)](#batteries-included-plugins)
-10. [Development from source](#development-from-source)
-11. [Security defaults](#security-defaults)
-12. [License](#license)
+1. [Purpose](#purpose)
+2. [What we're building toward](#what-were-building-toward)
+3. [Project status — done vs. cooking](#project-status--done-vs-cooking)
+4. [Why GDA?](#why-gda)
+5. [Install](#install)
+6. [The `hkm` CLI](#the-hkm-cli)
+7. [Your first project](#your-first-project)
+8. [Core concepts](#core-concepts)
+9. [The request lifecycle](#the-request-lifecycle)
+10. [Building a feature — end to end](#building-a-feature--end-to-end)
+11. [The five access rules](#the-five-access-rules)
+12. [Batteries included (plugins)](#batteries-included-plugins)
+13. [Development from source](#development-from-source)
+14. [Security defaults](#security-defaults)
+15. [License](#license)
+
+---
+
+## Purpose
+
+**HKM Kernel exists to make secure, cost-predictable PHP services the default — not the
+reward for discipline.**
+
+Most PHP frameworks boot the whole application, wire every service, and *then* decide what
+the request needs. That is convenient, but it means an unauthenticated request that should
+cost nothing still pays to construct half your app, and domain boundaries live only in your
+head (and your code reviews).
+
+HKM inverts that with the **Gated Demand Architecture**:
+
+- **Security is the gate, not a middleware afterthought.** A `SecurityGateway` runs *before*
+  any module is wired. A denied request costs *zero* module construction.
+- **You pay only for what a route uses.** Modules are resolved from a per-request dependency
+  graph and wired on demand. Nothing you didn't ask for is loaded.
+- **Boundaries are enforced by the runtime, not by convention.** Cross-layer and
+  cross-module access rules throw real exceptions, not lint warnings.
+
+The goal is a framework where the *fast, secure, well-bounded* way to build something is also
+the *easy* way — and where you can drop in a first-party plugin (auth, tenancy, mail, OAuth2)
+without inheriting a monolith.
+
+> **This is not Laravel, Symfony, or Slim.** It borrows none of their conventions — no
+> globals, no facades, no runtime auto-discovery. Everything is explicit and injected.
+
+---
+
+## What we're building toward
+
+The north-star goals that guide every decision in this repo:
+
+| Goal | What it means |
+|---|---|
+| **Zero-cost denial** | A blocked request never constructs a module. Security is measured in the gateway, not the controller. |
+| **Per-request minimalism** | The kernel wires exactly the modules a route needs — and their transitive dependencies — and nothing else. |
+| **Runtime-enforced isolation** | One module, one domain. Modules cannot reach into each other's internals; the container throws if they try. |
+| **A dependency-free kernel** | The core should carry no vendor coupling. Request/Response/uploads become pure value objects (see *cooking*, below). |
+| **Infrastructure independence** | The kernel defines *ports*; the project supplies adapters (MySQL, Redis, S3, SMTP…). Swap them without touching domain code. |
+| **Install like a binary** | `hkm` is a native cross-platform launcher — no Composer required to get started, upgradeable in place. |
+| **Batteries, not a monolith** | Auth, Users, Tenancy, OAuth2, Mail, and more ship as opt-in first-party plugins, each owning exactly one domain. |
+
+---
+
+## Project status — done vs. cooking
+
+> **Where things stand today.** HKM is under **active development**. The architecture and the
+> core plugins are in daily use, and releases are cut regularly — but some subsystems are
+> still stabilizing. This section is the honest map.
+
+### ✅ Done & stable
+
+- **The GDA kernel** — boot pipeline (10 fail-fast stages), security gateway, on-demand
+  module loader, request-scoped DI with runtime scope enforcement, HTTP / CLI / Worker
+  pipelines, domain + integration event system, and the port interfaces.
+- **The five access rules**, enforced at runtime via `ModuleContainer::bindInternal()`.
+- **Native distribution** — `hkm` launcher + `hkm-config` built with Zig; `.deb`, macOS
+  `.app`, and Windows `.zip` bundles published automatically from `CHANGELOG.md`.
+- **First-party plugins** (see [the full table](#batteries-included-plugins)) — Auth,
+  User, Tenancy, OAuth2, Validation, Mail, Storage, Session/Cookie, HttpClient,
+  SecurityFilters, I18n, View/ViteManifest/Pageflow.
+- **Multi-project, multi-tenant hosting** — host-based `DomainResolver`, strict per-tenant
+  DB routing, and a project-over-plugin resource resolution model.
+- **Database & migrations** — the multi-driver `DatabasePort` (MySQL / PostgreSQL / SQLite /
+  SQL Server) and the standalone **LetMigrate** engine (fluent schema, seeders, CLI).
+- **Frontend federation** — per-project surfaces + `hkm ui` to mirror plugin UIs, with a
+  Pageflow (Inertia-style) SPA bridge.
+
+### 🍳 Still cooking
+
+- **Dependency-free HTTP core.** The kernel's `Request`/`Response`/`UploadedFile` are
+  *currently* built on `symfony/http-foundation` as a deliberate, temporary choice. They are
+  being reimplemented as pure value objects so the kernel carries no vendor coupling. The
+  kernel's own method surface (`$request->input()`, `Response::json()`, …) is the stable API —
+  build against it and the switch will be non-breaking.
+- **API surface hardening.** We're at the `1.0.x` line; some plugin contracts and config keys
+  are still settling. Pin your version and read the [CHANGELOG](CHANGELOG.md) before upgrading.
+- **Docs & guides.** The layer deep-dives in [`docs/ai-context/`](docs/) are being expanded
+  and turned into a proper documentation site.
+- **Test & tooling coverage.** PHPStan (level 5) and the PHPUnit suite are wired as CI gates;
+  coverage and static-analysis depth are still growing.
+
+### 🗺️ On the roadmap
+
+- Finish the dependency-free kernel and drop the transitional Symfony dependency.
+- A public documentation site generated from the layer guides.
+- More first-party adapters (queue backends, storage drivers, mail transports).
+- Performance benchmarks published per release.
+
+Found a gap or want to help? [Open an issue](https://github.com/AlfaCode-Team/hkm-kernel/issues)
+or a discussion.
 
 ---
 
@@ -54,9 +152,6 @@ The result: predictable performance (you pay only for what a route uses), strong
 boundaries that hold at runtime, and infrastructure you can swap without touching business
 code.
 
-> **This is not Laravel, Symfony, or Slim.** It borrows none of their conventions. If you're
-> coming from those, unlearn the globals and facades — everything here is explicit and injected.
-
 ### The three worlds
 
 ```text
@@ -65,7 +160,7 @@ code.
 │  ┌─────────────────────────────────────────────┐ │
 │  │  MODULE / PLUGIN LAYER  (bounded domains)   │ │
 │  │  ┌───────────────────────────────────────┐  │ │
-│  │  │  KERNEL (Sentinel)                    │  │ │
+│  │  │  KERNEL                               │  │ │
 │  │  │  boot · security · loading · DI ·     │  │ │
 │  │  │  pipelines · events · ports           │  │ │
 │  │  └───────────────────────────────────────┘  │ │
@@ -82,7 +177,7 @@ code.
 ## Install
 
 Download the latest build from
-[Releases](https://github.com/AlfaCode-Team/php-service-platform/releases/latest).
+[Releases](https://github.com/AlfaCode-Team/hkm-kernel/releases/latest).
 
 **Linux (Debian / Ubuntu / Kali)**
 ```bash
@@ -119,11 +214,12 @@ so they match your exact PHP.
 | `hkm worker [args]` | Run a project's queue worker |
 | `hkm list` | List registered projects |
 | `hkm plugins [path\|name]` | Analyse a project's enabled plugins/modules |
+| `hkm module` | Inspect / update the first-party kernel packages |
 | `hkm ui [sync\|list\|link\|clean]` | Federate enabled plugins' UIs into the frontend |
 | `hkm doctor` | Diagnose PHP, extensions, and the resolved kernel path |
 | `hkm-config` | Set up / repair the full environment (kernel + userdata) |
 | `hkm upgrade [--check]` | Check for and install a newer release |
-| `hkm version` / `--version` / `-v` | Show the Sentinel banner + version |
+| `hkm version` / `--version` / `-v` | Show the banner + version |
 | `hkm <command> --dev` | Run any command against the **development** kernel checkout |
 
 ### Environment (all auto-detected — override only for non-standard layouts)
@@ -467,8 +563,8 @@ Each plugin ships its own `README.md` — e.g. [Auth](plugins/Auth/README.md),
 ## Development from source
 
 ```bash
-git clone --recurse-submodules git@github.com:AlfaCode-Team/php-service-platform.git
-cd php-service-platform
+git clone --recurse-submodules git@github.com:AlfaCode-Team/hkm-kernel.git
+cd hkm-kernel
 composer install                           # also wires the git hooks (core.hooksPath=.githooks)
 vendor/bin/phpunit                         # run the test suite
 
