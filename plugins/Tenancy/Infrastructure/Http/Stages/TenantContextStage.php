@@ -56,8 +56,46 @@ final class TenantContextStage implements HttpStageContract
     ) {
     }
 
+    /**
+     * Paths that are served WITHOUT a tenant scope (health/infra endpoints).
+     * Configured via TENANCY_EXEMPT (comma-separated; trailing '*' = prefix
+     * match), defaulting to '/ping'. Memoised once — this stage is an
+     * app-lifetime hook, not request-scoped, so the static cache is safe.
+     */
+    private function isExempt(string $path): bool
+    {
+        static $paths = null;
+        if ($paths === null) {
+            $raw   = (string) (env('TENANCY_EXEMPT', '/ping') ?? '/ping');
+            $paths = array_values(array_filter(
+                array_map('trim', explode(',', $raw)),
+                static fn (string $p): bool => $p !== '',
+            ));
+        }
+
+        foreach ($paths as $p) {
+            if (str_ends_with($p, '*')) {
+                if (str_starts_with($path, rtrim($p, '*'))) {
+                    return true;
+                }
+            } elseif ($path === $p) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function handle(Request $request, callable $next): Response
     {
+        // Infrastructure/health endpoints (TENANCY_EXEMPT, default '/ping') carry
+        // no tenant scope — skip identification AND the per-request DB rebind
+        // entirely. This stage is an always-on essential hook, so without this a
+        // bare /ping would still pay a host->tenant DB lookup it never needs.
+        if ($this->isExempt($request->path())) {
+            return $next($request);
+        }
+
         $container = $request->container();
 
         // This stage is an always-on after.load hook, but its collaborators are
