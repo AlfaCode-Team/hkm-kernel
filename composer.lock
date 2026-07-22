@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "modules/http",
-                "reference": "f62f55778a03a08cd46cb6ded22464f7f9e512ac"
+                "reference": "c7225893e59262f996294d99fc9ffcac6e5d4c26"
             },
             "require": {
                 "php": "^8.4",
@@ -22,7 +22,7 @@
             },
             "require-dev": {
                 "phpstan/phpstan": "^2.0",
-                "phpunit/phpunit": "^11.0"
+                "phpunit/phpunit": "^11.0 || ^13.0"
             },
             "type": "library",
             "extra": {
