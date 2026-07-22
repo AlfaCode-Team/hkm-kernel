@@ -6,6 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-07-22
+
+### Changed
+- **Rebranded to HKM Kernel.** The CLI banner (`hkm version`) now renders the HKM
+  block-letter art and reads "HKM Kernel · Gated Demand Architecture"; the debug/error
+  page and CLI exception header are branded **HKM** (was "Sentinel"); the global-kernel
+  autoload error prefix is now `[HKM]`.
+- **README rewritten as a guided document** — leads with Purpose, project goals, and an
+  honest "done vs. cooking" status map, followed by install and usage. Adds the HKM hero
+  banner and points at the new public guides.
+
+### Added
+- **Public architecture guides under `docs/guides/`** — a curated, reader-facing set of
+  layer-by-layer guides (kernel, modules, plugins, security, data access, and more), with
+  an index. The internal AI-context source stays private.
+
+### Fixed
+- **Security-layer docs corrected to match the code.** The guides no longer describe a
+  kernel `FirewallLayer` / `RateLimiterLayer` (which do not exist) — the kernel ships only
+  `CsrfTokenLayer`; authentication comes from the Auth plugin (`JwtAuthLayer` /
+  `PersonalAccessTokenLayer`), and rate-limiting / IP-filtering are SecurityFilters route
+  filters (`throttle` / `shield`).
+
+### Merged
+- Integrates edge features, CLI commands, and security updates from #36.
+
 ## [1.0.20] - 2026-07-22
 
 ### Added

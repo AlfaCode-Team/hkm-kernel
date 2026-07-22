@@ -12,7 +12,10 @@ tools/zig-out/
 /.claude/
 /CLAUDE.md
 /.github/copilot-instructions.md
-/docs/
+# Ignore each entry under docs/ (not the dir itself, so the negation below works):
+/docs/*
+# ...but publish the curated, reader-facing guides (docs/ai-context stays ignored):
+!/docs/guides/
 
 
 # ── COMPOSER ──────────────────────────────────────────────────

@@ -48,7 +48,7 @@ final class DebugPageRenderer
         $white = "\033[1;37m"; $reset = "\033[0m"; $dim = "\033[2m";
 
         $bar = $gray . str_repeat('═', 70) . $reset;
-        $out  = "\n{$bar}\n{$magenta}⚡ Sentinel Exception{$reset}\n{$bar}\n\n";
+        $out  = "\n{$bar}\n{$magenta}⚡ HKM Exception{$reset}\n{$bar}\n\n";
         $out .= "{$red}✗ " . $e::class . "{$reset}\n\n";
         $out .= "{$cyan}Message:{$reset}\n{$yellow}" . $e->getMessage() . "{$reset}\n\n";
         $out .= "{$cyan}Location:{$reset}\n{$white}" . self::sanitizePath($e->getFile(), $basePath) . "{$reset}{$dim} at line {$reset}{$green}" . $e->getLine() . "{$reset}\n\n";
@@ -161,7 +161,7 @@ final class DebugPageRenderer
         return '<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sentinel Exception • ' . $class . '</title>
+<title>HKM Exception • ' . $class . '</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:"Monaco","Menlo","Ubuntu Mono","Courier New",monospace; background:#1a1a1a; color:#ccc; line-height:1.6; }
@@ -208,7 +208,7 @@ body { font-family:"Monaco","Menlo","Ubuntu Mono","Courier New",monospace; backg
 @media (max-width:1024px){ .error-main { grid-template-columns:1fr; } .info-sidebar { flex-direction:row; flex-wrap:wrap; } .info-card { flex:1; min-width:250px; } }
 </style></head>
 <body><div class="error-container">
-<div class="hkm-brand"><div class="hkm-logo">SEN</div><div class="hkm-name">Sentinel</div><div class="hkm-version">debug</div></div>
+<div class="hkm-brand"><div class="hkm-logo">HKM</div><div class="hkm-name">HKM Kernel</div><div class="hkm-version">debug</div></div>
 <div class="error-main">
 <div class="error-card"><div class="exception-badge">' . $class . '</div>
 <div class="error-title">' . $message . '</div>

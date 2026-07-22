@@ -365,7 +365,7 @@ if (!function_exists('psp_require_kernel_autoload')) {
             }
         }
 
-        $msg = "[Sentinel] Could not load the global kernel autoload.\n"
+        $msg = "[HKM] Could not load the global kernel autoload.\n"
             . "Install globally: composer global require alfacode-team/php-service-platform\n"
             . "Or set PSP_GLOBAL_AUTOLOAD=/absolute/path/to/vendor/autoload.php\n";
 

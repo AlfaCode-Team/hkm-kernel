@@ -32,7 +32,7 @@ fn printHelp() void {
     prompt.item("hkm update <path|name>", "refresh a project's kernel registry entry");
     prompt.item("hkm upgrade [--check]", "check for / apply a kernel update");
     prompt.item("hkm doctor", "diagnose the local environment");
-    prompt.item("hkm version", "show the Sentinel banner + version (also --version, -v)");
+    prompt.item("hkm version", "show the HKM banner + version (also --version, -v)");
     prompt.item("hkm help", "show this help");
     prompt.item("hkm <cmd> --dev", "use the development kernel (this monorepo) instead of the installed stable copy");
     prompt.blank();
