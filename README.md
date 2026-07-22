@@ -118,7 +118,7 @@ The north-star goals that guide every decision in this repo:
   build against it and the switch will be non-breaking.
 - **API surface hardening.** We're at the `1.0.x` line; some plugin contracts and config keys
   are still settling. Pin your version and read the [CHANGELOG](CHANGELOG.md) before upgrading.
-- **Docs & guides.** The layer deep-dives in [`docs/ai-context/`](docs/) are being expanded
+- **Docs & guides.** The layer deep-dives in [`docs/guides/`](docs/guides/) are being expanded
   and turned into a proper documentation site.
 - **Test & tooling coverage.** PHPStan (level 5) and the PHPUnit suite are wired as CI gates;
   coverage and static-analysis depth are still growing.
@@ -607,7 +607,7 @@ Notes:
   `workflow_call`.
 - You can still cut a release manually at any time by pushing a `v*` tag.
 
-For deep dives, see the layer guides in [`docs/ai-context/`](docs/) and the
+For deep dives, see the layer guides in [`docs/guides/`](docs/guides/) and the
 [CHANGELOG](CHANGELOG.md).
 
 ---

@@ -5,7 +5,7 @@
 //!
 //! "Latest" is the highest v* tag on the kernel repo, discovered with
 //! `git ls-remote` (no API token, works for the public repo). The header is the
-//! Sentinel banner + current version.
+//! HKM banner + current version.
 
 const std = @import("std");
 const banner = @import("../lib/banner.zig");
