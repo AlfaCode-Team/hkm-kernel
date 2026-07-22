@@ -6,6 +6,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.20] - 2026-07-22
+
+### Added
+- **`hkm module` command** for managing first-party kernel packages (the
+  `modules/` submodules: bind-it, php-io-cli, let-migrate, http) — inspect,
+  and update the pinned package set from one CLI entry point.
+- **`alfacode-team/http` as a first-party package dependency** (`^1.0`;
+  dev-master inside the monorepo, `v1.0.0` for stable releases). The http
+  submodule is pinned at its latest master.
+
+### Changed
+- **Pageflow stages refactored and consolidated** — the SPA-bridge pipeline
+  stages are simplified into fewer, clearer units.
+- **Open-source readiness** — license, composer package metadata, and a
+  `.env.example` added; issue/PR templates, CODEOWNERS, and required-reviewer
+  configuration for `main`.
+
+### Fixed
+- **`MigrateListCommand`** parent wiring repaired and the **`OutboxWriter`**
+  port contract corrected.
+- **CI analysis gates** — PHPStan level-5 config + baseline made a blocking
+  gate (optional Swoole/OpenSwoole coroutine calls ignored); CodeQL, Semgrep,
+  and `composer audit` wired in.
+
 ## [1.0.19] - 2026-07-21
 
 ### Added

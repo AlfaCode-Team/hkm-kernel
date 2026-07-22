@@ -17,13 +17,11 @@ use Plugins\Pageflow\Http\PageflowPage;
 use Plugins\Pageflow\Http\PageflowResponder;
 use Plugins\Pageflow\Http\PageflowShares;
 use Plugins\Pageflow\Http\RegistryPageflowSharer;
-use Plugins\Pageflow\Http\PageflowShareStage;
-use Plugins\Pageflow\Http\PageflowVersionStage;
+use Plugins\Pageflow\Http\PageflowStage;
 
 #[CoversClass(PageflowResponder::class)]
 #[CoversClass(PageflowPage::class)]
-#[CoversClass(PageflowVersionStage::class)]
-#[CoversClass(PageflowShareStage::class)]
+#[CoversClass(PageflowStage::class)]
 final class PageflowResponderTest extends TestCase
 {
     private ?string $layoutPath = null;
@@ -173,7 +171,7 @@ final class PageflowResponderTest extends TestCase
     public function test_version_stage_returns_409_for_stale_client_version(): void
     {
         putenv('PAGEFLOW_VERSION=v2');
-        $stage = new PageflowVersionStage();
+        $stage = new PageflowStage();
         $next = static fn(Request $r) => \AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response::text('OK');
 
         $response = $stage->handle(
@@ -189,7 +187,7 @@ final class PageflowResponderTest extends TestCase
     public function test_version_stage_passes_matching_version_through(): void
     {
         putenv('PAGEFLOW_VERSION=v2');
-        $stage = new PageflowVersionStage();
+        $stage = new PageflowStage();
         $next = static fn(Request $r) => \AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response::text('OK');
 
         $response = $stage->handle(
@@ -218,7 +216,7 @@ final class PageflowResponderTest extends TestCase
 
         $request = $this->request(['X-Pageflow' => 'true'])->withContainer($container);
         $reached = false;
-        (new PageflowShareStage())->handle($request, static function (Request $r) use (&$reached) {
+        (new PageflowStage())->handle($request, static function (Request $r) use (&$reached) {
             $reached = true;
             return Response::text('OK');
         });
@@ -277,7 +275,7 @@ final class PageflowResponderTest extends TestCase
 
     public function test_share_stage_passes_through_without_a_container(): void
     {
-        $response = (new PageflowShareStage())->handle(
+        $response = (new PageflowStage())->handle(
             $this->request(),
             static fn(Request $r) => Response::text('OK'),
         );
