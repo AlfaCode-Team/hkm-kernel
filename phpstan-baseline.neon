@@ -2341,12 +2341,6 @@ parameters:
 			path: src/Commands/Migrate/MigrateStatusCommand.php
 
 		-
-			message: '#^Offset 1 on array\{non\-falsy\-string, non\-empty\-string\} on left side of \?\? always exists and is not nullable\.$#'
-			identifier: nullCoalesce.offset
-			count: 1
-			path: src/Kernel/Http/UserAgent.php
-
-		-
 			message: '#^PHPDoc tag @param for parameter \$default with type mixed is not subtype of native type array\.$#'
 			identifier: parameter.phpDocType
 			count: 1

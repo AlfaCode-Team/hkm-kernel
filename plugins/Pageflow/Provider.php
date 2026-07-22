@@ -18,11 +18,8 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 use Plugins\Pageflow\API\Contracts\PageflowSharerContract;
 use Plugins\Pageflow\Http\PageflowAuth;
 use Plugins\Pageflow\Http\PageflowChannel;
-use Plugins\Pageflow\Http\PageflowPrecognitionStage;
 use Plugins\Pageflow\Http\PageflowResponder;
-use Plugins\Pageflow\Http\PageflowShareStage;
-use Plugins\Pageflow\Http\PageflowValidationStage;
-use Plugins\Pageflow\Http\PageflowVersionStage;
+use Plugins\Pageflow\Http\PageflowStage;
 use Plugins\Pageflow\Http\RegistryPageflowSharer;
 use Plugins\Pageflow\Cli\PageflowTypesCommand;
 
@@ -108,24 +105,14 @@ final class Provider implements ModuleContract
 
     public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void
     {
-        // Stale-asset guard runs before modules load (cheap 409 reject).
-        $http->hook('after.security', PageflowVersionStage::class, priority: 18);
-
-        // Translate ValidationException into the Pageflow error envelope. Wraps
-        // execution, so it sits INSIDE the pipeline (before the kernel ErrorStage)
-        // but OUTSIDE the controller — priority 12 keeps it near the top of the
-        // after.security onion so it wraps everything below.
-        $http->hook('after.security', PageflowValidationStage::class, priority: 12);
-
-        // Flag precognition ("validate only") requests so every layer can refuse
-        // side effects. Runs just before execution.
-        $http->hook('after.load', PageflowPrecognitionStage::class, priority: 40);
+        // One stage carries the whole Pageflow HTTP protocol at after.load (the
+        // container/responder exist there): stale-asset 409 guard, precognition
+        // flagging, shared-prop population (do_action('pageflow_share')), and the
+        // ValidationException → Pageflow error envelope translation around $next.
+        $http->hook('after.load', PageflowStage::class, priority: 40);
 
         // CLI: generate TypeScript typings (shared props + page registry).
         $cli->command(PageflowTypesCommand::class);
-
-        // Populate shared props once modules are loaded (do_action('pageflow_share')).
-        $http->hook('after.load', PageflowShareStage::class, priority: 45);
 
         // ── Built-in shared props ────────────────────────────────────────────
         // Auth projection on every page (UI: useAuth()/<Can>). NON-SENSITIVE
@@ -135,7 +122,7 @@ final class Provider implements ModuleContract
             return PageflowAuth::resolve($request->identity());
         });
 
-        // Validation errors flashed by PageflowValidationStage on the previous
+        // Validation errors flashed by PageflowStage on the previous
         // request surface here (UI: useForm reads props.errors). Pull-and-clear.
         pageflow_share('errors', static function (Request $request): array {
             $container = $request->container();
@@ -144,7 +131,7 @@ final class Provider implements ModuleContract
             }
             /** @var SessionPort $session */
             $session = $container->make(SessionPort::class);
-            $errors = $session->pull(PageflowValidationStage::ERROR_FLASH_KEY, []);
+            $errors = $session->pull(PageflowStage::ERROR_FLASH_KEY, []);
             return is_array($errors) ? $errors : [];
         });
     }

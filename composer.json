@@ -2,7 +2,34 @@
     "name": "alfacode-team/php-service-platform",
     "description": "A modular PHP backend boilerplate built with OpenSwoole and a multi-repository architecture using Git submodules. Designed for scalable, high-performance microservices and service-oriented applications.",
     "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "framework",
+        "php",
+        "microservices",
+        "gated-demand-architecture",
+        "openswoole",
+        "modular",
+        "service-platform",
+        "ddd"
+    ],
+    "homepage": "https://github.com/AlfaCode-Team/php-service-platform",
+    "support": {
+        "issues": "https://github.com/AlfaCode-Team/php-service-platform/issues",
+        "source": "https://github.com/AlfaCode-Team/php-service-platform",
+        "security": "https://github.com/AlfaCode-Team/php-service-platform/security/policy"
+    },
     "require": {
+        "alfacode-team/http": "^1.0",
+        "php": ">=8.4",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-ctype": "*",
+        "ext-tokenizer": "*",
+        "ext-filter": "*",
+        "ext-openssl": "*",
+        "ext-curl": "*",
+        "ext-fileinfo": "*",
         "psr/http-message": "2.0.x-dev",
         "psr/container": "^2.0",
         "psr/log": "^3.0",
@@ -32,6 +59,10 @@
     "repositories": [
         {
             "type": "path",
+            "url": "modules/http"
+        },
+        {
+            "type": "path",
             "url": "modules/common-type-alias"
         },
         {
@@ -47,7 +78,6 @@
             "url": "modules/let-migrate"
         }
     ],
-    "license": "MIT",
     "autoload": {
         "psr-4": {
             "AlfacodeTeam\\PhpServicePlatform\\": "src/",

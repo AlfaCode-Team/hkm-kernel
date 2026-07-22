@@ -11,10 +11,9 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
 use Plugins\SecurityFilters\Infrastructure\Http\Stages\ApiRateLimitStage;
-use Plugins\SecurityFilters\Infrastructure\Http\Stages\CorsStage;
 use Plugins\SecurityFilters\Infrastructure\Http\Stages\HmacSignedStage;
 use Plugins\SecurityFilters\Infrastructure\Http\Stages\RequireAuthStage;
-use Plugins\SecurityFilters\Infrastructure\Http\Stages\SecureHeadersStage;
+use Plugins\SecurityFilters\Infrastructure\Http\Stages\SecurityHeadersStage;
 use Plugins\SecurityFilters\Infrastructure\Http\Stages\ShieldStage;
 
 /**
@@ -53,10 +52,10 @@ final class Provider implements ModuleContract
     {
         // ── GLOBAL hooks — always-on, every request/response ─────────────────
         // These genuinely apply to ALL traffic, so they stay global (not route
-        // filters). CORS first: answers preflight (OPTIONS) before auth so it is
-        // never rejected. SecureHeaders decorates every outgoing response.
-        $http->hook('after.security', CorsStage::class, priority: 10);
-        $http->hook('after.execute',  SecureHeadersStage::class, priority: 90);
+        // filters). One stage: it answers CORS preflight (OPTIONS) before auth so
+        // it is never rejected, then decorates every outgoing response with the
+        // CORS + OWASP security headers on the way back out.
+        $http->hook('after.security', SecurityHeadersStage::class, priority: 10);
 
         // ── DECLARATIVE route filters — opt-in per route ─────────────────────
         // Routes name these in module.json / proj.json:

@@ -1,2 +1,5 @@
-# Every change requires review from a repo owner.
-*  @hakeemRash @Alshatri
+# Code owners — required reviewers for every change into `main`.
+# A PR needs approval from at least one of these owners (branch protection
+# enforces 1 code-owner review). Authors cannot approve their own PR, so keep
+# more than one owner listed.
+*  @hakeemRash @Alshatri @craftdevscommunity

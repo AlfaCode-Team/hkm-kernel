@@ -10,3 +10,7 @@
 [submodule "modules/let-migrate"]
 	path = modules/let-migrate
 	url = https://github.com/AlfaCode-Team/Let-Migrate.git
+[submodule "modules/http"]
+	path = modules/http
+	url = git@github.com:AlfaCode-Team/http.git
+	branch = master
