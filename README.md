@@ -1,12 +1,19 @@
-# AlfacodeTeam PhpServicePlatform
+<p align="center">
+  <img src="logo/feature-graphic-1600x720.png" alt="HKM Kernel — a fast, modular PHP micro-kernel for building resilient services" width="800">
+</p>
 
-> A modular **PHP 8.4+** service framework built on the **Gated Demand Architecture (GDA)**.
-> Security runs *before* any module loads, and only the modules a request actually needs are
-> ever wired in. The kernel is codenamed **Sentinel**.
+<h1 align="center">HKM Kernel</h1>
 
-[![PHP](https://img.shields.io/badge/PHP-8.4%2B-777bb4)](https://www.php.net/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-![Runtime](https://img.shields.io/badge/runtime-FPM%20%7C%20OpenSwoole-orange)
+<p align="center">
+  <em>A modular <strong>PHP 8.4+</strong> service framework built on the <strong>Gated Demand Architecture (GDA)</strong>.<br>
+  Security runs <em>before</em> any module loads, and only the modules a request actually needs are ever wired in.</em>
+</p>
+
+<p align="center">
+  <a href="https://www.php.net/"><img src="https://img.shields.io/badge/PHP-8.4%2B-777bb4" alt="PHP"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
+  <img src="https://img.shields.io/badge/runtime-FPM%20%7C%20OpenSwoole-orange" alt="Runtime">
+</p>
 
 It ships as a **native cross-platform CLI** (`hkm`) built with Zig, so you install and
 upgrade it like a Go/Rust binary — no Composer needed to get started.
