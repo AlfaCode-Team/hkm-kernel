@@ -4,8 +4,87 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "d1d670f2885a0974802e9fdd5b4867f6",
+    "content-hash": "58e21feb6f2ea0a8a95805afa209d27a",
     "packages": [
+        {
+            "name": "alfacode-team/http",
+            "version": "dev-master",
+            "dist": {
+                "type": "path",
+                "url": "modules/http",
+                "reference": "f62f55778a03a08cd46cb6ded22464f7f9e512ac"
+            },
+            "require": {
+                "php": "^8.4",
+                "psr/http-message": "^1.1 || ^2.0",
+                "symfony/http-foundation": "^8.1",
+                "symfony/mime": "^8.1"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.0",
+                "phpunit/phpunit": "^11.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "1.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "AlfacodeTeam\\PhpServicePlatform\\Kernel\\Http\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "AlfacodeTeam\\PhpServicePlatform\\Kernel\\Http\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "phpunit"
+                ],
+                "analyse": [
+                    "phpstan analyse"
+                ],
+                "check": [
+                    "@analyse",
+                    "@test"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "AlfaCode Team",
+                    "homepage": "https://github.com/AlfaCode-Team"
+                },
+                {
+                    "name": "Hakeem Shamavu",
+                    "email": "shamavurasheed@gmail.com"
+                }
+            ],
+            "description": "PhpServicePlatform kernel HTTP layer — immutable Request/Response value objects, PSR-7 URI, content negotiation and Swoole-safe uploads, built on Symfony HttpFoundation.",
+            "homepage": "https://github.com/AlfaCode-Team/http",
+            "keywords": [
+                "content-negotiation",
+                "http",
+                "http-foundation",
+                "phpserviceplatform",
+                "psr-7",
+                "request",
+                "response",
+                "uri"
+            ],
+            "support": {
+                "issues": "https://github.com/AlfaCode-Team/http/issues",
+                "source": "https://github.com/AlfaCode-Team/http"
+            },
+            "transport-options": {
+                "relative": true
+            }
+        },
         {
             "name": "alfacode-team/let-migrate",
             "version": "dev-dev",
@@ -4548,8 +4627,8 @@
             "version": "2.2.x-dev",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/fcf555f564ef7933045a4acae2eedc03fd475228",
-                "reference": "fcf555f564ef7933045a4acae2eedc03fd475228",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/905d6cdf581b0ad307924aa8e4ed95772864fe93",
+                "reference": "905d6cdf581b0ad307924aa8e4ed95772864fe93",
                 "shasum": ""
             },
             "require": {
@@ -4606,7 +4685,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-07-21T11:43:33+00:00"
+            "time": "2026-07-22T08:07:53+00:00"
         },
         {
             "name": "phpunit/php-code-coverage",

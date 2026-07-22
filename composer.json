@@ -20,6 +20,7 @@
         "security": "https://github.com/AlfaCode-Team/php-service-platform/security/policy"
     },
     "require": {
+        "alfacode-team/http": "^1.0",
         "php": ">=8.4",
         "ext-json": "*",
         "ext-mbstring": "*",
@@ -56,6 +57,10 @@
         "composer/composer": "^2.7"
     },
     "repositories": [
+        {
+            "type": "path",
+            "url": "modules/http"
+        },
         {
             "type": "path",
             "url": "modules/common-type-alias"
