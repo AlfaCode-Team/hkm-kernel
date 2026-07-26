@@ -22,6 +22,7 @@ tools/zig-out/
 /vendor/
 #(Uncomment if you want to ignore lock file for the library)
 composer.lock 
+*.bak
 
 
 # ── TESTING & COVERAGE ────────────────────────────────────────
