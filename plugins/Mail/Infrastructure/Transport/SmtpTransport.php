@@ -261,7 +261,11 @@ final class SmtpTransport implements Transport
     /** SMTP dot-stuffing: a line starting with '.' gets an extra '.'. */
     private function dotStuff(string $mime): string
     {
-        $mime = str_replace(["\r\n", "\r", "\n"], self::EOL, $mime);
+        // Normalise ALL line endings to CRLF with a single pass. A str_replace with
+        // ["\r\n", "\r", "\n"] → "\r\n" is WRONG: it rewrites each CR of an existing
+        // CRLF and doubles it (\r\n → \r\r\n\r\n), producing a premature blank line
+        // that ends the header block early — strict MTAs then reject "no From header".
+        $mime = (string) preg_replace('/\r\n|\r|\n/', self::EOL, $mime);
         return (string) preg_replace('/^\./m', '..', $mime);
     }
 

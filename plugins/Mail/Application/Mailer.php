@@ -68,6 +68,12 @@ final class Mailer implements MailPort, MailerContract
         return $this->queue->push(self::QUEUE_JOB, $compiled, $this->queueName);
     }
 
+    /** Compile the full MIME (headers + body, DKIM-signed if configured) without sending. */
+    public function preview(Message $message): string
+    {
+        return $this->compile($message)['mime'];
+    }
+
     // ── MailPort (kernel, view-based) ────────────────────────────────────────
 
     /** @param string|array<int|string,string> $to */

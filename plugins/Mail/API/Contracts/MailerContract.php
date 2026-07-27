@@ -25,4 +25,7 @@ interface MailerContract
 
     /** Enqueue a Message for background delivery via the QueuePort; returns the job id. */
     public function enqueue(Message $message): string;
+
+    /** Build + (optionally DKIM-sign) the full MIME WITHOUT delivering — for tests/preview. */
+    public function preview(Message $message): string;
 }
