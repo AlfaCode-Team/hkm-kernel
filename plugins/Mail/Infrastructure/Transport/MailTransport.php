@@ -31,7 +31,10 @@ final class MailTransport implements Transport
         // mail() takes To + Subject separately; remove them from the header blob.
         $remaining = preg_replace('/^(To|Subject):.*(\r\n|$)/mi', '', $headerBlock) ?? $headerBlock;
 
-        $ok = mail($to, $subject, $body, trim($remaining), '-f' . $envelopeFrom);
+        // escapeshellarg the envelope: mail() does NOT sanitise the 5th param, and a
+        // FILTER_VALIDATE_EMAIL-legal quoted local part can contain a space that would
+        // otherwise split into extra sendmail arguments.
+        $ok = mail($to, $subject, $body, trim($remaining), '-f' . escapeshellarg($envelopeFrom));
         if ($ok === false) {
             throw new MailException('mail(): delivery failed.');
         }

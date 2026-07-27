@@ -46,6 +46,42 @@ $mail->queue($to, $subject, $view, $data);   // background delivery via QueuePor
 | `array` | Captures messages in memory — **tests**. |
 | `log` | Writes the full MIME to a log — **dev**. |
 
+## Testing routes (try it live)
+
+The plugin ships a self-contained demo controller
+([`MailDemoController`](Infrastructure/Http/MailDemoController.php)) wired to five
+`GET` routes so you can exercise every path with a browser or `curl` — no code to
+write. **They are for learning/testing: delete the `routes[]` entries (or gate them
+behind `auth`) before production.**
+
+| Route | Shows | Sends? |
+|---|---|---|
+| `GET /mail/demo` | Overview — active transport + endpoint map | no |
+| `GET /mail/demo/preview?to=you@example.com` | `MailerContract::preview()` — the raw MIME the builder produces | no |
+| `GET /mail/demo/send?to=you@example.com` | `MailerContract::dispatch()` — a rich Message (cc/bcc, inline image, attachment) | yes |
+| `GET /mail/demo/queue?to=you@example.com` | `MailerContract::enqueue()` — background delivery, returns the job id | yes |
+| `GET /mail/demo/view?to=you@example.com` | `MailPort::send()` — the kernel view-based shortcut | yes |
+
+```bash
+# 1. Safest: capture instead of send — nothing leaves the box.
+export MAIL_TRANSPORT=log            # or: array
+
+# 2. See exactly what the MIME builder produces (no send, always available):
+curl "http://localhost:8000/mail/demo/preview?to=you@example.com"
+
+# 3. "Send" the rich sample (with MAIL_TRANSPORT=log it lands in the error log):
+curl "http://localhost:8000/mail/demo/send?to=you@example.com"
+
+# 4. Enqueue for a worker (returns a job id; run a worker to deliver it):
+curl "http://localhost:8000/mail/demo/queue?to=you@example.com"
+```
+
+**Safety guard:** `send`/`queue`/`view` refuse to transmit (HTTP 403) unless a
+non-sending transport (`array`/`log`) is active **or** `APP_DEBUG=true` — an
+accidentally-enabled demo can never become an open relay. `preview` never sends.
+They load automatically once `Plugins\Mail\Provider` is in `withModules([...])`
+(plugin routes come from `module.json`).
+
 ## Security (security-first defaults)
 
 - **Header-injection proof.** Every address, name, custom header and attachment
@@ -76,8 +112,11 @@ $mail->queue($to, $subject, $view, $data);   // background delivery via QueuePor
 - **Non-blocking by default** — `queue()` hands the built message to the
   `QueuePort` (`mail.send` job), so the HTTP request returns immediately; the
   worker does the SMTP round-trip. (The User plugin's signup email uses this.)
-- **Connection reuse** — set `MAIL_KEEP_ALIVE=true` so a queue worker sends many
-  messages over ONE SMTP connection (RSET between them) instead of reconnecting.
+- **Connection reuse** — with `MAIL_KEEP_ALIVE=true`, a single request or job that
+  sends several messages reuses ONE SMTP connection (RSET between them) instead of
+  reconnecting each time. (The queue worker builds a fresh module scope per job, so
+  reuse is *within* a job, not across separately-queued jobs — batch a run of
+  messages into one job to benefit.)
 - **Fast path preserved** — short ASCII headers skip MIME-encoding and folding
   entirely; encoding only kicks in when a value actually needs it.
 
@@ -99,6 +138,7 @@ Domain/                             Message (builder), Address (CRLF guard), Att
 Infrastructure/Mime/MimeBuilder     multipart mixed/related/alternative + QP/base64 encoders
 Infrastructure/Security/DkimSigner  RSA-SHA256 relaxed/relaxed
 Infrastructure/Transport/           Transport + Smtp/Sendmail/Mail/Array/Log
+Infrastructure/Http/MailDemoController  demo/testing routes (GET /mail/demo/*) — remove for prod
 ```
 
 ## Enabling

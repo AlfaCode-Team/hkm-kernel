@@ -33,13 +33,21 @@ final class SendmailTransport implements Transport
             throw new MailException('Sendmail: failed to start ' . $this->binary);
         }
 
-        fwrite($pipes[0], str_replace(["\r\n", "\r", "\n"], "\r\n", $mime));
+        // Single-pass CRLF normalisation — a str_replace(["\r\n","\r","\n"] → "\r\n")
+        // doubles existing CRLFs (\r\n → \r\r\n\r\n) and corrupts the message.
+        fwrite($pipes[0], (string) preg_replace('/\r\n|\r|\n/', "\r\n", $mime));
         fclose($pipes[0]);
+
+        // Drain stdout/stderr to EOF BEFORE proc_close: a chatty binary that fills the
+        // pipe buffer (~64 KB) while we hold the pipes open would otherwise deadlock.
+        stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
 
         if (proc_close($process) !== 0) {
-            throw new MailException('Sendmail: delivery returned a non-zero status.');
+            $detail = trim($stderr) !== '' ? ': ' . trim($stderr) : ' (non-zero exit status).';
+            throw new MailException('Sendmail: delivery failed' . $detail);
         }
     }
 
