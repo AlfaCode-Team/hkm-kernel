@@ -6,22 +6,27 @@ namespace Plugins\OAuth2\Infrastructure\Cli;
 
 use AlfacodeTeam\PhpIoCli\AbstractCommand;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HashingPort;
-use Plugins\OAuth2\Application\Ports\ClientStore;
+use Plugins\OAuth2\Infrastructure\Cli\Concerns\TargetsTenant;
+use Plugins\OAuth2\Infrastructure\Persistence\ClientRepository;
 
 /**
  * oauth:client:create — register an OAuth2 client.
  *
- *   hkm oauth:client:create --name="My SPA" --public \
+ *   hkm oauth:client:create --tenant=acme-inc --name="My SPA" --public \
  *       --redirect="https://app.example.com/callback" --grant=authorization_code --scope="profile email"
  *
  *   hkm oauth:client:create --name="Service" --grant=client_credentials --scope="reports:read"
  *
  * A confidential client (default) is issued a secret ONCE — store it now.
+ * OAuth2 tables are tenant-scoped, so pass --tenant to write into a tenant DB;
+ * omit it to use the central/default connection.
  */
 final class CreateClientCommand extends AbstractCommand
 {
+    use TargetsTenant;
+
     public function __construct(
-        private readonly ClientStore $clients,
+        private readonly TenantConnections $connections,
         private readonly HashingPort $hasher,
     ) {
         parent::__construct();
@@ -32,6 +37,7 @@ final class CreateClientCommand extends AbstractCommand
         $this->name        = 'oauth:client:create';
         $this->description = 'Register an OAuth2 client (confidential by default; --public for SPA/mobile)';
 
+        $this->addTenantOptions();
         $this->addOption('name', '', 'Display name', acceptsValue: true);
         $this->addOption('public', '', 'Public client (no secret; must use PKCE)');
         $this->addOption('redirect', '', 'Allowed redirect URI (repeat comma-separated)', acceptsValue: true, default: '');
@@ -65,7 +71,16 @@ final class CreateClientCommand extends AbstractCommand
             $secretHash = $this->hasher->make($secret);
         }
 
-        $this->clients->create($id, $name, $secretHash, $redirects, $grantTypes, $scopes, !$public);
+        // One shared id/secret provisioned into each target (a single tenant, or
+        // the whole fleet with --all).
+        $targets  = $this->tenantTargets($this->connections);
+        $labelled = $this->tenantLabelled($targets);
+        foreach ($targets as [$label, $db]) {
+            (new ClientRepository($db))->create($id, $name, $secretHash, $redirects, $grantTypes, $scopes, !$public);
+            if ($labelled) {
+                $this->info("· provisioned in {$label}");
+            }
+        }
 
         $this->success('OAuth2 client created.');
         $this->info('client_id     : ' . $id);

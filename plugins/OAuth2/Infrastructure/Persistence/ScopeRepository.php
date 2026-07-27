@@ -54,4 +54,27 @@ final class ScopeRepository implements ScopeStore
 
         return $out;
     }
+
+    public function put(string $id, string $description): void
+    {
+        try {
+            $this->db->upsert(
+                'oauth_scopes',
+                ['id' => $id, 'description' => $description, 'created_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s')],
+                ['id'],
+                ['description'],
+            );
+        } catch (\PDOException $e) {
+            throw new RepositoryException('Failed to save scope', layer: 'repository.oauth', previous: $e);
+        }
+    }
+
+    public function delete(string $id): bool
+    {
+        try {
+            return $this->db->execute('DELETE FROM oauth_scopes WHERE id = :id', ['id' => $id]) > 0;
+        } catch (\PDOException $e) {
+            throw new RepositoryException('Failed to delete scope', layer: 'repository.oauth', previous: $e);
+        }
+    }
 }

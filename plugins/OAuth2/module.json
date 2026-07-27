@@ -13,8 +13,8 @@
     "views": "resources/views",
 
     "routes": [
-        { "method": "GET",  "path": "/oauth/authorize",  "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AuthorizationController@authorize" },
-        { "method": "POST", "path": "/oauth/authorize",  "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AuthorizationController@decision" },
+        { "method": "GET",  "path": "/oauth/authorize",  "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AuthorizationController@authorize", "requires": ["http.pageflow"] },
+        { "method": "POST", "path": "/oauth/authorize",  "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AuthorizationController@decision",  "requires": ["http.pageflow"] },
         { "method": "POST", "path": "/oauth/token",      "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\TokenController@issue",            "filters": ["throttle:30,1"] },
         { "method": "POST", "path": "/oauth/device_authorization", "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\DeviceController@authorize", "filters": ["throttle:30,1"] },
         { "method": "GET",  "path": "/oauth/device",     "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\DeviceVerificationController@show" },
@@ -31,6 +31,20 @@
         { "method": "DELETE", "path": "/oauth/clients/{id}", "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\ClientController@destroy", "filters": ["auth"] },
         { "method": "GET",    "path": "/oauth/authorized-tokens",      "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AuthorizedTokenController@forUser", "filters": ["auth"] },
         { "method": "DELETE", "path": "/oauth/authorized-tokens/{id}", "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AuthorizedTokenController@destroy", "filters": ["auth"] },
+
+        { "method": "GET",    "path": "/oauth/admin",                      "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminUiController@dashboard", "requires": ["http.pageflow"] },
+        { "method": "GET",    "path": "/oauth/admin/simulate",             "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminUiController@simulate",  "requires": ["http.pageflow"] },
+
+        { "method": "GET",    "path": "/oauth/admin/clients",              "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@clients",          "filters": ["auth"] },
+        { "method": "POST",   "path": "/oauth/admin/clients",              "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@createClient",     "filters": ["auth", "throttle:20,1"] },
+        { "method": "PUT",    "path": "/oauth/admin/clients/{id}",         "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@updateClient",     "filters": ["auth"] },
+        { "method": "POST",   "path": "/oauth/admin/clients/{id}/rotate",  "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@rotateClient",     "filters": ["auth"] },
+        { "method": "DELETE", "path": "/oauth/admin/clients/{id}",         "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@revokeClient",     "filters": ["auth"] },
+        { "method": "GET",    "path": "/oauth/admin/scopes",               "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@scopes",           "filters": ["auth"] },
+        { "method": "POST",   "path": "/oauth/admin/scopes",               "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@createScope",      "filters": ["auth"] },
+        { "method": "DELETE", "path": "/oauth/admin/scopes/{id}",          "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@deleteScope",      "filters": ["auth"] },
+        { "method": "GET",    "path": "/oauth/admin/authorized-tokens",      "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@authorizedTokens", "filters": ["auth"] },
+        { "method": "DELETE", "path": "/oauth/admin/authorized-tokens/{id}", "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\AdminController@revokeToken",      "filters": ["auth"] },
         { "method": "GET",  "path": "/.well-known/oauth-authorization-server", "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\DiscoveryController@metadata" },
         { "method": "GET",  "path": "/.well-known/openid-configuration",       "handler": "Plugins\\OAuth2\\Infrastructure\\Http\\Controllers\\DiscoveryController@openidConfiguration" }
     ],
@@ -47,6 +61,8 @@
         { "key": "OAUTH_DEVICE_TTL",      "type": "int", "required": false },
         { "key": "OAUTH_DEVICE_INTERVAL", "type": "int", "required": false },
         { "key": "OAUTH_TOKEN_AUDIENCE",  "type": "string", "required": false },
+        { "key": "OAUTH_ADMIN_ROLE",   "type": "string", "required": false },
+        { "key": "OAUTH_ADMIN_USERS",  "type": "string", "required": false },
         { "key": "JWT_PUBLIC_KEY",      "type": "string", "required": false },
         { "key": "JWT_PUBLIC_KEY_FILE", "type": "string", "required": false }
     ]

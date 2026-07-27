@@ -6,13 +6,16 @@ namespace Plugins\OAuth2\Infrastructure\Cli;
 
 use AlfacodeTeam\PhpIoCli\AbstractCommand;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HashingPort;
-use Plugins\OAuth2\Application\Ports\ClientStore;
+use Plugins\OAuth2\Infrastructure\Cli\Concerns\TargetsTenant;
+use Plugins\OAuth2\Infrastructure\Persistence\ClientRepository;
 
 /** oauth:client:rotate — issue a new secret for a confidential client. */
 final class RotateClientSecretCommand extends AbstractCommand
 {
+    use TargetsTenant;
+
     public function __construct(
-        private readonly ClientStore $clients,
+        private readonly TenantConnections $connections,
         private readonly HashingPort $hasher,
     ) {
         parent::__construct();
@@ -23,6 +26,7 @@ final class RotateClientSecretCommand extends AbstractCommand
         $this->name        = 'oauth:client:rotate';
         $this->description = 'Rotate a confidential OAuth2 client secret';
 
+        $this->addTenantOptions();
         $this->addOption('client', 'c', 'Client id', acceptsValue: true);
     }
 
@@ -34,8 +38,22 @@ final class RotateClientSecretCommand extends AbstractCommand
             return self::FAILURE;
         }
 
+        // One shared new secret applied to each target that has the client.
         $secret = bin2hex(random_bytes(32));
-        if (!$this->clients->updateSecret($id, $this->hasher->make($secret))) {
+        $hash   = $this->hasher->make($secret);
+
+        $targets  = $this->tenantTargets($this->connections);
+        $labelled = $this->tenantLabelled($targets);
+        $rotated  = 0;
+        foreach ($targets as [$label, $db]) {
+            $ok = (new ClientRepository($db))->updateSecret($id, $hash);
+            $rotated += $ok ? 1 : 0;
+            if ($labelled) {
+                $this->info(($ok ? '✓ rotated in ' : '· no confidential client in ') . $label);
+            }
+        }
+
+        if ($rotated === 0) {
             $this->error("No confidential client found for id: {$id}");
             return self::FAILURE;
         }
