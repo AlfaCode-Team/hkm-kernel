@@ -135,7 +135,15 @@ final class Mailer implements MailPort, MailerContract
     {
         // With the View plugin, treat $view as a template name; without it, the
         // caller passed raw HTML (so MailPort works even with no renderer bound).
-        return $this->views !== null ? $this->views->render($view, $data) : $view;
+        if ($this->views === null) {
+            return $view;
+        }
+
+        // render()'s second argument is render OPTIONS (layout/cache), NOT view
+        // data — template variables must go through setData(), otherwise nothing
+        // is extracted and every placeholder renders empty. 'raw' because mail
+        // templates escape what they print themselves.
+        return $this->views->setData($data, 'raw')->render($view);
     }
 
     /**

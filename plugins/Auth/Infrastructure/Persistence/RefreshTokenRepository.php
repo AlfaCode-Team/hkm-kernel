@@ -10,14 +10,17 @@ use Plugins\Auth\Application\Ports\RefreshTokenStore;
 use Plugins\Auth\Domain\Entities\RefreshTokenRecord;
 
 /**
- * RefreshTokenRepository — central `refresh_tokens`. DatabasePort ONLY; the
- * injected port is the central (control-plane) connection. Only token hashes
- * are stored/compared — never raw tokens.
+ * RefreshTokenRepository — TENANT-scoped `refresh_tokens`. DatabasePort ONLY;
+ * the injected port is the per-request connection, which TenantContextStage has
+ * rebound to the tenant database. Central holds no sessions and no tokens, so
+ * the table is created by this plugin's database/tenant-template/ migration and
+ * never exists on the central connection. Only token hashes are stored/compared
+ * — never raw tokens.
  */
 final class RefreshTokenRepository implements RefreshTokenStore
 {
     public function __construct(
-        private readonly DatabasePort $central,
+        private readonly DatabasePort $db,
     ) {}
 
     public function store(
@@ -31,7 +34,7 @@ final class RefreshTokenRepository implements RefreshTokenStore
         \DateTimeImmutable $expiresAt,
     ): void {
         try {
-            $this->central->execute(
+            $this->db->execute(
                 'INSERT INTO refresh_tokens
                     (token_id, family_id, user_id, token_hash, tenant_id, device, ip, expires_at, created_at)
                  VALUES (:tid, :fid, :uid, :hash, :tenant, :device, :ip, :exp, :now)',
@@ -55,7 +58,7 @@ final class RefreshTokenRepository implements RefreshTokenStore
     public function findActiveByHash(string $tokenHash): ?RefreshTokenRecord
     {
         try {
-            $row = $this->central->queryOne(
+            $row = $this->db->queryOne(
                 'SELECT token_id, family_id, user_id, tenant_id, revoked_at
                    FROM refresh_tokens
                   WHERE token_hash = :hash
@@ -76,7 +79,7 @@ final class RefreshTokenRepository implements RefreshTokenStore
         try {
             // Bounded by expiry — an expired token is just "unknown", not a reuse
             // signal. Revoked-but-unexpired is the replay case.
-            $row = $this->central->queryOne(
+            $row = $this->db->queryOne(
                 'SELECT token_id, family_id, user_id, tenant_id, revoked_at
                    FROM refresh_tokens
                   WHERE token_hash = :hash
@@ -99,7 +102,7 @@ final class RefreshTokenRepository implements RefreshTokenStore
     public function revokeIfActive(string $tokenId): bool
     {
         try {
-            $affected = $this->central->execute(
+            $affected = $this->db->execute(
                 'UPDATE refresh_tokens SET revoked_at = :now WHERE token_id = :tid AND revoked_at IS NULL',
                 ['now' => self::now(), 'tid' => $tokenId],
             );
@@ -113,7 +116,7 @@ final class RefreshTokenRepository implements RefreshTokenStore
     public function revokeFamily(string $familyId): int
     {
         try {
-            return $this->central->execute(
+            return $this->db->execute(
                 'UPDATE refresh_tokens SET revoked_at = :now WHERE family_id = :fid AND revoked_at IS NULL',
                 ['now' => self::now(), 'fid' => $familyId],
             );
@@ -125,7 +128,7 @@ final class RefreshTokenRepository implements RefreshTokenStore
     public function revokeAllForUser(string $userId): int
     {
         try {
-            return $this->central->execute(
+            return $this->db->execute(
                 'UPDATE refresh_tokens SET revoked_at = :now WHERE user_id = :uid AND revoked_at IS NULL',
                 ['now' => self::now(), 'uid' => $userId],
             );

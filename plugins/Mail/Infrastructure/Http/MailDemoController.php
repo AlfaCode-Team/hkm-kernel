@@ -148,6 +148,7 @@ final class MailDemoController extends ApiController
         try {
             $this->mail->send($to, 'MailPort demo', $html, ['now' => date('r')]);
         } catch (MailException $e) {
+            dd($e);
             return $this->unprocessable(['to' => $e->getMessage()]);
         }
 

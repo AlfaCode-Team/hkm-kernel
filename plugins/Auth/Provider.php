@@ -58,22 +58,23 @@ final class Provider implements ModuleContract
     public function register(ModuleContainer $container): void
     {
         // ONE nesting-aware transaction manager for ALL Auth writes. Every Auth
-        // repository is pinned to the CENTRAL connection, so transactions must
-        // bracket that same connection — the kernel's request TransactionManager
-        // wraps the (possibly tenant-rebound) DatabasePort and would open the
-        // transaction on the wrong database. Shared (singleton) so composed
+        // repository resolves the per-request DatabasePort (the tenant connection
+        // TenantContextStage rebinds), so transactions MUST bracket that same
+        // connection — pinning this to the ConnectionManager default would open
+        // the transaction on central while the writes land in the tenant DB,
+        // leaving them effectively unbracketed. Shared (singleton) so composed
         // flows (revokeOthers → establish) nest instead of double-beginning.
         $container->singleton('auth.transaction', static fn(ModuleContainer $c) =>
             new \AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager(
-                $c->make(DatabaseConnectionManagerContract::class)->default(),
+                $c->make(DatabasePort::class),
             )
         );
 
         $container->bindInternal(PersonalAccessTokenRepository::class, static fn(ModuleContainer $c) =>
             new PersonalAccessTokenRepository(
-                // Central connection — tokens belong to the control plane, not a
-                // tenant DB, so resolve the ConnectionManager default rather than
-                // the per-request (tenant-rebound) DatabasePort.
+                // Tenant connection — auth credentials are tenant-scoped, so this
+                // is the per-request (tenant-rebound) DatabasePort, never the
+                // ConnectionManager default.
                 $c->make(DatabasePort::class),
                 env('AUTH_PAT_TABLE') ?: 'personal_access_tokens',
             )
@@ -155,10 +156,15 @@ final class Provider implements ModuleContract
                 )
         );
 
-        // Refresh-token session store (central connection — control-plane data).
+        // Refresh-token session store — TENANT-scoped, like every other auth
+        // credential store (auth_sessions, personal_access_tokens). Central holds
+        // no sessions and no tokens, so this resolves the per-request DatabasePort
+        // (rebound to the tenant by TenantContextStage) and NOT the
+        // ConnectionManager default. `refresh_tokens` is created by this plugin's
+        // database/tenant-template/ migration; central never has that table.
         $container->bindInternal(\Plugins\Auth\Application\Ports\RefreshTokenStore::class, static fn(ModuleContainer $c) =>
             new \Plugins\Auth\Infrastructure\Persistence\RefreshTokenRepository(
-                $c->make(DatabaseConnectionManagerContract::class)->default(),
+                $c->make(DatabasePort::class),
             )
         );
 
@@ -232,6 +238,16 @@ final class Provider implements ModuleContract
                     $c->make(UserServiceContract::class),
                     $c->make(CachePort::class),
                     otpTtlSeconds: (int) (env('AUTH_OTP_TTL') ?: 600),
+                    // A completed reset must revoke every credential issued under
+                    // the old password. Both are Auth's own services; passed
+                    // optionally so the broker still works in unit tests and in
+                    // deployments without a database-backed session store.
+                    refreshTokens: $c->has(\Plugins\Auth\API\Contracts\RefreshTokenServiceContract::class)
+                        ? $c->make(\Plugins\Auth\API\Contracts\RefreshTokenServiceContract::class)
+                        : null,
+                    devices: $c->has(\Plugins\Auth\Application\Services\DeviceSessionService::class)
+                        ? $c->make(\Plugins\Auth\Application\Services\DeviceSessionService::class)
+                        : null,
                 )
             );
 
@@ -303,9 +319,15 @@ final class Provider implements ModuleContract
         // after StartSessionStage and before the route `auth` filter.
         $http->hook('after.load', \Plugins\Auth\Infrastructure\Http\Stages\SessionAuthStage::class, priority: \Plugins\Auth\Infrastructure\Http\Stages\SessionAuthStage::PRIORITY);
 
-        // Control-plane maintenance command (auth:tokens:prune). Deferred so only
-        // CLI processes pay for it; the repository pins to the central connection
-        // (tokens are control-plane data, never tenant-scoped).
+        // Maintenance command (auth:tokens:prune). Deferred so only CLI processes
+        // pay for it.
+        //
+        // KNOWN LIMITATION: `personal_access_tokens` is TENANT-scoped (central
+        // holds no tokens), but this still resolves the ConnectionManager default
+        // because the CLI has no per-request tenant to route to — so the command
+        // currently targets a table central does not have. Pruning must iterate
+        // the tenant registry and run once per tenant connection; until it does,
+        // treat this command as inoperative rather than as a central pin.
         $cli->defer(static function (CliPipeline $cli): void {
             $c = new ModuleContainer($cli->container());
             $c->setScope('database.management');
