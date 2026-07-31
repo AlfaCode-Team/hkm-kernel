@@ -30,8 +30,12 @@ interface EdgeServiceContract
      * TLS overrides (null = use config): $tlsMode is one of ssl|none|both,
      * $sslCert/$sslKey override the certificate paths. $appEnv overrides APP_ENV
      * (local|development|production), which is what the cache profile derives from.
+     *
+     * $force pins the strategy explicitly (null = auto-detect): 'nginx-only'
+     * serves via nginx with NO Apache fallback; 'apache-only' serves via Apache
+     * with no fallback — regardless of what else is running on the host.
      */
-    public function plan(bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): EdgePlan;
+    public function plan(bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null, ?string $force = null): EdgePlan;
 
     /**
      * Write the rendered config, sync local domains to /etc/hosts, then
@@ -44,9 +48,10 @@ interface EdgeServiceContract
      * }
      *
      * TLS overrides (null = use config): $tlsMode is one of ssl|none|both,
-     * $sslCert/$sslKey override the certificate paths.
+     * $sslCert/$sslKey override the certificate paths. $force pins the strategy
+     * ('nginx-only' | 'apache-only', null = auto-detect) with no fallback.
      */
-    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null): array;
+    public function apply(bool $reload = true, bool $dryRun = false, ?bool $manageHosts = null, bool $all = false, ?string $tlsMode = null, ?string $sslCert = null, ?string $sslKey = null, ?string $appEnv = null, ?string $force = null): array;
 
     /**
      * Render process-manager units (systemd | supervisor) for the OpenSwoole

@@ -11,7 +11,7 @@ use Plugins\Pageflow\API\Contracts\PageflowSharerContract;
  * Runs several PageflowSharerContract contributors in order, so shares can come
  * from independent sources (auth, flash, cart, …) instead of one class.
  *
- * Bind this as the PageflowSharerContract in the project; PageflowShareStage
+ * Bind this as the PageflowSharerContract in the project; PageflowStage
  * invokes it once per render and it fans out to each contributor. Later
  * contributors override earlier ones on a key collision (last wins).
  */

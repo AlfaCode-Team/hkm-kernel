@@ -1,0 +1,48 @@
+name: 📝 Documentation
+description: Report a problem with, or suggest an improvement to, the docs.
+title: "[Docs]: "
+labels: ["documentation", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the documentation! Point us at the page and
+        tell us what's missing, unclear, or wrong.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type of documentation issue
+      options:
+        - Incorrect / outdated information
+        - Missing documentation
+        - Unclear or confusing explanation
+        - Broken link or example
+        - Typo / formatting
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Location
+      description: File path or URL of the affected docs.
+      placeholder: "docs/ai-context/09_SECURITY.md, or README.md#install"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong or missing?
+      description: Describe the issue and, if you can, what it should say instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording (optional)
+      description: A proposed correction or addition.
+    validations:
+      required: false

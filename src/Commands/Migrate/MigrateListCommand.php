@@ -22,7 +22,7 @@ use AlfacodeTeam\PhpIoCli\Depends\Colors;
  *   migrate:list --applied    show only applied migrations
  *   migrate:list --batch=3    show only batch 3
  */
-final class MigrateListCommand extends AbstractMigrateCommand
+final class MigrateListCommand extends LetMigrateCommand
 {
     protected function configure(): void
     {

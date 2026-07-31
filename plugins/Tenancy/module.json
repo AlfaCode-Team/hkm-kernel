@@ -263,6 +263,11 @@
             "key": "TENANCY_TOKEN_TTL",
             "type": "int",
             "required": false
+        },
+        {
+            "key": "TENANCY_CONTROL_PLANE",
+            "type": "bool",
+            "required": false
         }
     ]
 }

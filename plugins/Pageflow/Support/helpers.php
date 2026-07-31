@@ -41,7 +41,7 @@ if (!function_exists('pageflow_precognition')) {
      *       // ... real work only reached on a normal submit
      *   }
      *
-     * The PageflowValidationStage turns any ValidationException into the 422
+     * The PageflowStage turns any ValidationException into the 422
      * error envelope the client reads, so you only handle the success path.
      */
     function pageflow_precognition(Request $request): bool

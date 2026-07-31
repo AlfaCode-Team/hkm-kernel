@@ -26,11 +26,25 @@ final class EdgeStatusCommand extends AbstractCommand
         $this->description = 'Detect nginx/Apache and show the edge routing strategy that would be applied';
 
         $this->addOption('all', '', 'Include every registered project (default: only the current one)');
+        $this->addOption('nginx-only', '', 'Preview the nginx-only strategy (NO Apache fallback)');
+        $this->addOption('apache-only', '', 'Preview the apache-only strategy (no fallback)');
     }
 
     protected function handle(): int
     {
-        $plan  = $this->edge->plan($this->hasOption('all'));
+        $force = match (true) {
+            $this->hasOption('nginx-only') && $this->hasOption('apache-only') => 'both',
+            $this->hasOption('nginx-only')  => 'nginx-only',
+            $this->hasOption('apache-only') => 'apache-only',
+            default                         => null,
+        };
+        if ($force === 'both') {
+            $this->error('Pick at most ONE of --nginx-only or --apache-only.');
+
+            return self::INVALID;
+        }
+
+        $plan  = $this->edge->plan($this->hasOption('all'), force: $force);
         $stack = $plan->stack;
 
         $this->section('Edge — detected stack');
@@ -38,6 +52,7 @@ final class EdgeStatusCommand extends AbstractCommand
         $this->info('nginx installed : ' . $yn($stack->nginxInstalled));
         $this->info('nginx active    : ' . $yn($stack->nginxActive));
         $this->info('nginx stream    : ' . $yn($stack->nginxHasStream));
+        $this->info('nginx stream cfg: ' . $yn($stack->nginxHasStreamConfig) . ($stack->nginxHasStreamConfig ? ' (existing splitter — will be reused)' : ''));
         $this->info('apache installed: ' . $yn($stack->apacheInstalled));
         $this->info('apache active   : ' . $yn($stack->apacheActive));
 
@@ -48,7 +63,7 @@ final class EdgeStatusCommand extends AbstractCommand
             $this->info('php-fpm active  : ' . implode(', ', $php['active']));
         }
         $this->newLine();
-        $this->success('strategy: ' . $plan->strategy->label());
+        $this->success('strategy: ' . $plan->strategy->label() . ($plan->reuseStream ? ' — reusing the existing nginx stream splitter' : ''));
         $this->info('project sites  : ' . count($plan->sites));
         foreach ($plan->sites as $site) {
             $this->info(sprintf(

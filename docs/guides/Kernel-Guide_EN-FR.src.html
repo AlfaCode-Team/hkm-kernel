@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4; margin: 22mm 18mm 20mm 18mm;
+    @bottom-center { content: "AlfacodeTeam · PhpServicePlatform Kernel Guide"; font-size: 8pt; color: #888; }
+    @bottom-right  { content: counter(page) " / " counter(pages); font-size: 8pt; color: #888; }
+  }
+  @page :first { margin: 0; }
+
+  html { font-family: "DejaVu Sans","Helvetica",sans-serif; font-size: 10.2pt; color: #1c2430; line-height: 1.5; }
+  body { margin: 0; }
+
+  .cover { height: 297mm; box-sizing: border-box; padding: 52mm 24mm 24mm 24mm;
+    background: linear-gradient(150deg,#0d1b2a 0%,#1b3a5b 55%,#24618f 100%); color: #f4f8fc; page-break-after: always; }
+  .cover .kicker { font-size: 11pt; letter-spacing: 4px; text-transform: uppercase; color: #8fc0e8; }
+  .cover h1 { font-size: 39pt; line-height: 1.05; margin: 13mm 0 4mm 0; font-weight: 800; }
+  .cover h2 { font-size: 16pt; font-weight: 400; color: #c7ddf0; margin: 0 0 16mm 0; }
+  .cover .meta { font-size: 10pt; color: #a9c7df; border-top: 1px solid #3a5e82; padding-top: 6mm; }
+  .cover .badges span { display: inline-block; border: 1px solid #4d76a0; border-radius: 14px; padding: 3px 12px; margin: 0 6px 6px 0; font-size: 9pt; color: #d6e8f7; }
+
+  h1.sec { font-size: 20pt; color: #14385c; border-bottom: 3px solid #24618f; padding-bottom: 4px; margin-top: 0; page-break-before: always; }
+  h2 { font-size: 14pt; color: #1b4a73; margin-top: 20px; }
+  h3 { font-size: 11.6pt; color: #285a86; margin-top: 15px; }
+  h4 { font-size: 10.6pt; color: #2f6291; margin: 12px 0 4px; }
+  p { margin: 7px 0; }
+  ul, ol { margin: 7px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  .step { counter-reset: none; }
+
+  code { font-family: "DejaVu Sans Mono",monospace; font-size: 8.7pt; background: #eef3f8; padding: 1px 4px; border-radius: 3px; color: #b1264a; }
+  pre { background: #0f2438; color: #e6eef6; padding: 11px 13px; border-radius: 6px; font-family: "DejaVu Sans Mono",monospace; font-size: 8.05pt; line-height: 1.45; white-space: pre-wrap; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .filename { background: #1b4a73; color: #cfe3f4; font-family: "DejaVu Sans Mono",monospace; font-size: 8pt; padding: 4px 10px; border-radius: 6px 6px 0 0; margin-top: 12px; }
+  .filename + pre { border-radius: 0 0 6px 6px; margin-top: 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 8.8pt; }
+  th { background: #24618f; color: #fff; text-align: left; padding: 6px 8px; }
+  td { border: 1px solid #cfdae6; padding: 5px 8px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f3f7fb; }
+
+  .note { background: #eaf4ec; border-left: 4px solid #3a9d5d; padding: 8px 12px; margin: 10px 0; border-radius: 0 4px 4px 0; }
+  .warn { background: #fdecec; border-left: 4px solid #d0453e; padding: 8px 12px; margin: 10px 0; border-radius: 0 4px 4px 0; }
+  .audience { background: #eef0fb; border-left: 4px solid #4a55c0; padding: 8px 12px; margin: 10px 0; border-radius: 0 4px 4px 0; }
+  .tip { background: #fef6e7; border-left: 4px solid #e0a82e; padding: 8px 12px; margin: 10px 0; border-radius: 0 4px 4px 0; }
+
+  .lang-divider { height: 297mm; box-sizing: border-box; padding: 110mm 24mm; background: #14385c; color: #fff; page-break-after: always; text-align: center; }
+  .lang-divider h1 { font-size: 34pt; border: none; }
+  .lang-divider p { font-size: 13pt; color: #b9d3e8; }
+
+  .toc a { text-decoration: none; color: #1b4a73; }
+  .toc ol { list-style: none; padding-left: 0; }
+  .toc > ol > li { font-weight: 700; margin-top: 7px; }
+  .toc ol ol { padding-left: 16px; font-weight: 400; }
+  .small { font-size: 8.5pt; color: #5a6b7d; }
+  .vs-good { color: #1d7a3d; font-weight: 700; }
+  .vs-bad  { color: #b32820; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="kicker">AlfacodeTeam · PhpServicePlatform</div>
+  <h1>The Kernel Guide</h1>
+  <h2>How the Gated Demand Architecture kernel works, how to use it,<br>and why it differs from other frameworks<br>· Guide bilingue — English &amp; Français ·</h2>
+  <div class="badges">
+    <span>PHP 8.2+</span><span>Gated Demand Architecture</span><span>Contributors</span><span>App Builders</span><span>Step-by-step</span><span>EN / FR</span>
+  </div>
+  <div class="meta">
+    Package: <strong>alfacode-team/php-service-platform</strong> &nbsp;·&nbsp; Namespace: AlfacodeTeam\PhpServicePlatform\Kernel\<br>
+    Audience: Internal contributors &amp; framework users &nbsp;·&nbsp; Expanded edition, version 2.0
+  </div>
+</div>
+
+<!-- ================= ENGLISH ================= -->
+
+<h1 class="sec">Table of Contents</h1>
+<div class="toc">
+<ol>
+  <li>1. What the Kernel Is &amp; Why It Exists</li>
+  <li>2. Why GDA — Benefits &amp; Differences vs Other Frameworks</li>
+  <li>3. The Kernel Lifecycle — configure → build → materialize</li>
+  <li>4. App Builders: Using the Kernel Step by Step
+    <ol>
+      <li>4.1 The fluent builder &amp; what each method does</li>
+      <li>4.2 Ports vs essential vs on-demand modules</li>
+      <li>4.3 Entry points</li>
+      <li>4.4 TUTORIAL: build a module from scratch (8 steps)</li>
+      <li>4.5 Worker jobs &amp; CLI commands</li>
+      <li>4.6 Testing a service</li>
+    </ol>
+  </li>
+  <li>5. Contributors: How the Kernel Works Internally
+    <ol>
+      <li>5.1 build() vs materialize()</li>
+      <li>5.2 The 9-stage boot pipeline</li>
+      <li>5.3 Trace an HTTP request end to end</li>
+      <li>5.4 Containers &amp; scope enforcement</li>
+      <li>5.5 WALKTHROUGH: add a new port / add a boot stage</li>
+      <li>5.6 Security gateway internals</li>
+    </ol>
+  </li>
+  <li>6. The Five Access Rules &amp; Exception Hierarchy</li>
+  <li>7. Quick Reference &amp; Checklists</li>
+</ol>
+</div>
+
+<h1 class="sec">1. What the Kernel Is &amp; Why It Exists</h1>
+<p>The <strong>Kernel</strong> is the heart of the AlfacodeTeam PhpServicePlatform framework — a small, domain-agnostic core that boots an application, runs security <em>before</em> any business code, loads only the modules a given request needs, and routes work through three pipelines: HTTP, CLI, and Worker.</p>
+<p>It is built on the <strong>Gated Demand Architecture (GDA)</strong>: security <em>gates</em> every request, and modules are loaded on <em>demand</em>, so a request pays only for what it actually uses.</p>
+
+<h3>The problem it solves</h3>
+<p>Most full-stack frameworks boot the <em>entire</em> application on every request: every service provider registers, every route is compiled, every middleware is constructed — then a request is matched and most of that work is thrown away. GDA inverts this: it compiles a static picture of the app once (manifests), then at request time it loads <em>only</em> the modules in that route's dependency graph. A blocked request (failed firewall, bad CSRF, rate limit) costs <strong>zero module work</strong> because security runs before anything loads.</p>
+
+<table>
+  <tr><th>Principle</th><th>Meaning</th></tr>
+  <tr><td>Security before everything</td><td>The SecurityGateway runs before any module loads. Denied = zero module cost.</td></tr>
+  <tr><td>Load only what is needed</td><td>Only the modules required for this specific request are loaded.</td></tr>
+  <tr><td>One module, one domain</td><td>Every module owns exactly one business domain.</td></tr>
+  <tr><td>Isolation by default</td><td>Modules cannot reach each other's internals — enforced at runtime by scoped containers.</td></tr>
+  <tr><td>Infrastructure independence</td><td>The kernel defines port interfaces; the project provides implementations.</td></tr>
+  <tr><td>Explicit over implicit</td><td>Everything is declared in <code>module.json</code>. Nothing is auto-discovered at runtime.</td></tr>
+</table>
+
+<h3>The three worlds</h3>
+<pre>┌─────────────────────────────────────────────────┐
+│  PROJECT LAYER  (wiring only — no business logic)│
+│  ┌─────────────────────────────────────────────┐ │
+│  │  MODULE LAYER  (bounded domain contexts)    │ │
+│  │  ┌───────────────────────────────────────┐  │ │
+│  │  │  KERNEL  (boot, security, loading,    │  │ │
+│  │  │  pipelines, DI, events, ports)        │  │ │
+│  │  └───────────────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────┘</pre>
+<ul>
+  <li><strong>Kernel</strong> — knows nothing about modules or business domains. Changes rarely.</li>
+  <li><strong>Module</strong> — knows nothing about the project. Wires to the kernel through contracts only.</li>
+  <li><strong>Project</strong> — knows everything, contains no business logic. Wiring only.</li>
+</ul>
+
+<div class="audience"><strong>How to read this guide.</strong> App builders / framework users → chapters 3, 4, 6, 7. Internal contributors → everything, especially chapter 5. Both audiences benefit from chapter 2.</div>
+
+<h1 class="sec">2. Why GDA — Benefits &amp; Differences vs Other Frameworks</h1>
+<p>This chapter is the "why bother" — what GDA buys you that Laravel, Symfony, or Slim do not, and the trade-offs.</p>
+
+<h2>2.1 Side-by-side comparison</h2>
+<table>
+  <tr><th>Concern</th><th>Laravel / Symfony (typical)</th><th>PhpServicePlatform (GDA)</th></tr>
+  <tr><td>Boot cost per request</td><td>All providers/bundles register every request</td><td><span class="vs-good">Only the route's module graph loads</span></td></tr>
+  <tr><td>Cost of a blocked request</td><td>App often boots before auth/throttle middleware</td><td><span class="vs-good">Security runs first — denied = 0 module cost</span></td></tr>
+  <tr><td>Routes</td><td>PHP route files / annotations</td><td>Declared in <code>module.json</code>, compiled to a manifest</td></tr>
+  <tr><td>Module isolation</td><td>Convention; any service is globally resolvable</td><td><span class="vs-good">Runtime-enforced — cross-module internals throw</span></td></tr>
+  <tr><td>Money / domain modelling</td><td>Floats &amp; Eloquent models common</td><td>Integer-cents value objects; pure Domain layer</td></tr>
+  <tr><td>Infrastructure coupling</td><td>Facades / global helpers reach the container</td><td>Ports + DI only; no global singletons</td></tr>
+  <tr><td>Swoole / long-running safety</td><td>Needs care — global state leaks between requests</td><td><span class="vs-good">Core frozen; request state in a discarded scope</span></td></tr>
+  <tr><td>Native distribution</td><td>Requires PHP + Composer + vendor/</td><td>Ships OS-native packages (.deb / .zip / .tar.gz)</td></tr>
+</table>
+
+<h2>2.2 The concrete benefits</h2>
+<h4>1 — Pay-per-use performance</h4>
+<p>A request to <code>/api/tasks</code> loads the Task module and its <code>requires[]</code> (e.g. the Database module) — and nothing else. The Invoice, Payment, or Auth modules are never instantiated unless the route graph pulls them in. Under OpenSwoole the <code>CoreContainer</code> (ports + kernel services) is built once per worker; only the cheap request-scoped <code>ModuleContainer</code> is rebuilt per request.</p>
+<h4>2 — Security that cannot be bypassed</h4>
+<p>Because the SecurityGateway is a pipeline stage that runs <em>before</em> ResolveStage/LoadStage, a 403/429 short-circuits the request with no module ever constructed. You cannot accidentally "forget the auth middleware on a route" — there is no per-route opt-in to forget.</p>
+<h4>3 — Architecture enforced by the runtime, not by code review</h4>
+<p>The Five Access Rules are not a style guide — <code>ModuleContainer::bindInternal()</code> physically throws <code>ScopeViolationException</code> if a controller reaches into another module's repository. Bad layering fails fast, in tests, instead of rotting over years.</p>
+<h4>4 — Testability by construction</h4>
+<p>Services depend on ports and contracts, never on concrete infrastructure, so a unit test swaps in <code>InMemoryRepository</code> / <code>FakeTransactionManager</code> with no framework bootstrapping at all.</p>
+<h4>5 — Honest deployment</h4>
+<p>The kernel can be shipped as an OS-native package with no <code>vendor/</code> directory, because env loading, the error net, and the CLI runtime are all dependency-light first-party code.</p>
+
+<div class="warn"><strong>The trade-off (be honest):</strong> GDA asks for more up-front structure — one domain per module, contracts at boundaries, manifests, declared config. For a 3-page CRUD site this is overhead. The payoff appears when the system grows past the point where a "just put it in a controller" framework becomes a tangle. Choose GDA for platforms, not for throwaway prototypes.</div>
+
+<h1 class="sec">3. The Kernel Lifecycle</h1>
+<p>Three distinct phases explain nearly every performance and correctness property of the framework.</p>
+<table>
+  <tr><th>Phase</th><th>Method</th><th>What happens</th></tr>
+  <tr><td>1. Configure</td><td><code>Kernel::configure()</code> + <code>with*()</code></td><td>Collect ports, security layers, modules, error pipeline, paths. Pure declaration — nothing is constructed.</td></tr>
+  <tr><td>2. Build</td><td><code>->build()</code></td><td>Runs the BootPipeline: validates config and <strong>compiles manifests</strong> (service / route / job / command). Compile-only — no pipeline built, no module wired, core not frozen.</td></tr>
+  <tr><td>3. Materialize</td><td>first <code>http()</code> / <code>cli()</code> / <code>workerLoop()</code></td><td>Constructs the pipelines, wires every module ONCE (<code>Provider::boot</code>), exposes kernel services, then <strong>freezes</strong> the core. Runs at most once.</td></tr>
+</table>
+<div class="note"><strong>Why split build and materialize?</strong> <code>build()</code> is cheap and safe enough to run in CI or to warm caches. <code>materialize()</code> is lazy and surface-specific: an HTTP-only process never reads the job manifest; a CLI process never reads the route manifest. The first entry-point call decides the <code>RuntimeMode</code>.</p></div>
+<pre>Kernel::configure()      // phase 1 — declare
+    ->withPorts([...])->withModules([...])
+    ->build();           // phase 2 — validate + compile manifests (no pipelines yet)
+
+$kernel->http();         // phase 3 — materialize(RuntimeMode::Http), return HttpPipeline
+$kernel->mode();         // RuntimeMode::Http  (null before any entry point)</pre>
+
+<h1 class="sec">4. App Builders: Using the Kernel Step by Step</h1>
+<p class="small">Audience: app builders / framework users.</p>
+
+<h2>4.1 The fluent builder &amp; what each method does</h2>
+<p>A shared <code>base.php</code> returns an <em>unbuilt</em> builder; each project extends it and calls <code>->build()</code>.</p>
+<div class="filename">app/bootstrap/base.php — shared base (NO ->build())</div>
+<pre>return Kernel::configure()
+    ->withBasePath(dirname(__DIR__, 2))         // var/, userdata/ live under here
+    ->withPorts([
+        DatabasePort::class => fn() => new PdoDatabase(dsn: env('DB_DSN')),
+        CachePort::class    => fn() => new InMemoryCache(),
+    ])
+    ->withSecurity([ new CsrfTokenLayer(exemptPaths: ['/api']) ])
+    ->withModules([ CryptoProvider::class, DatabaseProvider::class ])
+    ->withEssentialModules([ SessionProvider::class, CookieProvider::class ]);</pre>
+<div class="filename">projects/admin/bootstrap/app.php — concrete project</div>
+<pre>$builder = require __DIR__ . '/../../../app/bootstrap/base.php';
+return $builder
+    ->withProjectPath(dirname(__DIR__))         // isolates this project's var/ + userdata/
+    ->withModules([AuthModule::class, InvoiceModule::class])
+    ->build();                                  // validate + compile manifests</pre>
+
+<table>
+  <tr><th>Method</th><th>Merge semantics</th><th>Use for</th></tr>
+  <tr><td><code>withPorts([...])</code></td><td>Merges; later key wins</td><td>Infra implementations. A <code>Closure</code> is a <strong>lazy singleton</strong> — built on first use only.</td></tr>
+  <tr><td><code>withSecurity([...])</code></td><td>Appends</td><td>Security layers, cheapest first (firewall → rate-limit → CSRF → auth).</td></tr>
+  <tr><td><code>withModules([...])</code></td><td>Appends + de-dupes, keeps order</td><td>On-demand modules; loaded only when a route's dependency graph pulls them in.</td></tr>
+  <tr><td><code>withEssentialModules([...])</code></td><td>Appends + de-dupes</td><td>Request-scoped infra needed app-wide (sessions, cookies). Adds a <code>register()</code> cost per request.</td></tr>
+</table>
+
+<h2>4.2 Ports vs essential vs on-demand modules — the decision</h2>
+<div class="note"><strong>Rule of thumb:</strong> stateless + always → a <strong>port</strong>. Stateful + always → an <strong>essential module</strong>. Needed by some routes → an <strong>on-demand module</strong> with <code>requires[]</code> in its <code>module.json</code>.</div>
+<table>
+  <tr><th>Choice</th><th>Lifetime</th><th>Example</th></tr>
+  <tr><td>Port (CoreContainer)</td><td>App-lifetime, one per worker</td><td>Database, hashing, encryption, in-memory cache</td></tr>
+  <tr><td>Essential module</td><td>register() every request</td><td>Session, cookies, Redis cache override</td></tr>
+  <tr><td>On-demand module</td><td>register() only when in the route graph</td><td>Invoice, Task, outbound HTTP client</td></tr>
+</table>
+<div class="warn">Never put request-scoped state on a port (CoreContainer) — it would leak across requests under OpenSwoole.</div>
+
+<h2>4.3 Entry points</h2>
+<pre>$kernel->http()         // → HttpPipeline::handle(Request): Response
+$kernel->cli()          // → CliPipeline::run(argv): int
+$kernel->workerLoop()   // → WorkerLoop::run(callable $puller, int $maxIterations = 0)
+$kernel->container()    // → CoreContainer (materializes as the Cli surface)
+$kernel->mode()         // → ?RuntimeMode (null until first entry point)
+$kernel->requestTeardown() // call after each request under OpenSwoole (no-op on FPM/CLI)</pre>
+<div class="filename">app/public_html/index.php — FPM entry</div>
+<pre>$kernel  = require EntryHelpers::bootstrapPathFor($rootPath, $project);
+$request = Request::capture();
+$kernel->http()->handle($request)->send();</pre>
+
+<h2>4.4 TUTORIAL — Build a module from scratch (8 steps)</h2>
+<p>We rebuild the real <strong>Task</strong> plugin. It lives in <code>plugins/Task/</code> under the <code>Plugins\Task\</code> namespace and owns one domain: <code>task.management</code>.</p>
+
+<h4>Step 1 — Declare the module in module.json (single source of truth)</h4>
+<div class="filename">plugins/Task/module.json</div>
+<pre>{
+  "name": "task", "version": "1.0.0",
+  "solves": "task.management", "type": "module",
+  "requires": ["database.query"],
+  "exposes":  ["Plugins\\Task\\API\\Contracts\\TaskServiceContract"],
+  "routes": [
+    { "method": "GET",  "path": "/api/tasks",      "handler": "Plugins\\Task\\Infrastructure\\Http\\TaskController@index"  },
+    { "method": "POST", "path": "/api/tasks",      "handler": "Plugins\\Task\\Infrastructure\\Http\\TaskController@create" },
+    { "method": "GET",  "path": "/api/tasks/{id}", "handler": "Plugins\\Task\\Infrastructure\\Http\\TaskController@show"   },
+    { "method": "POST", "path": "/api/tasks/{id}/complete", "handler": "...TaskController@complete" }
+  ],
+  "emits": ["task.created"], "config": []
+}</pre>
+<p class="small">Routes are declared HERE ONLY. Every env var the module reads must appear in <code>config[]</code> or boot fails. Plugin handlers use the full <code>Plugins\...</code> class path.</p>
+
+<h4>Step 2 — The Domain entity (zero external imports)</h4>
+<div class="filename">plugins/Task/Domain/Entities/Task.php</div>
+<pre>final class Task
+{
+    private array $domainEvents = [];
+
+    private function __construct(            // ALWAYS private
+        private readonly TaskId $id,
+        private string $title,
+        private TaskStatus $status,
+    ) {}
+
+    public static function create(string $title): self   // named ctor — records events
+    {
+        $t = new self(TaskId::generate(), $title, TaskStatus::PENDING);
+        $t->domainEvents[] = new TaskCreatedDomainEvent($t->id, $title, new \DateTimeImmutable());
+        return $t;
+    }
+
+    public function markCompleted(): void {              // state transition
+        if ($this->status === TaskStatus::COMPLETED) {
+            throw new \DomainException('Task already completed');
+        }
+        $this->status = TaskStatus::COMPLETED;
+    }
+
+    public function releaseEvents(): array {              // returns AND clears
+        $e = $this->domainEvents; $this->domainEvents = []; return $e;
+    }
+}</pre>
+
+<h4>Step 3 — Published contract (the only thing other modules may import)</h4>
+<div class="filename">plugins/Task/API/Contracts/TaskServiceContract.php</div>
+<pre>interface TaskServiceContract
+{
+    public function list(): array;
+    public function create(CreateTaskDTO $dto): TaskDTO;
+    public function find(string $id): ?TaskDTO;
+    public function complete(string $id): ?TaskDTO;
+    public function delete(string $id): bool;
+}</pre>
+
+<h4>Step 4 — Repository (DatabasePort only, tenant-scoped)</h4>
+<pre>final class TaskRepository
+{
+    public function __construct(
+        private readonly DatabasePort $db,        // ONLY external dependency
+        private readonly Identity     $identity,  // for tenant scoping
+    ) {}
+
+    public function find(string $id): ?Task {
+        try {
+            $row = $this->db->queryOne(
+              'SELECT * FROM tasks WHERE id = :id AND tenant_id = :t',
+              ['id' => $id, 't' => $this->identity->tenantId]);
+        } catch (\PDOException $e) {
+            throw new RepositoryException("find task [{$id}]", layer: 'repository.task', previous: $e);
+        }
+        return $row === null ? null : TaskHydrator::hydrate($row);
+    }
+}</pre>
+
+<h4>Step 5 — Application service (the mandatory transaction + event shape)</h4>
+<p>This is the real <code>TaskService::create()</code>. Note the exact ordering: begin collection → begin tx → work → commit; on failure rollback <em>and</em> discard; dispatch integration events ONLY after commit, never inside <code>try{}</code>.</p>
+<div class="filename">plugins/Task/Application/Services/TaskService.php</div>
+<pre>public function create(CreateTaskDTO $dto): TaskDTO
+{
+    $this->collector->beginCollection();
+    $this->transaction->begin();
+    try {
+        $task = Task::create($dto->title);
+        foreach ($task->releaseEvents() as $event) {
+            $this->collector->collect($event);
+        }
+        $this->repository->save($task);
+        $this->transaction->commit();
+    } catch (\Throwable $e) {
+        $this->transaction->rollback();
+        $this->collector->discard();          // ← no phantom events on rollback
+        throw new ServiceException('task.create.failed', layer: 'service.task', previous: $e);
+    }
+
+    // AFTER commit only — never inside the try block
+    $created = $this->firstCreatedEvent($this->collector->release());
+    if ($created !== null) {
+        $this->eventBus->dispatch(new TaskCreatedIntegrationEvent(
+            taskId:     $created->taskId->value(),
+            title:      $created->title,
+            occurredAt: $created->occurredAt->format(\DateTimeInterface::RFC3339),
+        ));
+    }
+    return TaskDTO::fromEntity($task);
+}</pre>
+
+<h4>Step 6 — Controller (max 3 lines per method)</h4>
+<div class="filename">plugins/Task/Infrastructure/Http/TaskController.php</div>
+<pre>final class TaskController
+{
+    public function __construct(private readonly TaskServiceContract $tasks) {}  // contract only
+
+    public function create(Request $request): Response {
+        $task = $this->tasks->create(CreateTaskDTO::fromRequest($request));
+        return Response::json(['data' => $task->toArray()], 201);
+    }
+
+    public function show(Request $request, string $id): Response {
+        $task = $this->tasks->find($id);
+        return $task === null
+            ? Response::notFound("Task [{$id}] not found.")
+            : Response::json(['data' => $task->toArray()]);
+    }
+}</pre>
+
+<h4>Step 7 — Provider: register() bindings + boot() hooks</h4>
+<div class="filename">plugins/Task/Provider.php</div>
+<pre>final class Provider implements ModuleContract
+{
+    public function solves(): string  { return 'task.management'; }
+    public function requires(): array { return [DatabasePort::class]; }
+    public function exposes(): array  { return [TaskServiceContract::class]; }
+
+    public function register(ModuleContainer $c): void {
+        // internal — ScopeViolationException if resolved from outside this module
+        $c->bindInternal(TaskRepository::class, static fn(ModuleContainer $c) =>
+            new TaskRepository($c->make(DatabasePort::class), $c->make(Identity::class)));
+        // public — resolvable by modules that 'require' task.management
+        $c->bind(TaskServiceContract::class, static fn(ModuleContainer $c) =>
+            new TaskService(
+                repository:  $c->make(TaskRepository::class),
+                transaction: $c->make(TransactionManager::class),
+                collector:   $c->make(DomainEventCollector::class),
+                eventBus:    $c->make(EventBus::class),
+                identity:    $c->make(Identity::class),
+            ));
+    }
+
+    public function boot(HttpPipeline $http, CliPipeline $cli,
+                         WorkerPipeline $worker, EventBus $events): void {
+        // hooks + event subscriptions go here, e.g.:
+        // $events->subscribe('payment.succeeded', MarkTaskPaidListener::class);
+    }
+}</pre>
+
+<h4>Step 8 — Register the provider with the project</h4>
+<pre>// projects/admin/bootstrap/app.php
+return $builder
+    ->withModules([ \Plugins\Task\Provider::class ])
+    ->build();</pre>
+<div class="note">That is the whole module. <code>build()</code> validates it (route handler format, no duplicate <code>solves</code>, declared config) and compiles it into the manifests. The first HTTP request to <code>/api/tasks</code> loads it on demand.</div>
+
+<h2>4.5 Worker jobs &amp; CLI commands</h2>
+<h4>A job</h4>
+<pre>// module.json
+{ "type": "job", "queue": "emails",
+  "retry": { "max": 3, "strategy": "exponential", "jitter": true },
+  "timeout": 30, "requires": ["mail.port", "invoice.generation"] }
+
+final class SendInvoiceEmailJob implements JobContract
+{
+    public function handle(JobPayload $payload): JobResult {
+        // ... throw to trigger a retry
+        return JobResult::success(['sent' => 1]);
+    }
+    public function failed(JobPayload $payload, \Throwable $e): void { /* after max retries */ }
+}</pre>
+<h4>A CLI command</h4>
+<pre>final class SyncTasksCommand extends AbstractCommand   // php-io-cli, NOT Symfony
+{
+    protected string $signature = 'tasks:sync';
+    public function handle(): int {
+        $this->output->success('Synced.');
+        return 0;
+    }
+}
+// register: $cli->command(SyncTasksCommand::class);  // resolved via CoreContainer → ports injectable</pre>
+
+<h2>4.6 Testing a service (no real infrastructure)</h2>
+<pre>$repo      = new InMemoryTaskRepository();
+$txn       = new FakeTransactionManager();
+$bus       = new FakeIntegrationEventBus();
+$collector = new DomainEventCollector();
+$identity  = Identity::asUser('user-1', 'tenant-abc');
+
+$sut    = new TaskService($repo, $txn, $collector, $bus, $identity);
+$result = $sut->create(new CreateTaskDTO('Write the guide'));
+
+$this->assertTrue($txn->wasCommitted());
+$bus->assertDispatched(TaskCreatedIntegrationEvent::class, times: 1);
+
+// rollback path:
+$repo->failOnNextSave();
+try { $sut->create($dto); } catch (ServiceException) {}
+$this->assertTrue($txn->wasRolledBack());
+$bus->assertNotDispatched(TaskCreatedIntegrationEvent::class);  // no phantom event</pre>
+
+<h1 class="sec">5. Contributors: How the Kernel Works Internally</h1>
+<p class="small">Audience: internal contributors. This chapter explains the machinery inside <code>src/Kernel/</code>.</p>
+
+<h2>5.1 build() vs materialize()</h2>
+<p><strong><code>Kernel::build()</code></strong> creates a <code>CoreContainer</code>; registers each port as a lazy <code>singleton</code> (Closure) or eager <code>instance</code> (object); then runs the <code>BootPipeline</code> to validate config + compile manifests. The kernel is marked <code>built</code> but <strong>not</strong> frozen, and <strong>no</strong> pipeline exists yet.</p>
+<p><strong><code>Kernel::materialize(RuntimeMode)</code></strong> (private, once): builds <code>EventBus</code>, <code>WorkerPipeline</code>, <code>HttpPipeline</code> (with a <code>SecurityGateway</code> over the layers), <code>CliPipeline</code>, <code>WorkerLoop</code>; exposes them back into the core; loops over every module, instantiates the provider, calls <code>boot()</code> to register hooks + subscriptions on the live instances; then calls <code>core->freeze()</code>.</p>
+<div class="note">All three pipelines are constructed at materialize because a module's single <code>boot()</code> may hook any of them — but each pipeline is a cheap shell that defers its manifest disk I/O until its own first run. So an HTTP process never reads the job/command manifest in practice.</div>
+
+<h2>5.2 The 9-stage boot pipeline (fail-fast)</h2>
+<table>
+  <tr><th>#</th><th>Stage</th><th>Checks / produces</th></tr>
+  <tr><td>1</td><td>ValidateConfig</td><td>All declared env vars present + typed</td></tr>
+  <tr><td>2</td><td>DetectConflicts</td><td>No two modules <code>solves()</code> the same domain</td></tr>
+  <tr><td>3</td><td>DetectCycles</td><td>No circular <code>requires[]</code></td></tr>
+  <tr><td>4</td><td>CompileServiceManifest</td><td><code>service-manifest.php</code></td></tr>
+  <tr><td>5</td><td>CompileRouteManifest</td><td><code>route-manifest.php</code> (validates <code>Controller@method</code>)</td></tr>
+  <tr><td>6</td><td>CompileJobManifest</td><td><code>job-manifest.php</code></td></tr>
+  <tr><td>7</td><td>CompileCommandManifest</td><td><code>command-manifest.php</code></td></tr>
+  <tr><td>8</td><td>RegisterPorts</td><td>Verify port bindings exist</td></tr>
+  <tr><td>9</td><td>BindSecurity</td><td>Verify security layers</td></tr>
+</table>
+
+<h2>5.3 Trace an HTTP request end to end</h2>
+<p>Follow <code>POST /api/tasks</code> through the running kernel:</p>
+<ol>
+  <li><strong>CorrelationIdStage</strong> — generates/propagates <code>X-Correlation-ID</code> so the whole request is traceable in logs.</li>
+  <li><strong>SecurityStage</strong> — runs the <code>SecurityGateway</code> over its layers (firewall → rate-limit → CSRF → auth). On <code>deny</code> it returns an HTTP error immediately — <span class="vs-good">no module is loaded</span>. On <code>allow</code> it attaches the <code>Identity</code> to the request. <em>after.security</em> hooks run here.</li>
+  <li><strong>ResolveStage</strong> — looks up <code>POST /api/tasks</code> in <code>route-manifest.php</code> via <code>RouteMatcher</code>, yielding the service/domain (<code>task.management</code>) and handler <code>TaskController@create</code>.</li>
+  <li><strong>LoadStage</strong> — <code>DependencyGraphCalculator</code> walks the service manifest to compute the transitive <code>requires[]</code> (Task → Database). <code>OnDemandLoader</code> builds a fresh <code>ModuleContainer</code>, registers the request-scoped kernel services (<code>Identity</code>, <code>DomainEventCollector</code>, <code>TransactionManager</code>) under public scope, then runs each module's <code>register()</code> under its own scope so <code>bindInternal()</code> isolation holds. <em>after.load</em> hooks run here.</li>
+  <li><strong>ExecuteStage</strong> — resolves <code>TaskController</code> via <code>makeInScope(..., 'task.management')</code>, builds the DTO from the request, calls the controller method, gets a <code>Response</code>. <em>after.execute</em> hooks run here.</li>
+  <li><strong>ErrorStage</strong> — wraps the whole chain; any <code>Throwable</code> is classified and routed through the <code>ErrorPipeline</code> to notifiers, returning a safe HTTP response.</li>
+  <li>The <code>ModuleContainer</code> is discarded — <span class="vs-good">zero state leaks</span>. Under Swoole, <code>requestTeardown()</code> is called.</li>
+</ol>
+<p>Hook priority bands: 1–9 system, 10–19 security, 40–59 feature, 80–99 observability.</p>
+
+<h2>5.4 Containers &amp; scope enforcement</h2>
+<p>Both extend <code>PHPShots\Common\Container</code> (the bind-it engine): reflection autowiring, contextual bindings, PSR-11.</p>
+<ul>
+  <li><strong>CoreContainer</strong> — app-lifetime, one per worker. Holds ports + kernel services. <code>freeze()</code> locks it after materialize; any write then throws <code>LogicException</code>. <code>getInstance()/setInstance()</code> are disabled — no global singleton.</li>
+  <li><strong>ModuleContainer</strong> — request-scoped, new per request/job, discarded after. <code>bindInternal()</code> enforces scope: resolving an internal binding from outside its owning module throws <code>ScopeViolationException</code>. <code>makeInScope($class, $domain)</code> resolves with an explicit caller scope (used by ExecuteStage). Call <code>reset()</code> at end-of-request under Swoole.</li>
+</ul>
+<pre>// From OnDemandLoader::loadWithIdentity() — request-scoped kernel services
+$container = new ModuleContainer($this->core);
+$container->setScope('');                                  // public scope
+$container->singleton(Identity::class, fn() => $identity ?? Identity::guest());
+$container->singleton(DomainEventCollector::class, fn() => new DomainEventCollector());
+$container->singleton(TransactionManager::class,
+    fn() => new TransactionManager($this->core->make(DatabasePort::class)));
+// then each module's register() runs under its own scope</pre>
+
+<h2>5.5 WALKTHROUGH — extending the kernel</h2>
+<h4>Adding a new port (e.g. a SearchPort)</h4>
+<ol>
+  <li>Define the interface in <code>src/Kernel/Ports/SearchPort.php</code> — methods only, no implementation.</li>
+  <li>Provide an adapter in a plugin (e.g. <code>plugins/Search/Infrastructure/ElasticAdapter.php</code>) implementing it.</li>
+  <li>Bind it in a project's <code>base.php</code>: <code>->withPorts([SearchPort::class => fn() => new ElasticAdapter(env('ES_URL'))])</code>.</li>
+  <li>Consuming modules inject <code>SearchPort</code> in their repository/gateway via DI. The kernel never references the adapter.</li>
+</ol>
+<div class="warn">A port is for STATELESS app-lifetime infrastructure only. Anything request-scoped must be an essential or on-demand module, never a port.</div>
+<h4>Adding a boot validation stage</h4>
+<ol>
+  <li>Create a stage under <code>src/Kernel/Boot/Stages/</code> implementing the boot-stage contract; throw <code>BootException</code> on failure (fail fast).</li>
+  <li>Register it in the <code>BootPipeline</code> stage list, in the correct order (validation before compilation).</li>
+  <li>Keep it domain-agnostic — it may only reason about manifests, ports, and config, never a specific business module.</li>
+</ol>
+
+<h2>5.6 Security gateway internals</h2>
+<pre>Request → FirewallLayer → RateLimiterLayer → CsrfTokenLayer → [Auth layer] → pipeline
+              ↓ deny(403)      ↓ deny(429)        ↓ deny(403)      ↓ deny(401)
+          ZERO module cost at every denial</pre>
+<p>A layer implements <code>check(Request): SecurityVerdict</code> and <strong>never throws</strong> — it returns <code>allow()</code> or <code>deny(code, reason)</code>. Layers are ordered cheapest-first so the cheapest rejection happens earliest. Authorization (role/permission checks) belongs in the <em>Service</em> layer, not the gateway. The kernel ships no JWT validator — token auth is provided by a project's Auth module as a layer hook registered in <code>boot()</code>.</p>
+
+<h1 class="sec">6. The Five Access Rules &amp; Exception Hierarchy</h1>
+<p>Absolute, enforced at runtime by <code>ModuleContainer::bindInternal()</code>. Violations throw <code>ScopeViolationException</code>.</p>
+<pre>Controller  →  Service     (published contract interface ONLY)
+Service     →  Repository AND Gateway  (the ONLY layer calling both)
+Repository  →  DatabasePort ONLY       (no HTTP, no vendor SDK)
+Gateway     →  Vendor SDK ONLY         (no DB, no services)
+Domain      →  NOTHING EXTERNAL        (zero imports outside Domain/)</pre>
+<table>
+  <tr><th>Layer</th><th>Throws</th><th>Translates from</th><th>HTTP</th></tr>
+  <tr><td>Domain</td><td><code>\DomainException</code> (built-in)</td><td>—</td><td>422</td></tr>
+  <tr><td>Service</td><td><code>ServiceException</code></td><td>any caught Throwable</td><td>422/500</td></tr>
+  <tr><td>Repository</td><td><code>RepositoryException</code></td><td><code>\PDOException</code></td><td>500</td></tr>
+  <tr><td>Gateway</td><td><code>GatewayException</code></td><td>ALL vendor exceptions</td><td>502</td></tr>
+  <tr><td>Security</td><td>never throws — <code>SecurityVerdict::deny()</code></td><td>—</td><td>401/403</td></tr>
+</table>
+<p>Error response body shape is always: <code>{ "error": { "code", "message", "requestId", "fields"? } }</code>.</p>
+
+<h1 class="sec">7. Quick Reference &amp; Checklists</h1>
+<h3>App-builder checklist (shipping a feature)</h3>
+<ul>
+  <li>Routes go in <code>module.json</code>, never in PHP.</li>
+  <li>Every env var a module reads is declared in its <code>config[]</code>.</li>
+  <li>Read config with <code>env()</code>, never <code>getenv()</code>.</li>
+  <li>Money is a <code>Money</code> value object with integer cents — never float.</li>
+  <li>Integration events dispatch only AFTER commit, never inside <code>try{}</code>.</li>
+  <li>Always <code>collector->discard()</code> in the catch block.</li>
+  <li>Controllers are max 3 lines: DTO → service → Response.</li>
+  <li>Local modules live in <code>plugins/</code> with the <code>Plugins\</code> namespace, full handler paths.</li>
+</ul>
+<h3>Contributor checklist (changing the kernel)</h3>
+<ul>
+  <li>Keep the kernel domain-agnostic — no business logic, no module names.</li>
+  <li>New boot validation → add a fail-fast stage to the BootPipeline.</li>
+  <li>Respect <code>freeze()</code> — no writes to the core after materialize.</li>
+  <li>Request-scoped state never lives on CoreContainer (leaks across Swoole requests).</li>
+  <li>No static properties in request-scoped classes.</li>
+  <li>Translate vendor exceptions at their layer — none escape.</li>
+</ul>
+
+<!-- ================= FRENCH ================= -->
+<div class="lang-divider">
+  <h1>Version Française</h1>
+  <p>Guide du Kernel — Architecture à Demande Contrôlée (GDA)</p>
+</div>
+
+<h1 class="sec">Table des matières</h1>
+<div class="toc">
+<ol>
+  <li>1. Ce qu'est le Kernel et pourquoi il existe</li>
+  <li>2. Pourquoi GDA — bénéfices et différences vs autres frameworks</li>
+  <li>3. Le cycle de vie — configure → build → materialize</li>
+  <li>4. Développeurs : utiliser le Kernel étape par étape
+    <ol>
+      <li>4.1 Le constructeur fluide</li>
+      <li>4.2 Ports vs essentiels vs à la demande</li>
+      <li>4.3 Points d'entrée</li>
+      <li>4.4 TUTORIEL : créer un module de zéro (8 étapes)</li>
+      <li>4.5 Jobs Worker et commandes CLI</li>
+      <li>4.6 Tester un service</li>
+    </ol>
+  </li>
+  <li>5. Contributeurs : fonctionnement interne du Kernel
+    <ol>
+      <li>5.1 build() vs materialize()</li>
+      <li>5.2 Le pipeline de démarrage à 9 étapes</li>
+      <li>5.3 Tracer une requête HTTP de bout en bout</li>
+      <li>5.4 Conteneurs et portées</li>
+      <li>5.5 GUIDE PRATIQUE : ajouter un port / une étape</li>
+      <li>5.6 Intérieur de la passerelle de sécurité</li>
+    </ol>
+  </li>
+  <li>6. Les cinq règles d'accès et la hiérarchie d'exceptions</li>
+  <li>7. Référence rapide et listes de contrôle</li>
+</ol>
+</div>
+
+<h1 class="sec">1. Ce qu'est le Kernel et pourquoi il existe</h1>
+<p>Le <strong>Kernel</strong> est le cœur du framework AlfacodeTeam PhpServicePlatform — un noyau compact et indépendant de tout domaine métier qui démarre une application, exécute la sécurité <em>avant</em> tout code métier, charge uniquement les modules nécessaires à une requête, et achemine le travail à travers trois pipelines : HTTP, CLI et Worker.</p>
+<p>Il repose sur l'<strong>Architecture à Demande Contrôlée (GDA)</strong> : la sécurité <em>contrôle</em> chaque requête, et les modules sont chargés à la <em>demande</em>, de sorte qu'une requête ne paie que ce qu'elle utilise réellement.</p>
+
+<h3>Le problème résolu</h3>
+<p>La plupart des frameworks complets démarrent l'application <em>entière</em> à chaque requête : tous les service providers s'enregistrent, toutes les routes sont compilées, tous les middlewares sont construits — puis une requête est appariée et l'essentiel de ce travail est jeté. GDA inverse cela : il compile une image statique de l'app une fois (manifestes), puis à l'exécution ne charge <em>que</em> les modules du graphe de dépendances de la route. Une requête bloquée (pare-feu, CSRF, limite) coûte <strong>zéro travail module</strong> car la sécurité s'exécute avant tout chargement.</p>
+
+<table>
+  <tr><th>Principe</th><th>Signification</th></tr>
+  <tr><td>La sécurité avant tout</td><td>La SecurityGateway s'exécute avant tout module. Refusé = coût module nul.</td></tr>
+  <tr><td>Charger seulement le nécessaire</td><td>Seuls les modules requis pour cette requête précise sont chargés.</td></tr>
+  <tr><td>Un module, un domaine</td><td>Chaque module possède exactement un domaine métier.</td></tr>
+  <tr><td>Isolation par défaut</td><td>Les modules n'accèdent pas aux internes des autres — imposé à l'exécution.</td></tr>
+  <tr><td>Indépendance de l'infrastructure</td><td>Le kernel définit des interfaces de ports ; le projet fournit les implémentations.</td></tr>
+  <tr><td>L'explicite plutôt que l'implicite</td><td>Tout est déclaré dans <code>module.json</code>. Rien n'est auto-découvert.</td></tr>
+</table>
+
+<h3>Les trois mondes</h3>
+<pre>┌─────────────────────────────────────────────────┐
+│  COUCHE PROJET  (câblage seul — aucune logique)  │
+│  ┌─────────────────────────────────────────────┐ │
+│  │  COUCHE MODULE  (contextes de domaine bornés)│ │
+│  │  ┌───────────────────────────────────────┐  │ │
+│  │  │  KERNEL  (démarrage, sécurité,        │  │ │
+│  │  │  chargement, pipelines, DI, événements)│  │ │
+│  │  └───────────────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────┘</pre>
+<ul>
+  <li><strong>Kernel</strong> — ne connaît ni les modules ni les domaines. Change rarement.</li>
+  <li><strong>Module</strong> — ne connaît pas le projet. Se raccorde au kernel via des contrats uniquement.</li>
+  <li><strong>Projet</strong> — connaît tout, ne contient aucune logique métier. Câblage uniquement.</li>
+</ul>
+
+<div class="audience"><strong>Comment lire ce guide.</strong> Développeurs / utilisateurs → chapitres 3, 4, 6, 7. Contributeurs internes → tout, surtout le chapitre 5. Les deux publics gagnent à lire le chapitre 2.</div>
+
+<h1 class="sec">2. Pourquoi GDA — bénéfices et différences</h1>
+<p>Ce chapitre explique ce que GDA apporte que Laravel, Symfony ou Slim n'apportent pas, et les compromis.</p>
+
+<h2>2.1 Comparaison côte à côte</h2>
+<table>
+  <tr><th>Aspect</th><th>Laravel / Symfony (typique)</th><th>PhpServicePlatform (GDA)</th></tr>
+  <tr><td>Coût de démarrage par requête</td><td>Tous les providers s'enregistrent à chaque requête</td><td><span class="vs-good">Seul le graphe de la route se charge</span></td></tr>
+  <tr><td>Coût d'une requête bloquée</td><td>L'app démarre souvent avant l'auth</td><td><span class="vs-good">La sécurité d'abord — refusé = 0 coût</span></td></tr>
+  <tr><td>Routes</td><td>Fichiers PHP / annotations</td><td>Déclarées dans <code>module.json</code></td></tr>
+  <tr><td>Isolation des modules</td><td>Convention ; tout service est global</td><td><span class="vs-good">Imposée à l'exécution — lève si violée</span></td></tr>
+  <tr><td>Modélisation de l'argent</td><td>Flottants et modèles ORM fréquents</td><td>Objets valeur en centimes entiers</td></tr>
+  <tr><td>Couplage à l'infra</td><td>Façades / helpers globaux</td><td>Ports + DI uniquement ; pas de singleton global</td></tr>
+  <tr><td>Sûreté Swoole</td><td>Fuites d'état global entre requêtes</td><td><span class="vs-good">Noyau figé ; état requête jeté</span></td></tr>
+  <tr><td>Distribution native</td><td>Nécessite PHP + Composer + vendor/</td><td>Paquets OS natifs (.deb / .zip / .tar.gz)</td></tr>
+</table>
+
+<h2>2.2 Les bénéfices concrets</h2>
+<h4>1 — Performance à l'usage</h4>
+<p>Une requête vers <code>/api/tasks</code> charge le module Task et ses <code>requires[]</code> — et rien d'autre. Sous OpenSwoole, le <code>CoreContainer</code> est construit une fois par worker ; seul le <code>ModuleContainer</code> à portée requête est reconstruit.</p>
+<h4>2 — Une sécurité non contournable</h4>
+<p>La SecurityGateway étant une étape avant ResolveStage/LoadStage, un 403/429 court-circuite la requête sans qu'aucun module soit construit. Impossible d'« oublier le middleware d'auth sur une route ».</p>
+<h4>3 — Architecture imposée par l'exécution, pas par la revue de code</h4>
+<p>Les cinq règles d'accès ne sont pas un guide de style — <code>bindInternal()</code> lève physiquement <code>ScopeViolationException</code> si un contrôleur atteint le repository d'un autre module.</p>
+<h4>4 — Testabilité par construction</h4>
+<p>Les services dépendent de ports et de contrats, jamais d'infra concrète : un test substitue <code>InMemoryRepository</code> / <code>FakeTransactionManager</code> sans aucun amorçage du framework.</p>
+<h4>5 — Déploiement honnête</h4>
+<p>Le kernel peut être livré en paquet OS natif sans <code>vendor/</code>, car le chargement d'env, le filet d'erreur et le runtime CLI sont du code maison à faibles dépendances.</p>
+
+<div class="warn"><strong>Le compromis (soyons honnêtes) :</strong> GDA demande plus de structure en amont — un domaine par module, des contrats aux frontières, des manifestes, une config déclarée. Pour un petit site CRUD, c'est du surcoût. Le gain apparaît quand le système dépasse le point où un framework « mets ça dans un contrôleur » devient un enchevêtrement. Choisissez GDA pour des plateformes, pas pour des prototypes jetables.</div>
+
+<h1 class="sec">3. Le cycle de vie du Kernel</h1>
+<table>
+  <tr><th>Phase</th><th>Méthode</th><th>Ce qui se passe</th></tr>
+  <tr><td>1. Configurer</td><td><code>Kernel::configure()</code> + <code>with*()</code></td><td>Collecte ports, sécurité, modules, pipeline d'erreur, chemins. Déclaration pure.</td></tr>
+  <tr><td>2. Construire</td><td><code>->build()</code></td><td>Exécute le BootPipeline : valide la config et <strong>compile les manifestes</strong>. Compilation seule.</td></tr>
+  <tr><td>3. Matérialiser</td><td>premier <code>http()</code> / <code>cli()</code> / <code>workerLoop()</code></td><td>Construit les pipelines, câble chaque module UNE fois, expose les services, puis <strong>fige</strong> le noyau.</td></tr>
+</table>
+<div class="note"><strong>Pourquoi séparer build et materialize ?</strong> <code>build()</code> est peu coûteux et exécutable en CI. <code>materialize()</code> est paresseux et spécifique à la surface : un processus HTTP ne lit jamais le manifeste des jobs. Le premier point d'entrée décide du <code>RuntimeMode</code>.</div>
+<pre>Kernel::configure()->withPorts([...])->withModules([...])->build();
+$kernel->http();    // matérialise(RuntimeMode::Http), retourne HttpPipeline
+$kernel->mode();    // RuntimeMode::Http (null avant tout point d'entrée)</pre>
+
+<h1 class="sec">4. Développeurs : utiliser le Kernel</h1>
+<p class="small">Public : développeurs d'applications / utilisateurs.</p>
+
+<h2>4.1 Le constructeur fluide</h2>
+<div class="filename">app/bootstrap/base.php — base partagée (SANS ->build())</div>
+<pre>return Kernel::configure()
+    ->withBasePath(dirname(__DIR__, 2))
+    ->withPorts([
+        DatabasePort::class => fn() => new PdoDatabase(dsn: env('DB_DSN')),
+        CachePort::class    => fn() => new InMemoryCache(),
+    ])
+    ->withSecurity([ new CsrfTokenLayer(exemptPaths: ['/api']) ])
+    ->withModules([ CryptoProvider::class, DatabaseProvider::class ])
+    ->withEssentialModules([ SessionProvider::class, CookieProvider::class ]);</pre>
+<div class="filename">projects/admin/bootstrap/app.php — projet concret</div>
+<pre>$builder = require __DIR__ . '/../../../app/bootstrap/base.php';
+return $builder
+    ->withProjectPath(dirname(__DIR__))
+    ->withModules([AuthModule::class, InvoiceModule::class])
+    ->build();</pre>
+<table>
+  <tr><th>Méthode</th><th>Fusion</th><th>Usage</th></tr>
+  <tr><td><code>withPorts</code></td><td>Fusionne ; dernière clé gagne</td><td>Infra. Une <code>Closure</code> = singleton paresseux (construit au 1er usage).</td></tr>
+  <tr><td><code>withSecurity</code></td><td>Ajoute</td><td>Couches, la moins coûteuse d'abord.</td></tr>
+  <tr><td><code>withModules</code></td><td>Ajoute + dédoublonne</td><td>Modules à la demande.</td></tr>
+  <tr><td><code>withEssentialModules</code></td><td>Ajoute + dédoublonne</td><td>Infra à portée requête nécessaire partout.</td></tr>
+</table>
+
+<h2>4.2 Ports vs essentiels vs à la demande</h2>
+<div class="note"><strong>Règle :</strong> sans état + toujours → <strong>port</strong>. Avec état + toujours → <strong>module essentiel</strong>. Nécessaire à certaines routes → <strong>module à la demande</strong> avec <code>requires[]</code>.</div>
+<div class="warn">Ne jamais mettre d'état à portée requête sur un port (CoreContainer) — fuite entre requêtes sous OpenSwoole.</div>
+
+<h2>4.3 Points d'entrée</h2>
+<pre>$kernel->http()         // → HttpPipeline::handle(Request): Response
+$kernel->cli()          // → CliPipeline::run(argv): int
+$kernel->workerLoop()   // → WorkerLoop::run(callable $puller, int $maxIterations = 0)
+$kernel->container()    // → CoreContainer (matérialise en surface Cli)
+$kernel->requestTeardown() // après chaque requête sous OpenSwoole</pre>
+
+<h2>4.4 TUTORIEL — créer un module de zéro (8 étapes)</h2>
+<p>Nous reconstruisons le plugin réel <strong>Task</strong>, dans <code>plugins/Task/</code> sous l'espace de noms <code>Plugins\Task\</code>, possédant le domaine <code>task.management</code>.</p>
+
+<h4>Étape 1 — Déclarer dans module.json (source unique de vérité)</h4>
+<pre>{
+  "name": "task", "solves": "task.management", "type": "module",
+  "requires": ["database.query"],
+  "exposes":  ["Plugins\\Task\\API\\Contracts\\TaskServiceContract"],
+  "routes": [
+    { "method": "POST", "path": "/api/tasks",
+      "handler": "Plugins\\Task\\Infrastructure\\Http\\TaskController@create" }
+  ],
+  "emits": ["task.created"], "config": []
+}</pre>
+<p class="small">Les routes sont déclarées ICI UNIQUEMENT. Chaque variable d'env lue doit figurer dans <code>config[]</code> sinon le démarrage échoue.</p>
+
+<h4>Étape 2 — L'entité de domaine (zéro import externe)</h4>
+<pre>final class Task
+{
+    private array $domainEvents = [];
+    private function __construct(
+        private readonly TaskId $id, private string $title, private TaskStatus $status) {}
+
+    public static function create(string $title): self {   // ctor nommé — enregistre l'événement
+        $t = new self(TaskId::generate(), $title, TaskStatus::PENDING);
+        $t->domainEvents[] = new TaskCreatedDomainEvent($t->id, $title, new \DateTimeImmutable());
+        return $t;
+    }
+    public function markCompleted(): void {
+        if ($this->status === TaskStatus::COMPLETED) throw new \DomainException('Déjà terminé');
+        $this->status = TaskStatus::COMPLETED;
+    }
+    public function releaseEvents(): array {
+        $e = $this->domainEvents; $this->domainEvents = []; return $e;
+    }
+}</pre>
+
+<h4>Étape 3 — Le contrat publié (seul élément importable par d'autres modules)</h4>
+<pre>interface TaskServiceContract {
+    public function list(): array;
+    public function create(CreateTaskDTO $dto): TaskDTO;
+    public function find(string $id): ?TaskDTO;
+    public function complete(string $id): ?TaskDTO;
+    public function delete(string $id): bool;
+}</pre>
+
+<h4>Étape 4 — Le repository (DatabasePort uniquement, scope tenant)</h4>
+<pre>final class TaskRepository {
+    public function __construct(
+        private readonly DatabasePort $db, private readonly Identity $identity) {}
+
+    public function find(string $id): ?Task {
+        try {
+            $row = $this->db->queryOne('SELECT * FROM tasks WHERE id=:id AND tenant_id=:t',
+              ['id'=>$id,'t'=>$this->identity->tenantId]);
+        } catch (\PDOException $e) {
+            throw new RepositoryException("find task [{$id}]", layer:'repository.task', previous:$e);
+        }
+        return $row === null ? null : TaskHydrator::hydrate($row);
+    }
+}</pre>
+
+<h4>Étape 5 — Le service applicatif (forme transaction + événements obligatoire)</h4>
+<p>Ordre exact : début collection → début tx → travail → commit ; en échec rollback <em>et</em> discard ; diffusion des événements d'intégration UNIQUEMENT après commit, jamais dans <code>try{}</code>.</p>
+<pre>public function create(CreateTaskDTO $dto): TaskDTO {
+    $this->collector->beginCollection();
+    $this->transaction->begin();
+    try {
+        $task = Task::create($dto->title);
+        foreach ($task->releaseEvents() as $event) $this->collector->collect($event);
+        $this->repository->save($task);
+        $this->transaction->commit();
+    } catch (\Throwable $e) {
+        $this->transaction->rollback();
+        $this->collector->discard();            // ← pas d'événement fantôme au rollback
+        throw new ServiceException('task.create.failed', layer:'service.task', previous:$e);
+    }
+    // APRÈS commit uniquement
+    $created = $this->firstCreatedEvent($this->collector->release());
+    if ($created !== null) {
+        $this->eventBus->dispatch(new TaskCreatedIntegrationEvent(
+            taskId: $created->taskId->value(), title: $created->title,
+            occurredAt: $created->occurredAt->format(\DateTimeInterface::RFC3339)));
+    }
+    return TaskDTO::fromEntity($task);
+}</pre>
+
+<h4>Étape 6 — Le contrôleur (3 lignes max par méthode)</h4>
+<pre>final class TaskController {
+    public function __construct(private readonly TaskServiceContract $tasks) {}  // contrat seul
+    public function create(Request $request): Response {
+        $task = $this->tasks->create(CreateTaskDTO::fromRequest($request));
+        return Response::json(['data' => $task->toArray()], 201);
+    }
+}</pre>
+
+<h4>Étape 7 — Le Provider : register() + boot()</h4>
+<pre>final class Provider implements ModuleContract {
+    public function solves(): string  { return 'task.management'; }
+    public function requires(): array { return [DatabasePort::class]; }
+    public function exposes(): array  { return [TaskServiceContract::class]; }
+
+    public function register(ModuleContainer $c): void {
+        $c->bindInternal(TaskRepository::class, static fn($c) =>
+            new TaskRepository($c->make(DatabasePort::class), $c->make(Identity::class)));
+        $c->bind(TaskServiceContract::class, static fn($c) =>
+            new TaskService(
+                repository: $c->make(TaskRepository::class),
+                transaction: $c->make(TransactionManager::class),
+                collector: $c->make(DomainEventCollector::class),
+                eventBus: $c->make(EventBus::class),
+                identity: $c->make(Identity::class)));
+    }
+    public function boot(HttpPipeline $http, CliPipeline $cli,
+                         WorkerPipeline $worker, EventBus $events): void { /* hooks + abonnements */ }
+}</pre>
+
+<h4>Étape 8 — Enregistrer le provider dans le projet</h4>
+<pre>// projects/admin/bootstrap/app.php
+return $builder->withModules([ \Plugins\Task\Provider::class ])->build();</pre>
+<div class="note">C'est tout le module. <code>build()</code> le valide et le compile dans les manifestes. La première requête HTTP vers <code>/api/tasks</code> le charge à la demande.</div>
+
+<h2>4.5 Jobs Worker et commandes CLI</h2>
+<pre>// module.json d'un job
+{ "type": "job", "queue": "emails",
+  "retry": { "max": 3, "strategy": "exponential", "jitter": true },
+  "timeout": 30, "requires": ["mail.port"] }
+
+final class SendInvoiceEmailJob implements JobContract {
+    public function handle(JobPayload $payload): JobResult {
+        return JobResult::success(['sent' => 1]);   // lever pour relancer
+    }
+    public function failed(JobPayload $payload, \Throwable $e): void { /* après max relances */ }
+}
+
+// Commande CLI (php-io-cli, PAS Symfony)
+final class SyncTasksCommand extends AbstractCommand {
+    protected string $signature = 'tasks:sync';
+    public function handle(): int { $this->output->success('Synchronisé.'); return 0; }
+}</pre>
+
+<h2>4.6 Tester un service (sans infra réelle)</h2>
+<pre>$sut    = new TaskService(new InMemoryTaskRepository(), new FakeTransactionManager(),
+                          new DomainEventCollector(), new FakeIntegrationEventBus(),
+                          Identity::asUser('user-1','tenant-abc'));
+$result = $sut->create(new CreateTaskDTO('Écrire le guide'));
+$this->assertTrue($txn->wasCommitted());
+$bus->assertDispatched(TaskCreatedIntegrationEvent::class, times: 1);</pre>
+
+<h1 class="sec">5. Contributeurs : fonctionnement interne</h1>
+<p class="small">Public : contributeurs internes. Mécanique interne de <code>src/Kernel/</code>.</p>
+
+<h2>5.1 build() vs materialize()</h2>
+<p><strong><code>build()</code></strong> crée un <code>CoreContainer</code>, enregistre chaque port en <code>singleton</code> paresseux ou <code>instance</code> immédiate, puis exécute le <code>BootPipeline</code>. Kernel marqué <code>built</code> mais non figé ; aucun pipeline encore.</p>
+<p><strong><code>materialize(RuntimeMode)</code></strong> (privé, une fois) construit <code>EventBus</code>, <code>WorkerPipeline</code>, <code>HttpPipeline</code> (avec <code>SecurityGateway</code>), <code>CliPipeline</code>, <code>WorkerLoop</code> ; les réexpose dans le noyau ; parcourt chaque module, instancie le provider, appelle <code>boot()</code> ; puis <code>core->freeze()</code>.</p>
+<div class="note">Les trois pipelines sont construits car l'unique <code>boot()</code> peut hooker n'importe lequel — mais chaque pipeline diffère ses E/S disque jusqu'à sa première exécution.</div>
+
+<h2>5.2 Le pipeline de démarrage (9 étapes, échec rapide)</h2>
+<table>
+  <tr><th>#</th><th>Étape</th><th>Vérifie / produit</th></tr>
+  <tr><td>1</td><td>ValidateConfig</td><td>Variables d'env présentes + typées</td></tr>
+  <tr><td>2</td><td>DetectConflicts</td><td>Pas deux modules pour le même <code>solves()</code></td></tr>
+  <tr><td>3</td><td>DetectCycles</td><td>Pas de <code>requires[]</code> circulaire</td></tr>
+  <tr><td>4–7</td><td>Compile*Manifest</td><td>Manifestes service / route / job / commande</td></tr>
+  <tr><td>8</td><td>RegisterPorts</td><td>Vérifie les liaisons de ports</td></tr>
+  <tr><td>9</td><td>BindSecurity</td><td>Vérifie les couches de sécurité</td></tr>
+</table>
+
+<h2>5.3 Tracer une requête HTTP de bout en bout</h2>
+<p>Suivons <code>POST /api/tasks</code> :</p>
+<ol>
+  <li><strong>CorrelationIdStage</strong> — génère/propage <code>X-Correlation-ID</code>.</li>
+  <li><strong>SecurityStage</strong> — exécute la <code>SecurityGateway</code> (pare-feu → limite → CSRF → auth). En <code>deny</code>, retour immédiat — <span class="vs-good">aucun module chargé</span>. En <code>allow</code>, l'<code>Identity</code> est attachée. Hooks <em>after.security</em> ici.</li>
+  <li><strong>ResolveStage</strong> — cherche la route dans <code>route-manifest.php</code> → domaine <code>task.management</code>, handler <code>TaskController@create</code>.</li>
+  <li><strong>LoadStage</strong> — <code>DependencyGraphCalculator</code> calcule le graphe transitif (Task → Database). <code>OnDemandLoader</code> bâtit un <code>ModuleContainer</code> neuf, enregistre les services à portée requête (<code>Identity</code>, <code>DomainEventCollector</code>, <code>TransactionManager</code>), puis exécute chaque <code>register()</code> sous sa propre portée. Hooks <em>after.load</em>.</li>
+  <li><strong>ExecuteStage</strong> — résout <code>TaskController</code> via <code>makeInScope(..., 'task.management')</code>, construit le DTO, appelle la méthode, obtient une <code>Response</code>. Hooks <em>after.execute</em>.</li>
+  <li><strong>ErrorStage</strong> — englobe tout ; tout <code>Throwable</code> est classé et routé vers l'<code>ErrorPipeline</code>.</li>
+  <li>Le <code>ModuleContainer</code> est jeté — <span class="vs-good">zéro fuite d'état</span>. Sous Swoole, <code>requestTeardown()</code> est appelé.</li>
+</ol>
+<p>Bandes de priorité : 1–9 système, 10–19 sécurité, 40–59 fonctionnalité, 80–99 observabilité.</p>
+
+<h2>5.4 Conteneurs et portées</h2>
+<ul>
+  <li><strong>CoreContainer</strong> — durée de vie app, un par worker. <code>freeze()</code> le verrouille ; toute écriture lève <code>LogicException</code>. <code>getInstance()/setInstance()</code> désactivés.</li>
+  <li><strong>ModuleContainer</strong> — portée requête, neuf par requête/job, jeté après. <code>bindInternal()</code> impose la portée : résoudre une liaison interne de l'extérieur lève <code>ScopeViolationException</code>. <code>makeInScope($class, $domain)</code> résout avec portée explicite. <code>reset()</code> en fin de requête sous Swoole.</li>
+</ul>
+
+<h2>5.5 GUIDE PRATIQUE — étendre le kernel</h2>
+<h4>Ajouter un port (ex. SearchPort)</h4>
+<ol>
+  <li>Définir l'interface dans <code>src/Kernel/Ports/SearchPort.php</code> — méthodes seulement.</li>
+  <li>Fournir un adaptateur dans un plugin l'implémentant.</li>
+  <li>Le lier dans <code>base.php</code> : <code>->withPorts([SearchPort::class => fn() => new ElasticAdapter(env('ES_URL'))])</code>.</li>
+  <li>Les modules consommateurs injectent <code>SearchPort</code> par DI. Le kernel ne référence jamais l'adaptateur.</li>
+</ol>
+<div class="warn">Un port est pour de l'infra SANS état à durée de vie app. Tout ce qui est à portée requête doit être un module essentiel ou à la demande.</div>
+<h4>Ajouter une étape de validation au démarrage</h4>
+<ol>
+  <li>Créer une étape sous <code>src/Kernel/Boot/Stages/</code> ; lever <code>BootException</code> en échec.</li>
+  <li>L'enregistrer dans le <code>BootPipeline</code> dans le bon ordre (validation avant compilation).</li>
+  <li>La garder indépendante du domaine — manifestes/ports/config seulement.</li>
+</ol>
+
+<h2>5.6 Intérieur de la passerelle de sécurité</h2>
+<pre>Requête → FirewallLayer → RateLimiterLayer → CsrfTokenLayer → [couche Auth] → pipeline
+               ↓ deny(403)     ↓ deny(429)        ↓ deny(403)      ↓ deny(401)
+           COÛT MODULE NUL à chaque refus</pre>
+<p>Une couche implémente <code>check(Request): SecurityVerdict</code> et <strong>ne lève jamais</strong>. L'autorisation (rôles/permissions) appartient à la couche <em>Service</em>. Le kernel ne fournit aucun validateur JWT — l'auth par jeton vient du module Auth du projet, sous forme de hook enregistré dans <code>boot()</code>.</p>
+
+<h1 class="sec">6. Les cinq règles d'accès et la hiérarchie d'exceptions</h1>
+<p>Absolues, imposées à l'exécution par <code>ModuleContainer::bindInternal()</code>. Violation → <code>ScopeViolationException</code>.</p>
+<pre>Contrôleur  →  Service     (interface de contrat publiée UNIQUEMENT)
+Service     →  Repository ET Gateway  (la SEULE couche appelant les deux)
+Repository  →  DatabasePort UNIQUEMENT  (pas de HTTP, pas de SDK)
+Gateway     →  SDK fournisseur UNIQUEMENT  (pas de BD, pas de services)
+Domaine     →  RIEN D'EXTERNE            (zéro import hors de Domain/)</pre>
+<table>
+  <tr><th>Couche</th><th>Lève</th><th>Traduit depuis</th><th>HTTP</th></tr>
+  <tr><td>Domaine</td><td><code>\DomainException</code></td><td>—</td><td>422</td></tr>
+  <tr><td>Service</td><td><code>ServiceException</code></td><td>tout Throwable capté</td><td>422/500</td></tr>
+  <tr><td>Repository</td><td><code>RepositoryException</code></td><td><code>\PDOException</code></td><td>500</td></tr>
+  <tr><td>Gateway</td><td><code>GatewayException</code></td><td>TOUTES les exceptions fournisseur</td><td>502</td></tr>
+  <tr><td>Sécurité</td><td>ne lève jamais — <code>deny()</code></td><td>—</td><td>401/403</td></tr>
+</table>
+
+<h1 class="sec">7. Référence rapide et listes de contrôle</h1>
+<h3>Liste pour développeurs (livrer une fonctionnalité)</h3>
+<ul>
+  <li>Les routes vont dans <code>module.json</code>, jamais en PHP.</li>
+  <li>Chaque variable d'env lue est déclarée dans <code>config[]</code>.</li>
+  <li>Lire la config avec <code>env()</code>, jamais <code>getenv()</code>.</li>
+  <li>L'argent est un objet valeur <code>Money</code> en centimes entiers — jamais flottant.</li>
+  <li>Les événements d'intégration ne se diffusent qu'APRÈS le commit.</li>
+  <li>Toujours <code>collector->discard()</code> dans le bloc catch.</li>
+  <li>Contrôleurs : 3 lignes max — DTO → service → Response.</li>
+  <li>Modules locaux dans <code>plugins/</code> avec l'espace de noms <code>Plugins\</code>.</li>
+</ul>
+<h3>Liste pour contributeurs (modifier le kernel)</h3>
+<ul>
+  <li>Garder le kernel indépendant du domaine.</li>
+  <li>Nouvelle validation → étape à échec rapide dans le BootPipeline.</li>
+  <li>Respecter <code>freeze()</code> — aucune écriture du noyau après materialize.</li>
+  <li>L'état à portée requête ne vit jamais sur le CoreContainer.</li>
+  <li>Pas de propriétés statiques dans les classes à portée requête.</li>
+  <li>Traduire les exceptions fournisseur à leur couche — aucune ne s'échappe.</li>
+</ul>
+
+<p class="small" style="margin-top:24px;">© AlfacodeTeam — PhpServicePlatform Kernel Guide · Expanded edition v2.0 · For internal contributors and framework users · EN/FR.</p>
+
+</body>
+</html>

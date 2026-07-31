@@ -131,14 +131,69 @@ return [
     })(),
 
     // HTTP Strict Transport Security. Emitted ONLY for TLS modes (ssl / both) —
-    // never for plain HTTP. `preload` is a long-lived commitment; enable only
-    // when you're sure. max_age is in seconds (default 1 year).
+    // never for plain HTTP. The DEVELOPMENT profile ALWAYS emits a short max-age
+    // (dev_max_age, default 300s) with no includeSubDomains and no preload, so a
+    // dev host is never pinned to HTTPS-for-a-year. PRODUCTION uses max_age (+ the
+    // flags below). `preload` is a long-lived, hard-to-reverse commitment — it is
+    // OPT-IN and never a silent default. max_age is in seconds (default 1 year).
     'hsts' => [
         'enabled'            => filter_var(env('EDGE_HSTS', 'true'), FILTER_VALIDATE_BOOL),
         'max_age'            => (int) (env('EDGE_HSTS_MAX_AGE') ?: 31536000),
+        'dev_max_age'        => (int) (env('EDGE_HSTS_DEV_MAX_AGE') ?: 300),
         'include_subdomains' => filter_var(env('EDGE_HSTS_SUBDOMAINS', 'true'), FILTER_VALIDATE_BOOL),
         'preload'            => filter_var(env('EDGE_HSTS_PRELOAD', 'false'), FILTER_VALIDATE_BOOL),
     ],
+
+    // Cross-Origin Resource Sharing for the generated vhosts. The wildcard is
+    // OPT-IN: `*` combined with `Allow-Headers: Authorization` on a host reachable
+    // beyond localhost lets any page a developer visits make authenticated
+    // cross-origin reads. Prefer an explicit origin allowlist (echoed back via a
+    // $http_origin map) over the wildcard.
+    //   EDGE_CORS         = off (default) | allowlist | wildcard
+    //   EDGE_CORS_ORIGINS = https://a.com,https://b.com   (allowlist mode)
+    'cors' => [
+        'mode'        => strtolower(trim((string) env('EDGE_CORS', 'off'))),
+        'origins'     => array_values(array_filter(array_map('trim', explode(',', (string) env('EDGE_CORS_ORIGINS', ''))))),
+        'methods'     => (string) (env('EDGE_CORS_METHODS') ?: 'GET, POST, PUT, DELETE, PATCH, OPTIONS'),
+        'headers'     => (string) (env('EDGE_CORS_HEADERS') ?: 'Content-Type, Authorization, X-Requested-With'),
+        'credentials' => filter_var(env('EDGE_CORS_CREDENTIALS', 'false'), FILTER_VALIDATE_BOOL),
+    ],
+
+    // Explicit TLS pinning for every generated TLS listener (both profiles).
+    // Relying on the nginx build defaults has historically left TLS 1.0/1.1 on.
+    // Keep stapling OFF for Cloudflare Origin CA certs (not publicly chained).
+    'ssl_hardening' => [
+        'protocols' => (string) (env('EDGE_SSL_PROTOCOLS') ?: 'TLSv1.2 TLSv1.3'),
+        'ciphers'   => (string) (env('EDGE_SSL_CIPHERS') ?: ''), // empty = built-in modern default
+        'stapling'  => filter_var(env('EDGE_SSL_STAPLING', 'false'), FILTER_VALIDATE_BOOL),
+    ],
+
+    // Directories denied (prefix-matched, before the static rule) so their files
+    // can never be served even with a whitelisted extension. Per-project because
+    // the right set is app-specific — `storage` is deliberately NOT in the default
+    // (a Laravel-style public/storage symlink serves intended uploads); add it via
+    // EDGE_DENY_DIRS where the app has no such symlink. Empty disables dir denies.
+    'deny_dirs' => (static function (): array {
+        $raw = env('EDGE_DENY_DIRS');
+        if ($raw === null || $raw === '') {
+            return ['vendor', 'node_modules', 'tests', '.git', '.github', 'bootstrap/cache'];
+        }
+        return array_values(array_filter(array_map('trim', explode(',', (string) $raw))));
+    })(),
+
+    // HTTP method allowlist emitted as a guard (`if ($request_method !~ …)`).
+    // Defaults to the full REST set because these apps use PUT/PATCH/DELETE;
+    // tighten to e.g. GET|HEAD|POST where an app only reads. Empty disables it.
+    'allowed_methods' => (string) (env('EDGE_ALLOWED_METHODS') ?: 'GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS'),
+
+    // error_log debug level is OPT-IN: it needs an nginx built --with-debug, is
+    // hugely verbose, and can log session ids/tokens. Default level is warn.
+    'debug_log' => filter_var(env('EDGE_NGINX_DEBUG_LOG', 'false'), FILTER_VALIDATE_BOOL),
+
+    // Emit the /nginx-status stub_status location on DEVELOPMENT hosts. Never
+    // emitted in production: behind the :443 SNI stream splitter every peer looks
+    // like 127.0.0.1, so `allow 127.0.0.1` would expose it to the whole internet.
+    'nginx_status' => filter_var(env('EDGE_NGINX_STATUS', 'true'), FILTER_VALIDATE_BOOL),
 
     // Backends the traffic is routed to.
     'upstreams' => [
@@ -171,6 +226,43 @@ return [
         'apache_test'   => (string) (env('EDGE_APACHE_TEST_CMD')   ?: 'apachectl configtest'),
         'apache_reload' => (string) (env('EDGE_APACHE_RELOAD_CMD') ?: 'apachectl graceful'),
     ],
+
+    // Force a single-server strategy, bypassing host auto-detection. Empty (the
+    // default) = auto-detect. Set to `nginx-only` to serve everything through
+    // nginx with NO Apache fallback, or `apache-only` for Apache with no fallback.
+    // Overridable per run with `edge:apply --nginx-only` / `--apache-only`.
+    'force_strategy' => (static function (): string {
+        $v = strtolower(trim((string) env('EDGE_FORCE_STRATEGY', '')));
+        return in_array($v, ['nginx-only', 'nginx', 'apache-only', 'apache'], true) ? $v : '';
+    })(),
+
+    // When both nginx and Apache are running and nginx ALREADY has an SNI stream
+    // splitter configured (a `stream {}` block using ssl_preread), reuse it rather
+    // than writing a second, conflicting splitter. Edge then emits only the
+    // internal backend vhosts AND merges the platform's public domains INTO that
+    // existing `map $ssl_preread_server_name` in place (host file untouched apart
+    // from a marked, idempotent managed sub-block). Set false to always write
+    // Edge's own stream block instead.
+    'reuse_stream' => filter_var(env('EDGE_REUSE_STREAM', 'true'), FILTER_VALIDATE_BOOL),
+
+    // The TLS port the nginx-only vhost LISTENS on. Empty/0 = auto: the public
+    // `listen` port (443) standalone, but the internal backend port (from
+    // upstreams.nginx, e.g. 444) when this host also runs an SNI `stream {}` router
+    // that already binds :443 — otherwise nginx fails to start (Address already in
+    // use). Auto-detected when an existing splitter is found; force with
+    // EDGE_BEHIND_SNI_ROUTER=1, or pin the port with EDGE_NGINX_SSL_PORT.
+    'nginx_ssl_port'    => (int) (env('EDGE_NGINX_SSL_PORT') ?: 0),
+    'behind_sni_router' => filter_var(env('EDGE_BEHIND_SNI_ROUTER', 'false'), FILTER_VALIDATE_BOOL),
+
+    // Emit per-site access_log / error_log in every vhost (both profiles). They
+    // matter most in production, where incidents are reconstructed across many
+    // domains on one host. Set false to fall back to nginx's single global log.
+    'per_site_logs' => filter_var(env('EDGE_PER_SITE_LOGS', 'true'), FILTER_VALIDATE_BOOL),
+
+    // The upstream NAME the merged domains map to inside the existing splitter —
+    // must match the `upstream { … }` in your nginx.conf (default `nginx_backend`,
+    // i.e. 127.0.0.1:444). Only used when reusing an existing stream splitter.
+    'stream_backend' => (string) (env('EDGE_STREAM_BACKEND') ?: 'nginx_backend'),
 
     // Reload the web server after writing (edge:apply). Can also be forced/ skipped
     // with CLI flags. Off by default so a bare `edge:apply` never touches a live

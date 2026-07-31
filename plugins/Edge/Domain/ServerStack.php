@@ -25,6 +25,10 @@ final readonly class ServerStack
         public bool $apacheActive,
         public bool $nginxHasBrotli = false,
         public array $apacheModules = [],
+        // The RUNNING nginx already declares an SNI stream splitter (a `stream {}`
+        // block using ssl_preread) in a file Edge does not manage. When true Edge
+        // reuses it instead of emitting a second, conflicting splitter.
+        public bool $nginxHasStreamConfig = false,
     ) {}
 
     /**
@@ -44,14 +48,20 @@ final readonly class ServerStack
     }
 
     /**
-     * Pick the routing strategy:
+     * Pick the routing strategy. A non-null $force is an EXPLICIT operator
+     * override (`--nginx-only` / `--apache-only`, or EDGE_FORCE_STRATEGY): the
+     * chosen single server is used verbatim with NO fallback, regardless of what
+     * else is running. Auto-detection (the default) is:
      *   both active  → stream if nginx has it, else nginx-only (nginx is front)
      *   nginx only   → nginx-only
      *   apache only  → apache-only
      *   neither      → none
      */
-    public function strategy(): Strategy
+    public function strategy(?Strategy $force = null): Strategy
     {
+        if ($force === Strategy::NginxOnly || $force === Strategy::ApacheOnly) {
+            return $force;
+        }
         if ($this->nginxActive && $this->apacheActive) {
             return $this->nginxHasStream ? Strategy::NginxStream : Strategy::NginxOnly;
         }
@@ -68,13 +78,14 @@ final readonly class ServerStack
     public function toArray(): array
     {
         return [
-            'nginx_installed'  => $this->nginxInstalled,
-            'nginx_active'     => $this->nginxActive,
-            'nginx_has_stream' => $this->nginxHasStream,
-            'nginx_has_brotli' => $this->nginxHasBrotli,
-            'apache_installed' => $this->apacheInstalled,
-            'apache_active'    => $this->apacheActive,
-            'strategy'         => $this->strategy()->value,
+            'nginx_installed'      => $this->nginxInstalled,
+            'nginx_active'         => $this->nginxActive,
+            'nginx_has_stream'     => $this->nginxHasStream,
+            'nginx_has_stream_cfg' => $this->nginxHasStreamConfig,
+            'nginx_has_brotli'     => $this->nginxHasBrotli,
+            'apache_installed'     => $this->apacheInstalled,
+            'apache_active'        => $this->apacheActive,
+            'strategy'             => $this->strategy()->value,
         ];
     }
 }

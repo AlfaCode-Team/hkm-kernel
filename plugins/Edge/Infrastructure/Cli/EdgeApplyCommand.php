@@ -34,6 +34,12 @@ use Plugins\Edge\API\Contracts\EdgeServiceContract;
  *   hkm edge:apply --no-ssl        # alias for --tls=none
  *   hkm edge:apply --tls=both      # plain :80 that 301-redirects to HTTPS (:443)
  *   hkm edge:apply --ssl-cert=/path/fullchain.pem --ssl-key=/path/privkey.pem
+ *
+ * Strategy override (default: auto-detect the running servers):
+ *   hkm edge:apply --nginx-only    # nginx serves everything, NO Apache fallback
+ *   hkm edge:apply --apache-only   # Apache serves everything, no fallback
+ * When both nginx and Apache run and nginx already has an SNI `stream {}` splitter,
+ * Edge REUSES it instead of writing a second one (disable with EDGE_REUSE_STREAM=0).
  */
 final class EdgeApplyCommand extends AbstractCommand
 {
@@ -59,6 +65,8 @@ final class EdgeApplyCommand extends AbstractCommand
         $this->addOption('no-ssl', '', 'Plain HTTP only, listen on :80 — alias for --tls=none');
         $this->addOption('ssl-cert', '', 'Path to the TLS certificate (overrides config ssl.cert)', true);
         $this->addOption('ssl-key', '', 'Path to the TLS private key (overrides config ssl.key)', true);
+        $this->addOption('nginx-only', '', 'Serve everything through nginx with NO Apache fallback (overrides auto-detection)');
+        $this->addOption('apache-only', '', 'Serve everything through Apache with no fallback (overrides auto-detection)');
     }
 
     protected function handle(): int
@@ -81,6 +89,13 @@ final class EdgeApplyCommand extends AbstractCommand
             return self::INVALID;
         }
 
+        $force = $this->resolveForce();
+        if ($force === false) {
+            $this->error('Pick at most ONE of --nginx-only or --apache-only.');
+
+            return self::INVALID;
+        }
+
         $result = $this->edge->apply(
             reload: $reload,
             dryRun: $dryRun,
@@ -90,6 +105,7 @@ final class EdgeApplyCommand extends AbstractCommand
             sslCert: $sslCert,
             sslKey: $sslKey,
             appEnv: $appEnv,
+            force: $force,
         );
 
         $this->reportHosts($result['hosts'] ?? null);
@@ -107,6 +123,7 @@ final class EdgeApplyCommand extends AbstractCommand
             $this->info('strategy: ' . $result['strategy'] . '  →  ' . $result['path'] . '  (' . ($result['sites'] ?? 0) . ' site(s))');
             $this->newLine();
             $this->muted($result['contents']);
+            $this->reportStream($result['stream'] ?? null, dryRun: true);
 
             return self::SUCCESS;
         }
@@ -115,6 +132,7 @@ final class EdgeApplyCommand extends AbstractCommand
         foreach ((array) ($result['steps'] ?? []) as $step) {
             $this->info('  - ' . $step);
         }
+        $this->reportStream($result['stream'] ?? null, dryRun: false);
 
         return self::SUCCESS;
     }
@@ -146,12 +164,65 @@ final class EdgeApplyCommand extends AbstractCommand
         };
     }
 
+    /**
+     * The forced strategy from --nginx-only / --apache-only: 'nginx-only' |
+     * 'apache-only', null when neither was given (auto-detect), or false when
+     * both were passed (mutually exclusive).
+     */
+    private function resolveForce(): string|false|null
+    {
+        $picked = array_keys(array_filter([
+            'nginx-only'  => $this->hasOption('nginx-only'),
+            'apache-only' => $this->hasOption('apache-only'),
+        ]));
+
+        return match (\count($picked)) {
+            0       => null,
+            1       => $picked[0],
+            default => false,
+        };
+    }
+
     /** A value-accepting option as a non-empty string, or null (unset / bare flag). */
     private function stringOption(string $name): ?string
     {
         $value = $this->option($name);
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Report the in-place merge into the host's existing SNI stream splitter.
+     *
+     * @param array<string, mixed>|null $stream
+     */
+    private function reportStream(?array $stream, bool $dryRun): void
+    {
+        if ($stream === null) {
+            return;
+        }
+        $file    = (string) ($stream['file'] ?? '?');
+        $added   = (array) ($stream['added'] ?? []);
+        $present = (array) ($stream['present'] ?? []);
+
+        if (($stream['ok'] ?? false) !== true) {
+            $this->warning('stream: could NOT update ' . $file . ' — ' . ($stream['message'] ?? 'error'));
+
+            return;
+        }
+        if ($present !== []) {
+            $this->muted('stream: ' . \count($present) . ' domain(s) already in the map (left untouched)');
+        }
+        if ($added === []) {
+            $this->info('stream: ' . $file . ' already current — no domains to add');
+
+            return;
+        }
+        $verb = $dryRun ? 'would merge' : 'merged';
+        $this->info("stream: {$verb} " . \count($added) . " domain(s) into {$file} → nginx_backend");
+        foreach ($added as $d) {
+            $this->muted('  + ' . $d);
+        }
     }
 
     /** @param array<string, mixed>|null $hosts */
