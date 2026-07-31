@@ -80,19 +80,40 @@ final class RefreshTokenRepository implements RefreshTokenStore
             throw new RepositoryException('Failed to list refresh tokens', layer: 'repository.oauth', previous: $e);
         }
 
-        return array_map(static function (array $row): RefreshToken {
-            $scopes = json_decode((string) ($row['scopes'] ?? '[]'), true);
+        return array_map($this->hydrate(...), $rows);
+    }
 
-            return RefreshToken::of(
-                id:        (string) $row['id'],
-                familyId:  (string) $row['family_id'],
-                clientId:  (string) $row['client_id'],
-                userId:    (string) $row['user_id'],
-                scopes:    is_array($scopes) ? array_values(array_filter($scopes, 'is_string')) : [],
-                expiresAt: new \DateTimeImmutable((string) $row['expires_at']),
-                revoked:   (bool) $row['revoked'],
+    /** @return list<RefreshToken> every active grant in the tenant (admin view). */
+    public function allActive(): array
+    {
+        try {
+            $rows = $this->db->query(
+                'SELECT * FROM oauth_refresh_tokens
+                 WHERE revoked = 0 AND expires_at > :now
+                 ORDER BY expires_at DESC',
+                ['now' => (new \DateTimeImmutable())->format('Y-m-d H:i:s')],
             );
-        }, $rows);
+        } catch (\PDOException $e) {
+            throw new RepositoryException('Failed to list refresh tokens', layer: 'repository.oauth', previous: $e);
+        }
+
+        return array_map($this->hydrate(...), $rows);
+    }
+
+    /** @param array<string,mixed> $row */
+    private function hydrate(array $row): RefreshToken
+    {
+        $scopes = json_decode((string) ($row['scopes'] ?? '[]'), true);
+
+        return RefreshToken::of(
+            id:        (string) $row['id'],
+            familyId:  (string) $row['family_id'],
+            clientId:  (string) $row['client_id'],
+            userId:    (string) $row['user_id'],
+            scopes:    is_array($scopes) ? array_values(array_filter($scopes, 'is_string')) : [],
+            expiresAt: new \DateTimeImmutable((string) $row['expires_at']),
+            revoked:   (bool) $row['revoked'],
+        );
     }
 
     public function revokeIfActive(string $tokenId): bool

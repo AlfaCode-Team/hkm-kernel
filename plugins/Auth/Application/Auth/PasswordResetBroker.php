@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Plugins\Auth\Application\Auth;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
+use Plugins\Auth\API\Contracts\RefreshTokenServiceContract;
 use Plugins\Auth\Application\Ports\PasswordBroker;
+use Plugins\Auth\Application\Services\DeviceSessionService;
 use Plugins\User\API\Contracts\UserServiceContract;
 
 /**
@@ -21,6 +23,7 @@ final class PasswordResetBroker implements PasswordBroker
     private const TOKEN_PREFIX    = 'auth:pwreset:tok:';
     private const THROTTLE_PREFIX = 'auth:pwreset:thr:';
     private const OTP_PREFIX      = 'auth:pwreset:otp:';
+    private const ATTEMPT_PREFIX  = 'auth:pwreset:try:';
 
     public function __construct(
         private readonly UserServiceContract $users,
@@ -28,6 +31,12 @@ final class PasswordResetBroker implements PasswordBroker
         private readonly int $ttlSeconds = 3600,
         private readonly int $throttleSeconds = 60,
         private readonly int $otpTtlSeconds = 600,
+        /** Wrong-code guesses allowed per account before the OTP is burned. */
+        private readonly int $maxOtpAttempts = 5,
+        /** Optional — when bound, a reset revokes every refresh token. */
+        private readonly ?RefreshTokenServiceContract $refreshTokens = null,
+        /** Optional — when bound, a reset revokes every device session. */
+        private readonly ?DeviceSessionService $devices = null,
     ) {}
 
     public function sendResetLink(string $email): array
@@ -80,9 +89,24 @@ final class PasswordResetBroker implements PasswordBroker
             return self::INVALID_USER;
         }
 
+        // A reset is a compromise-recovery action, so every credential minted
+        // under the OLD password has to die with it — otherwise an attacker who
+        // is already signed in (or holds a refresh token) keeps access and the
+        // reset achieves nothing. UserService clears the remember-me token;
+        // refresh tokens and device sessions are Auth's own and are swept here.
+        //
+        // Deliberately BEFORE the token burn: if a sweep fails we do not report
+        // success, and the reset token stays valid so the user can retry. The
+        // password write is idempotent, so a retry is harmless.
+        $this->refreshTokens?->revokeAllForUser($user->id);
+        $this->devices?->revokeAll($user->id);
+
         // One-time use: burn the token (and the throttle) on success.
         $this->cache->delete(self::TOKEN_PREFIX . $this->key($email));
         $this->cache->delete(self::THROTTLE_PREFIX . $this->key($email));
+        // Also burn any OTP still outstanding for this account — the reset is
+        // done, so a code sitting in an inbox must not open a second window.
+        $this->cache->delete(self::OTP_PREFIX . $this->key($email));
 
         return self::PASSWORD_RESET;
     }
@@ -104,6 +128,8 @@ final class PasswordResetBroker implements PasswordBroker
             $otp . '|' . $result['token'],
             $this->otpTtlSeconds,
         );
+        // A newly issued code starts with a clean guess budget.
+        $this->cache->delete(self::ATTEMPT_PREFIX . $this->key((string) $result['email']));
 
         return ['otp' => $otp, 'email' => (string) $result['email']];
     }
@@ -111,7 +137,8 @@ final class PasswordResetBroker implements PasswordBroker
     public function verifyOtp(string $email, string $otp): ?string
     {
         $email  = mb_strtolower(trim($email));
-        $cached = $this->cache->get(self::OTP_PREFIX . $this->key($email));
+        $key    = $this->key($email);
+        $cached = $this->cache->get(self::OTP_PREFIX . $key);
 
         if (!is_string($cached) || $cached === '') {
             return null;
@@ -119,11 +146,28 @@ final class PasswordResetBroker implements PasswordBroker
 
         [$storedOtp, $token] = explode('|', $cached, 2) + [1 => ''];
         if ($token === '' || !hash_equals($storedOtp, trim($otp))) {
+            // Cap guesses PER ACCOUNT. The route throttle is per IP, and the code
+            // space is only 10^6 — a distributed guesser would otherwise get
+            // effectively unlimited tries inside the OTP's whole lifetime.
+            $attempts = $this->cache->increment(self::ATTEMPT_PREFIX . $key);
+
+            if ($attempts === 1) {
+                // Re-set with a TTL so a stale counter can never outlive the code
+                // and burn a LATER, legitimate OTP. increment() carries no TTL.
+                $this->cache->set(self::ATTEMPT_PREFIX . $key, 1, $this->otpTtlSeconds);
+            }
+
+            if ($attempts >= $this->maxOtpAttempts) {
+                $this->cache->delete(self::OTP_PREFIX . $key);
+                $this->cache->delete(self::ATTEMPT_PREFIX . $key);
+            }
+
             return null;
         }
 
         // Single-use: burn the OTP; the underlying token stays valid for reset().
-        $this->cache->delete(self::OTP_PREFIX . $this->key($email));
+        $this->cache->delete(self::OTP_PREFIX . $key);
+        $this->cache->delete(self::ATTEMPT_PREFIX . $key);
 
         return $token;
     }

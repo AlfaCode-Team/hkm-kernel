@@ -52,8 +52,11 @@ use Plugins\User\API\Contracts\UserServiceContract;
  * Grants: authorization_code (+PKCE), client_credentials, refresh_token,
  * password. Access tokens are JWTs signed with the SAME keys the platform's
  * JwtAuthLayer verifies, so issued tokens authenticate against the existing
- * SecurityGateway with no extra wiring. All control-plane tables (clients,
- * codes, refresh tokens, scopes) are pinned to the CENTRAL connection.
+ * SecurityGateway with no extra wiring. Every repository binds the per-request
+ * DatabasePort, so the server tables (clients, codes, refresh tokens, scopes,
+ * device codes) follow the request connection — TENANT-scoped under Tenancy,
+ * central in a single-DB deployment. The CLI has no request, so its commands
+ * take a --tenant option (see the deferred registration in boot()).
  *
  * Endpoints: /oauth/authorize, /oauth/token, /oauth/introspect, /oauth/revoke,
  * /oauth/jwks, /.well-known/oauth-authorization-server.
@@ -174,6 +177,7 @@ final class Provider implements ModuleContract
                 $c->make(ViewRendererContract::class),
                 $c->make(AuthorizationService::class),
                 $c->make(SessionPort::class),
+                $c->make(\Plugins\Pageflow\Http\PageflowResponder::class),
             ));
         $container->bindInternal(TokenController::class, static fn(ModuleContainer $c) =>
             new TokenController($c->make(TokenService::class)));
@@ -217,12 +221,32 @@ final class Provider implements ModuleContract
         $container->bindInternal(\Plugins\OAuth2\Infrastructure\Http\Controllers\AuthorizedTokenController::class, static fn(ModuleContainer $c) =>
             new \Plugins\OAuth2\Infrastructure\Http\Controllers\AuthorizedTokenController(
                 $c->make(RefreshTokenStore::class)));
+
+        // Tenant-wide ADMIN API (all clients / scopes / authorized grants).
+        // Gated on OAUTH_ADMIN_ROLE / OAUTH_ADMIN_USERS inside the controller.
+        $container->bindInternal(\Plugins\OAuth2\Infrastructure\Http\Controllers\AdminController::class, static fn(ModuleContainer $c) =>
+            new \Plugins\OAuth2\Infrastructure\Http\Controllers\AdminController(
+                $c->make(ClientStore::class),
+                $c->make(ScopeStore::class),
+                $c->make(RefreshTokenStore::class),
+                $c->make(HashingPort::class),
+                $c->make(UserServiceContract::class),
+            ));
+
+        // Admin dashboard (GET /oauth/admin) — rendered via Pageflow (component
+        // "OAuth2/Admin"); its page fetches the JSON admin API same-origin.
+        $container->bindInternal(\Plugins\OAuth2\Infrastructure\Http\Controllers\AdminUiController::class, static fn(ModuleContainer $c) =>
+            new \Plugins\OAuth2\Infrastructure\Http\Controllers\AdminUiController(
+                $c->make(\Plugins\Pageflow\Http\PageflowResponder::class)));
     }
 
     public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void
     {
-        // oauth:client:create — needs central-connection contracts the CoreContainer
-        // cannot autowire, so build a scoped container on the CLI path (deferred).
+        // OAuth2 data is tenant-scoped, but the CLI has no Host to route from —
+        // so the commands take a --tenant option. Build a scoped container on the
+        // CLI path (deferred so HTTP/worker builds never pay for it) and hand each
+        // command a TenantConnections resolver (central by default; a named tenant
+        // with --tenant, when the Tenancy plugin is present).
         $cli->defer(static function (CliPipeline $cli): void {
             $c = new ModuleContainer($cli->container());
             $c->setScope('database.management');
@@ -230,20 +254,46 @@ final class Provider implements ModuleContract
             $c->setScope((new \Plugins\Crypto\Provider())->solves());
             (new \Plugins\Crypto\Provider())->register($c);
 
-            $central = $c->make(DatabaseConnectionManagerContract::class)->default();
-            $clients = new ClientRepository($central);
-            $hasher  = $c->make(HashingPort::class);
+            $connections = self::tenantConnections($c);
+            $hasher      = $c->make(HashingPort::class);
 
-            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\CreateClientCommand($clients, $hasher));
-            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\ListClientsCommand($clients));
-            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\RevokeClientCommand($clients));
-            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\RotateClientSecretCommand($clients, $hasher));
-            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\PruneCommand(
-                new \Plugins\OAuth2\Infrastructure\Persistence\AuthCodeRepository($central),
-                new \Plugins\OAuth2\Infrastructure\Persistence\RefreshTokenRepository($central),
-                new \Plugins\OAuth2\Infrastructure\Persistence\DeviceCodeRepository($central),
-            ));
+            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\CreateClientCommand($connections, $hasher));
+            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\ListClientsCommand($connections));
+            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\RevokeClientCommand($connections));
+            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\RotateClientSecretCommand($connections, $hasher));
+            $cli->command(new \Plugins\OAuth2\Infrastructure\Cli\PruneCommand($connections));
         });
+    }
+
+    /**
+     * Build the CLI connection resolver: the central/default connection, plus the
+     * OPTIONAL Tenancy registry + resolver so `--tenant=<id|slug|db>` can target a
+     * tenant database. Tenancy is registered into the scoped container only when
+     * the plugin is present; otherwise the commands run central-only.
+     */
+    private static function tenantConnections(ModuleContainer $c): \Plugins\OAuth2\Infrastructure\Cli\TenantConnections
+    {
+        $central  = self::central($c);
+        $registry = null;
+        $resolver = null;
+
+        if (class_exists(\Plugins\Tenancy\Provider::class)) {
+            try {
+                // Tenancy's services depend on Audit (audit.trail); register it first.
+                $c->setScope((new \Plugins\Audit\Provider())->solves());
+                (new \Plugins\Audit\Provider())->register($c);
+                $c->setScope('tenancy.routing');
+                (new \Plugins\Tenancy\Provider())->register($c);
+
+                $registry = $c->make(\Plugins\Tenancy\API\Contracts\TenantRegistryContract::class);
+                $resolver = $c->make(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class);
+            } catch (\Throwable) {
+                $registry = null;
+                $resolver = null;
+            }
+        }
+
+        return new \Plugins\OAuth2\Infrastructure\Cli\TenantConnections($central, $registry, $resolver);
     }
 
     private static function central(ModuleContainer $c): DatabasePort

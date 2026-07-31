@@ -223,6 +223,19 @@ final class DeviceSessionService
         return $this->transactional(fn (): bool => $this->sessions->revokeForUser($userId, $sessionId));
     }
 
+    /**
+     * Revoke EVERY session for a user, the caller's own included.
+     *
+     * Unlike revokeOthers(), this keeps no session alive and needs no SessionPort
+     * — it is for credential-recovery paths (password reset) where the request is
+     * unauthenticated and no existing session can be trusted: whoever knew the
+     * old password may still be signed in somewhere.
+     */
+    public function revokeAll(string $userId): int
+    {
+        return $this->transactional(fn (): int => $this->sessions->revokeAllForUser($userId, null));
+    }
+
     // ── Internals ───────────────────────────────────────────────────────────────
 
     /**

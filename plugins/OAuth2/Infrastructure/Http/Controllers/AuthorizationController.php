@@ -8,6 +8,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SessionPort;
 use Plugins\OAuth2\Application\Services\AuthorizationService;
 use Plugins\OAuth2\Domain\Exceptions\OAuthException;
+use Plugins\Pageflow\Http\PageflowResponder;
 use Plugins\View\API\Contracts\ViewRendererContract;
 use Project\Http\Controllers\ViewController;
 
@@ -32,6 +33,7 @@ final class AuthorizationController extends ViewController
         ViewRendererContract $renderer,
         private readonly AuthorizationService $authz,
         private readonly SessionPort $session,
+        private readonly PageflowResponder $pageflow,
     ) {
         parent::__construct($renderer);
     }
@@ -48,8 +50,13 @@ final class AuthorizationController extends ViewController
 
         $identity = $request->identity();
         if ($identity === null || $identity->isGuest()) {
-            // Not logged in — send to login, returning here afterwards.
-            return $this->redirect('/login?return=' . urlencode((string) $request->uri()));
+            // Not logged in — send to login, returning here afterwards. Auth's login
+            // honours `redirectTo` (not `return`) and its open-redirect guard accepts
+            // only a RELATIVE path, so hand it path+query, never the absolute URL.
+            $query  = $request->uri()->getQuery();
+            $target = $request->path() . ($query !== '' ? '?' . $query : '');
+
+            return $this->redirect('/login?redirectTo=' . urlencode($target));
         }
 
         // Store the validated request SERVER-SIDE and hand the form only an opaque
@@ -58,10 +65,10 @@ final class AuthorizationController extends ViewController
         $authzId = bin2hex(random_bytes(16));
         $this->session->put(self::SESSION_PREFIX . $authzId, $req->toFormState());
 
-        return $this->view('oauth2::consent', [
+        return $this->pageflow->render($request, 'OAuth2/Consent', 'admin', [
             'csrf'       => $this->_csrfToken(),
-            'clientName' => $req->client->name,
-            'scopes'     => $req->scopes,
+            'clientName' => (string) $req->client->name,
+            'scopes'     => array_values($req->scopes),
             'authzId'    => $authzId,
         ]);
     }
