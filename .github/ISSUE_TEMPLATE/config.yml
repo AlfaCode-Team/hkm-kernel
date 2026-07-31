@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/AlfaCode-Team/php-service-platform/security/advisories/new
+    about: Please report security issues privately — never as a public issue. See SECURITY.md.
+  - name: 💬 Questions & discussion
+    url: https://github.com/AlfaCode-Team/php-service-platform/discussions
+    about: Ask questions, share ideas, and get help from the community.

@@ -6,6 +6,171 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-07-22
+
+### Changed
+- **Rebranded to HKM Kernel.** The CLI banner (`hkm version`) now renders the HKM
+  block-letter art and reads "HKM Kernel · Gated Demand Architecture"; the debug/error
+  page and CLI exception header are branded **HKM** (was "Sentinel"); the global-kernel
+  autoload error prefix is now `[HKM]`.
+- **README rewritten as a guided document** — leads with Purpose, project goals, and an
+  honest "done vs. cooking" status map, followed by install and usage. Adds the HKM hero
+  banner and points at the new public guides.
+
+### Added
+- **Public architecture guides under `docs/guides/`** — a curated, reader-facing set of
+  layer-by-layer guides (kernel, modules, plugins, security, data access, and more), with
+  an index. The internal AI-context source stays private.
+
+### Fixed
+- **Security-layer docs corrected to match the code.** The guides no longer describe a
+  kernel `FirewallLayer` / `RateLimiterLayer` (which do not exist) — the kernel ships only
+  `CsrfTokenLayer`; authentication comes from the Auth plugin (`JwtAuthLayer` /
+  `PersonalAccessTokenLayer`), and rate-limiting / IP-filtering are SecurityFilters route
+  filters (`throttle` / `shield`).
+
+### Merged
+- Integrates edge features, CLI commands, and security updates from #36.
+
+## [1.0.20] - 2026-07-22
+
+### Added
+- **`hkm module` command** for managing first-party kernel packages (the
+  `modules/` submodules: bind-it, php-io-cli, let-migrate, http) — inspect,
+  and update the pinned package set from one CLI entry point.
+- **`alfacode-team/http` as a first-party package dependency** (`^1.0`;
+  dev-master inside the monorepo, `v1.0.0` for stable releases). The http
+  submodule is pinned at its latest master.
+
+### Changed
+- **Pageflow stages refactored and consolidated** — the SPA-bridge pipeline
+  stages are simplified into fewer, clearer units.
+- **Open-source readiness** — license, composer package metadata, and a
+  `.env.example` added; issue/PR templates, CODEOWNERS, and required-reviewer
+  configuration for `main`.
+
+### Fixed
+- **`MigrateListCommand`** parent wiring repaired and the **`OutboxWriter`**
+  port contract corrected.
+- **CI analysis gates** — PHPStan level-5 config + baseline made a blocking
+  gate (optional Swoole/OpenSwoole coroutine calls ignored); CodeQL, Semgrep,
+  and `composer audit` wired in.
+
+## [1.0.19] - 2026-07-21
+
+### Added
+- **Edge reuses & updates an existing nginx SNI stream splitter.** When both nginx
+  and Apache run and the host already declares a `map $ssl_preread_server_name`
+  splitter (located via `nginx -T`), Edge no longer writes a second, conflicting
+  `stream {}` block. It emits only the internal backend vhosts AND **merges the
+  platform's public domains into the existing `map` in place** — inside a marked,
+  idempotent sub-block, leaving hand-written entries untouched and never
+  duplicating a domain. New `StreamConfigWriter`; `EDGE_REUSE_STREAM` (default on),
+  `EDGE_STREAM_BACKEND` (default `nginx_backend`).
+- **Force a single-server strategy with no fallback.** `edge:apply --nginx-only` /
+  `--apache-only` (and `edge:status` preview) bypass host auto-detection;
+  `EDGE_FORCE_STRATEGY` sets a deploy default.
+- **Behind-SNI-router awareness.** The nginx-only vhost now listens on the internal
+  backend port (e.g. 444) instead of `:443` when the host runs an SNI stream router
+  that already owns `:443` — auto-detected, or forced via `EDGE_BEHIND_SNI_ROUTER`
+  / pinned with `EDGE_NGINX_SSL_PORT`. Prevents nginx failing to start with
+  "Address already in use". The `:80→HTTPS` redirect still targets the public port.
+- **Configurable CORS, TLS pinning, method guard and deny lists** for generated
+  vhosts: `EDGE_CORS` (off/allowlist/wildcard — wildcard opt-in, allowlist echoed
+  via a `$http_origin` map), `EDGE_SSL_PROTOCOLS`/`EDGE_SSL_CIPHERS`/
+  `EDGE_SSL_STAPLING`, `EDGE_ALLOWED_METHODS`, `EDGE_DENY_DIRS`.
+- **`plugins/Edge/USAGE.md`** — full command + environment reference.
+
+### Fixed
+- **CLI parser rejects unknown/misspelled options** instead of silently ignoring
+  them (e.g. a typo'd `--tsl=both` no longer produces the wrong config with a zero
+  exit). In a script/CI it exits non-zero with a Damerau-Levenshtein "did you
+  mean?" suggestion; on an interactive terminal it auto-applies the obvious
+  correction with a visible notice. Launcher-injected globals stay tolerated.
+- **`--tls=both` emits the port-80 redirect block** (with ACME/Let's-Encrypt
+  HTTP-01 passthrough before the redirect) alongside the `:443` block.
+- **Security/CORS headers are no longer dropped inside location blocks.** Header
+  emission is centralised so every location that declares an `add_header` re-emits
+  the full set — headers now land on real app/API responses, not just static
+  paths.
+- **DEVELOPMENT profile emits short-lived HSTS** (`max-age=300`, no
+  `includeSubDomains`, never `preload`); production keeps long-form HSTS with
+  `preload` opt-in.
+- **`/nginx-status` is dev-only** — removed from production, where the SNI stream
+  proxy makes `allow 127.0.0.1` world-open.
+- **Production denies source maps.** `.map` is added to the deny list (not merely
+  dropped from the static-asset rule, which `location /` would still serve via
+  `try_files`); development keeps serving maps for debugging.
+- **Deny rules are ordered before the static-asset regex** and directories use
+  `^~` prefix locations, so a denied path (e.g. `vendor/composer/installed.json`)
+  can no longer be served through a whitelisted extension.
+- **Per-site access/error logs are emitted in production** (previously dev-only,
+  silently falling back to the global log).
+- **IPv4/IPv6 listeners are consistent** — `listen [::]:443 ssl` now mirrors the
+  `:80` block.
+- **Production static-asset regex drops `map`/`json`**, and explicit TLS
+  protocol/cipher pinning + session settings are emitted for every TLS listener;
+  `error_log … debug` is opt-in (`EDGE_NGINX_DEBUG_LOG`), default `warn`.
+
+## [1.0.18] - 2026-07-20
+
+### Added
+- **`hkm plugins recover [proj]` — rebuild a lost/drifted `var/plugin-assets.json`
+  (aliases `rebuild` / `reindex`).** Reconstructs the plugin-assets manifest from
+  ground truth: for every plugin ENABLED in the project bootstrap it records the
+  published assets that actually exist on disk, healing a manifest that was
+  deleted, truncated, or fell out of sync. It copies nothing (use
+  `hkm plugins update` to re-publish physically-missing assets) and preserves any
+  migration `batch` already recorded, since batch numbers cannot be derived from
+  the filesystem. `--dry-run` (`-n`) previews the rebuild; unresolvable enabled
+  plugins are reported and skipped. Implemented natively in Zig.
+
+### Changed
+- **`hkm discover` now restores each project's gitignored runtime folders.**
+  After locating a project it ensures `var/logs`, `var/cache/manifests`,
+  `var/tmp`, `var/locks`, `var/sessions`, `var/queue` and `userdata/storage`
+  exist — a freshly cloned or moved project is usually missing them, which would
+  otherwise fail at boot. `--dry-run` reports how many are missing without
+  creating them; a real run creates them (idempotent — an already-complete
+  project reports nothing).
+
+## [1.0.17] - 2026-07-20
+
+### Added
+- **`hkm discover [root]` — find projects on disk and register them (alias
+  `hkm scan`).** Walks a directory tree, finds every folder holding a
+  `proj.json`, and upserts each into the kernel registry (`projects.json`) with
+  its name, version, ABSOLUTE path, and domains read straight from that project's
+  own `proj.json`. The bulk counterpart to `hkm update <path>` (one project):
+  use it to adopt projects scaffolded with `--no-register`, cloned from git, or
+  moved on disk. Reports each match as `new` / `moved` / `up-to-date` against the
+  current registry; `--dry-run` (`-n`) previews without writing; `--depth=N`
+  (default 4) caps descent. Skips `vendor`, `node_modules`, `var`, `.git`,
+  `dist`, `zig-out`, `.zig-cache` and dotfolders, and stops descending once a
+  folder is identified as a project root. Implemented natively in Zig (no PHP
+  required), reusing the same registry resolver as `new`/`update`/`list`.
+- **`TENANCY_CONTROL_PLANE` — serve a super-admin host with Tenancy enabled.**
+  `Tenancy::boot()` previously registered `TenantContextStage` unconditionally,
+  which made a central control-plane deployment unservable: every request either
+  500'd (route did not load Tenancy, so `TenantIdentifier` was unbound and the
+  stage threw) or 404'd (loaded, but no tenant resolves on an admin host). Set
+  `TENANCY_CONTROL_PLANE=true` and the `after.load` hook is skipped, so
+  `DatabasePort` stays on central. Everything else the plugin publishes — the
+  registry, connection resolver, admin/membership/invitation services and the
+  `tenant:*` provisioning commands — is unaffected. Defaults to **false**, so a
+  tenant-serving deployment cannot lose tenant isolation by omission.
+
+### Changed
+- **`tenant:migrate` is scoped to the calling project by default.** It now
+  migrates only the tenants recorded in that project's `var/tenants.json`,
+  instead of every active tenant in the registry. Several projects may share one
+  central registry, and a sibling's tenant is encrypted with that project's
+  `APP_KEY` — so it surfaced on every run as a spurious "Could not decrypt
+  payload (invalid key or tampered data)" failure. Pass `--all` for the previous
+  fleet-wide behaviour; a project with no `var/tenants.json` still migrates every
+  active tenant, so single-project deployments are unchanged. Skipped tenants are
+  reported rather than silently dropped.
+
 ## [1.0.16] - 2026-07-18
 
 ### Added

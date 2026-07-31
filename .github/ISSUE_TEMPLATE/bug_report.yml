@@ -1,0 +1,111 @@
+name: 🐛 Bug report
+description: Report a reproducible bug or regression in the framework.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Please fill out the
+        sections below so we can reproduce and fix the problem quickly.
+
+        ⚠️ **Do not report security vulnerabilities here.** See our
+        [Security Policy](../blob/master/SECURITY.md) for private reporting.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through the Security Policy).
+          required: true
+        - label: I am running a supported release (or `master`) and can reproduce the issue.
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps (and minimal code / config) to reproduce the behavior.
+      placeholder: |
+        1. Configure '...'
+        2. Send request '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened. Include stack traces / logs (redact secrets).
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Kernel (boot / pipelines / DI / security)
+        - HTTP layer (Request / Response)
+        - A plugin (please name it in the description)
+        - Native launcher / bundling (tools/)
+        - Migrations (LetMigrate)
+        - CLI (php-io-cli)
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Framework version / commit
+      description: Release tag (e.g. v1.0.19) or commit SHA.
+      placeholder: "v1.0.19"
+    validations:
+      required: true
+
+  - type: input
+    id: php
+    attributes:
+      label: PHP version
+      placeholder: "8.4.3"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / runtime
+      description: Operating system and SAPI (PHP-FPM, OpenSwoole, CLI).
+      placeholder: "Ubuntu 24.04, PHP-FPM"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — related config, screenshots, `hkm doctor` output.
+    validations:
+      required: false

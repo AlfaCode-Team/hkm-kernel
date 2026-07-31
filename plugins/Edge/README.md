@@ -19,6 +19,55 @@ This is exactly the "check what's on the host and apply accordingly" rule:
 nginx is the front; if it can stream and Apache is up, split by SNI; if Apache
 is down, just nginx without stream; if only Apache, configure Apache.
 
+### Reusing (and updating) an existing nginx stream splitter
+
+When both servers are running **and** the running nginx **already declares an
+SNI `stream {}` splitter** (a `map $ssl_preread_server_name … { … }` using
+`ssl_preread`, located from `nginx -T`, excluding Edge's own managed file), Edge
+does **not** write a second, conflicting splitter. Instead it:
+
+1. emits only the internal backend vhosts (TLS-terminating on `:444`), and
+2. **merges the platform's public domains INTO your existing `map` in place** —
+   editing the host file (e.g. `nginx.conf`) where the splitter lives.
+
+The merge is surgical and idempotent: your hand-written entries are left exactly
+as they are, and Edge's additions live inside a marked sub-block placed just
+before the `default` line. A domain already present anywhere in the map (yours or
+ours) is never re-added; re-runs never duplicate.
+
+```nginx
+    map $ssl_preread_server_name $backend_name {
+        migratetravel.com                  nginx_backend;   # your entries — untouched
+        www.migratetravel.com              nginx_backend;
+        # >>> HKM Edge (managed domains) >>>
+        app.showmeuganda.com   nginx_backend;               # added by `edge:apply`
+        admin.hkmvote.com      nginx_backend;
+        # <<< HKM Edge (managed domains) <<<
+        default                            apache_ssl;
+    }
+```
+
+The upstream name the domains map to is `nginx_backend` by default (override with
+`EDGE_STREAM_BACKEND` to match your `upstream { … }`). Writing `nginx.conf`
+usually needs **`sudo`** — a failed write fails the whole apply loudly rather than
+reporting success. Disable this reuse/merge behaviour and always write Edge's own
+stream block with `EDGE_REUSE_STREAM=0`. Preview the exact map diff without
+touching anything using `edge:apply --dry-run`.
+
+### Forcing a single server (no fallback)
+
+Auto-detection can be overridden to pin one server with **no fallback**:
+
+```bash
+hkm cli -p <project> edge:apply --nginx-only    # nginx serves everything, NO Apache fallback
+hkm cli -p <project> edge:apply --apache-only   # Apache serves everything, no fallback
+```
+
+`--nginx-only` renders the plain nginx reverse-proxy vhost (no stream layer);
+`--apache-only` renders the Apache SSL VirtualHost. The same choice can be set as
+a deploy default with `EDGE_FORCE_STRATEGY=nginx-only|apache-only`. `edge:status`
+accepts the same two flags to preview the forced strategy without writing.
+
 ## The SNI stream splitter (the `nginx-stream` output)
 
 ```nginx
@@ -189,6 +238,8 @@ entries).
 | `EDGE_APP_BACKEND` | `127.0.0.1:8080` | app upstream (nginx-only / Apache) |
 | `EDGE_SSL_CERT` / `EDGE_SSL_KEY` | `/etc/ssl/...` | cert used by nginx-only / Apache templates |
 | `EDGE_STREAM_PATH` / `EDGE_NGINX_PATH` / `EDGE_APACHE_PATH` | `var/edge/*.conf` | where each config is written (point at `/etc/nginx/...` in prod) |
+| `EDGE_FORCE_STRATEGY` | *(empty)* | pin a single server — `nginx-only` \| `apache-only` (no fallback); empty = auto-detect |
+| `EDGE_REUSE_STREAM` | `true` | reuse an existing nginx `stream {}` splitter instead of writing a second one |
 | `EDGE_RELOAD` | `false` | reload after write by default (also controllable per-command) |
 | `EDGE_*_TEST_CMD` / `EDGE_*_RELOAD_CMD` | `nginx -t`, `nginx -s reload`, `apachectl configtest`, `apachectl graceful` | validate/reload commands per distro |
 | `EDGE_EXTRA_DOMAINS` / `EDGE_EXCLUDE_DOMAINS` | — | comma-separated add/drop |

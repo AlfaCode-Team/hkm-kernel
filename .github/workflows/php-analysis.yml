@@ -1,0 +1,79 @@
+name: PHP Analysis
+
+# PHP security + static analysis. CodeQL does not support PHP, so this workflow
+# provides equivalent coverage for the framework's PHP code:
+#   • composer audit — dependency CVE gate (blocking)
+#   • Semgrep        — PHP static analysis, results uploaded to code scanning
+#   • PHPStan        — type/static analysis (non-blocking until a baseline lands)
+
+"on":
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: "27 4 * * 1"   # weekly, Monday 04:27 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: php-analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Dependency vulnerability gate ──────────────────────────────────────────
+  audit:
+    name: composer audit
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: recursive }
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: "8.4", tools: composer, coverage: none }
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress
+      - name: Audit dependencies for known vulnerabilities
+        run: composer audit
+
+  # ── Static analysis (PHPStan) ──────────────────────────────────────────────
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: recursive }
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer
+          extensions: mbstring, curl, pdo, pdo_sqlite, openssl, fileinfo, zip, intl
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress
+      - name: Run PHPStan
+        # Blocking gate: 542 pre-existing errors are captured in
+        # phpstan-baseline.neon, so only NEW errors fail the build.
+        run: php -d memory_limit=2G vendor/bin/phpstan analyse --no-progress --error-format=github
+
+  # ── Semgrep → code scanning (SARIF) ────────────────────────────────────────
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      security-events: write   # upload SARIF to code scanning
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run Semgrep (PHP + security rulesets)
+        run: semgrep scan --sarif --output=semgrep.sarif --config=p/php --config=p/security-audit --config=p/secrets
+        env:
+          SEMGREP_RULES: "p/php p/security-audit p/secrets"
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep

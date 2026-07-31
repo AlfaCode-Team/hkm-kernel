@@ -1,3 +1,3 @@
 #!/bin/sh
 # Strip AI-authored trailers (Co-Authored-By: Claude / Generated with Claude Code)
-grep -viE 'Co-authored-by:.*Claude|Generated with .*Claude' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+grep -viE 'Co-authored-by:.*(Claude|anthropic)|anthropic\.com|Generated with .*(Claude|Claude Code)' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
