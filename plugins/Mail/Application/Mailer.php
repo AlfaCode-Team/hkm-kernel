@@ -68,6 +68,12 @@ final class Mailer implements MailPort, MailerContract
         return $this->queue->push(self::QUEUE_JOB, $compiled, $this->queueName);
     }
 
+    /** Compile the full MIME (headers + body, DKIM-signed if configured) without sending. */
+    public function preview(Message $message): string
+    {
+        return $this->compile($message)['mime'];
+    }
+
     // ── MailPort (kernel, view-based) ────────────────────────────────────────
 
     /** @param string|array<int|string,string> $to */
@@ -129,7 +135,15 @@ final class Mailer implements MailPort, MailerContract
     {
         // With the View plugin, treat $view as a template name; without it, the
         // caller passed raw HTML (so MailPort works even with no renderer bound).
-        return $this->views !== null ? $this->views->render($view, $data) : $view;
+        if ($this->views === null) {
+            return $view;
+        }
+
+        // render()'s second argument is render OPTIONS (layout/cache), NOT view
+        // data — template variables must go through setData(), otherwise nothing
+        // is extracted and every placeholder renders empty. 'raw' because mail
+        // templates escape what they print themselves.
+        return $this->views->setData($data, 'raw')->render($view);
     }
 
     /**

@@ -28,8 +28,9 @@ use Plugins\Edge\API\Contracts\EdgeServiceContract;
  * `--dev` is accepted as an alias for --local, but the `hkm` launcher strips
  * --dev (it selects the dev kernel), so prefer --local when running via `hkm`.
  *
- * TLS mode (default: config `tls.mode`, i.e. `ssl`):
- *   hkm edge:apply --tls=ssl       # HTTPS only (:443)
+ * TLS mode (default: `none` under --local, else config `tls.mode` i.e. `ssl`):
+ *   hkm edge:apply --local         # plain HTTP only (:80) — local dev default
+ *   hkm edge:apply --tls=ssl       # HTTPS only (:443)  (also `--local --tls=ssl`)
  *   hkm edge:apply --tls=none      # plain HTTP only (:80, no certificate)
  *   hkm edge:apply --no-ssl        # alias for --tls=none
  *   hkm edge:apply --tls=both      # plain :80 that 301-redirects to HTTPS (:443)
@@ -87,6 +88,15 @@ final class EdgeApplyCommand extends AbstractCommand
             $this->error('Pick ONE environment: --local (or --dev), --development/-d, or --production.');
 
             return self::INVALID;
+        }
+
+        // A LOCAL developer machine serves plain HTTP by default — no self-signed
+        // cert to trust, no HSTS/cert warnings. Only applies when the user did NOT
+        // explicitly choose a TLS mode (--tls=... / --no-ssl always win, so
+        // `--local --tls=ssl` still gets HTTPS). Shared dev/staging + production
+        // keep the config default (ssl).
+        if ($tlsMode === null && $appEnv === 'local') {
+            $tlsMode = 'none';
         }
 
         $force = $this->resolveForce();

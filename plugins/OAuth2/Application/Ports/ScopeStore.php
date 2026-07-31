@@ -19,4 +19,10 @@ interface ScopeStore
      * @return array<string,string> id => description ('' when none stored)
      */
     public function describe(): array;
+
+    /** Register or update a grantable scope (admin catalogue management). */
+    public function put(string $id, string $description): void;
+
+    /** Remove a scope from the catalogue. False when it did not exist. */
+    public function delete(string $id): bool;
 }

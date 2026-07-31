@@ -20,6 +20,14 @@ interface RefreshTokenStore
      */
     public function findByUser(string $userId): array;
 
+    /**
+     * Every active (non-revoked, non-expired) refresh token in the tenant —
+     * ADMIN view of all authorized grants across users.
+     *
+     * @return list<RefreshToken>
+     */
+    public function allActive(): array;
+
     /** Atomically revoke if currently active; false when it was already revoked. */
     public function revokeIfActive(string $tokenId): bool;
 
