@@ -32,6 +32,7 @@ fn printHelp() void {
     prompt.item("hkm ui [sync|list|link|clean]", "federate enabled plugins' UIs into the frontend");
     prompt.item("hkm update <path|name>", "refresh a project's kernel registry entry");
     prompt.item("hkm upgrade [--check]", "check for / apply a kernel update");
+    prompt.item("hkm upgrade --local", "install THIS checkout over the installed kernel");
     prompt.item("hkm doctor", "diagnose the local environment");
     prompt.item("hkm version", "show the HKM banner + version (also --version, -v)");
     prompt.item("hkm help", "show this help");
@@ -248,7 +249,7 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         return 0;
     }
     if (std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-v")) {
-        banner.printShort();
+        banner.printShort(io);
         return 0;
     }
     if (std.mem.eql(u8, cmd, "version")) {
