@@ -450,6 +450,19 @@ final class InMemoryRefreshTokenStore implements RefreshTokenStore
         return $out;
     }
 
+    public function allActive(): array
+    {
+        $out = [];
+        foreach ($this->byHash as $row) {
+            $t = $row['token'];
+            if (!$row['revoked'] && !$t->isExpired()) {
+                $out[] = $t;
+            }
+        }
+
+        return $out;
+    }
+
     public function revokeIfActive(string $tokenId): bool
     {
         $hash = $this->idToHash[$tokenId] ?? null;
@@ -479,18 +492,34 @@ final class InMemoryRefreshTokenStore implements RefreshTokenStore
 
 final class InMemoryScopeStore implements ScopeStore
 {
+    /** @var array<string,string> id => description */
+    private array $catalogue;
+
     /** @param list<string> $scopes */
-    public function __construct(private array $scopes)
+    public function __construct(array $scopes)
     {
+        $this->catalogue = array_fill_keys($scopes, '');
     }
 
-    public function exists(string $scope): bool { return in_array($scope, $this->scopes, true); }
+    public function exists(string $scope): bool { return array_key_exists($scope, $this->catalogue); }
 
-    public function all(): array { return $this->scopes; }
+    public function all(): array { return array_keys($this->catalogue); }
 
-    public function describe(): array
+    public function describe(): array { return $this->catalogue; }
+
+    public function put(string $id, string $description): void
     {
-        return array_fill_keys($this->scopes, '');
+        $this->catalogue[$id] = $description;
+    }
+
+    public function delete(string $id): bool
+    {
+        if (!array_key_exists($id, $this->catalogue)) {
+            return false;
+        }
+        unset($this->catalogue[$id]);
+
+        return true;
     }
 }
 

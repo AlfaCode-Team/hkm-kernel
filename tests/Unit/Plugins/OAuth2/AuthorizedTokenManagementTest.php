@@ -28,6 +28,10 @@ final class AuthorizedTokenManagementTest extends TestCase
             {
                 return array_values(array_filter($this->tokens, static fn(RefreshToken $t) => $t->userId === $userId));
             }
+            public function allActive(): array
+            {
+                return array_values(array_filter($this->tokens, static fn(RefreshToken $t) => !$t->isExpired()));
+            }
             public function revokeIfActive(string $tokenId): bool { return true; }
             public function revokeFamily(string $familyId): int { $this->revokedFamilies[] = $familyId; return 1; }
             public function deleteExpired(?\DateTimeImmutable $now = null): int { return 0; }
