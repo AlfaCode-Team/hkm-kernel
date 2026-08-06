@@ -45,4 +45,27 @@ final class ManifestReader
 
         return $this->cache[$moduleClass] = $decoded;
     }
+
+    /**
+     * Read a COMPILED manifest written by {@see ManifestWriter} (route-manifest.php,
+     * config-manifest.php, …). The counterpart to ManifestWriter::write().
+     *
+     * A missing manifest returns $default rather than throwing: a surface that
+     * never compiled its manifest (an HTTP-only process has no job manifest) must
+     * not fail, and boot compiles every manifest before anything reads one.
+     *
+     * @param  array<string, mixed> $default
+     * @return array<string, mixed>
+     */
+    public static function readCompiled(string $file, array $default = []): array
+    {
+        $path = \AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths::cache('manifests/' . ltrim($file, '/'));
+        if (!is_file($path)) {
+            return $default;
+        }
+
+        $data = require $path;
+
+        return is_array($data) ? $data : $default;
+    }
 }

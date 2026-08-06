@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace AlfacodeTeam\PhpServicePlatform\Kernel\Security\Layers;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\ClockPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SystemClock;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Contracts\SecurityLayerContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\SecurityVerdict;
 
@@ -61,6 +63,13 @@ final class CsrfTokenLayer implements SecurityLayerContract
         private readonly int    $lifetime      = 43200,
         private readonly array  $exemptPaths   = [],
         private readonly array  $exemptMethods = [],
+        /**
+         * Source of "now". Defaults to the real clock, so behaviour is unchanged.
+         * Tests inject a frozen clock to exercise token expiry without sleeping
+         * past a 12-hour lifetime — which is why this expiry logic was
+         * effectively untestable before.
+         */
+        private readonly ?ClockPort $clock = null,
     ) {
         $this->secret = $secret ?? (string) (env('APP_KEY') ?: '');
     }
@@ -113,7 +122,7 @@ final class CsrfTokenLayer implements SecurityLayerContract
      */
     public function issue(Request $request, string $action = ''): string
     {
-        return self::make($this->secret, $this->binding($request), $this->lifetime, $action);
+        return self::make($this->secret, $this->binding($request), $this->lifetime, $action, $this->clock);
     }
 
     // ─── public static API (for controllers / views that mint & check tokens) ──
@@ -124,9 +133,9 @@ final class CsrfTokenLayer implements SecurityLayerContract
      *
      *   $token = CsrfTokenLayer::make(env('APP_KEY'), $sessionCookieValue);
      */
-    public static function make(string $secret, string $binding = '', int $lifetime = 43200, string $action = ''): string
+    public static function make(string $secret, string $binding = '', int $lifetime = 43200, string $action = '', ?ClockPort $clock = null): string
     {
-        return self::build($secret, self::tickFor($lifetime), $binding, $action);
+        return self::build($secret, self::tickFor($lifetime, $clock), $binding, $action);
     }
 
     /**
@@ -134,7 +143,7 @@ final class CsrfTokenLayer implements SecurityLayerContract
      * already runs check() for every unsafe request, so this is only for code
      * that wants to validate a token itself without denying the request.
      */
-    public static function valid(string $secret, string $token, string $binding = '', int $lifetime = 43200): bool
+    public static function valid(string $secret, string $token, string $binding = '', int $lifetime = 43200, ?ClockPort $clock = null): bool
     {
         if ($secret === '' || $token === '') {
             return false;
@@ -150,7 +159,7 @@ final class CsrfTokenLayer implements SecurityLayerContract
             return false;
         }
 
-        $now = self::tickFor($lifetime);
+        $now = self::tickFor($lifetime, $clock);
         // Accept this tick or the immediately previous one; reject anything else
         // (expired, or a future tick that should not yet exist).
         if ($tick !== $now && $tick !== $now - 1) {
@@ -168,7 +177,7 @@ final class CsrfTokenLayer implements SecurityLayerContract
 
     private function verify(string $token, string $binding): bool
     {
-        return self::valid($this->secret, $token, $binding, $this->lifetime);
+        return self::valid($this->secret, $token, $binding, $this->lifetime, $this->clock);
     }
  
     /** token = tick . "." . hex(HMAC(secret, tick|binding|action)). Action rides after the sig for re-derivation. */
@@ -193,11 +202,12 @@ final class CsrfTokenLayer implements SecurityLayerContract
     }
 
     /** WordPress-style half-life tick: two overlapping windows per lifetime. */
-    private static function tickFor(int $lifetime): int
+    private static function tickFor(int $lifetime, ?ClockPort $clock = null): int
     {
         $half = max(1, intdiv($lifetime, 2));
+        $now  = ($clock ?? new SystemClock())->timestamp();
 
-        return (int) ceil(time() / $half);
+        return (int) ceil($now / $half);
     }
 
     /**
