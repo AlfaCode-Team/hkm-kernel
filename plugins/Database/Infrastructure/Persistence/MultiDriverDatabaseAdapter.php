@@ -8,7 +8,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use PDO;
 use PDOException;
 use PDOStatement;
-use Psr\Log\LoggerInterface;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
 use Plugins\Database\API\Contracts\DatabaseConfigurationContract;
 use Plugins\Database\Exceptions\ConnectionException;
 
@@ -40,7 +40,7 @@ final class MultiDriverDatabaseAdapter implements DatabasePort
 
     public function __construct(
         private readonly DatabaseConfigurationContract $config,
-        private readonly ?LoggerInterface $logger = null,
+        private readonly ?LoggerPort $logger = null,
         private readonly bool $logQueries = false,
         private readonly float $slowQueryThresholdMs = 200.0,
     ) {

@@ -6,8 +6,8 @@ namespace Plugins\Tenancy\Application\Services;
 
 use Plugins\Tenancy\Application\Ports\AuditSink;
 use Plugins\Tenancy\Application\Ports\AuditWriter;
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
+use Plugins\Logger\Infrastructure\NullLogger;
 
 /**
  * AuditService — application service for the append-only central audit trail.
@@ -22,7 +22,7 @@ final class AuditService implements AuditSink
 {
     public function __construct(
         private readonly AuditWriter $writer,
-        private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly LoggerPort $logger = new NullLogger(),
     ) {}
 
     public function record(

@@ -19,8 +19,6 @@ use Firebase\JWT\Key;
  * token validator, so this plugin provides one. Wire it in a project bootstrap:
  *
  *   ->withSecurity([
- *       new FirewallLayer(...),
- *       new RateLimiterLayer(...),
  *       new JwtAuthLayer(secret: env('JWT_SECRET'), algo: 'HS256'),
  *   ])
  *

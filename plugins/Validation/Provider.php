@@ -62,16 +62,19 @@ final class Provider implements ModuleContract
     /** @return array{rulesets?: list<object|class-string>, groups?: array<string,array{rules?:array,messages?:array}>} */
     private function config(): array
     {
-        // Prefer a project override (config_path helper) when available; fall
-        // back to the plugin's shipped default.
-        $default = __DIR__ . '/config/validation.php';
-        $path = function_exists('config_path') && is_file(config_path('validation.php'))
-            ? config_path('validation.php')
-            : $default;
+        // From the compiled config manifest, where the project's config/validation.php
+        // is DEEP-MERGED over this plugin's — so a project adding one rule group
+        // keeps the shipped rulesets instead of replacing the file wholesale.
+        $config = \function_exists('config') ? config('validation') : null;
 
-        /** @var array $config */
-        $config = is_file($path) ? require $path : [];
+        if (\is_array($config) && $config !== []) {
+            return $config;
+        }
 
-        return is_array($config) ? $config : [];
+        // No manifest (e.g. a unit test that never ran the BootPipeline).
+        /** @var array $fallback */
+        $fallback = require __DIR__ . '/config/validation.php';
+
+        return \is_array($fallback) ? $fallback : [];
     }
 }

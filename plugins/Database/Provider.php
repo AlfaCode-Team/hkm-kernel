@@ -11,7 +11,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
-use Psr\Log\LoggerInterface;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
 use Plugins\Database\API\Contracts\DatabaseConfigurationContract;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Database\Infrastructure\Drivers\DatabaseConfigurationFactory;
@@ -132,14 +132,15 @@ final class Provider implements ModuleContract
     }
 
     /**
-     * Resolve a PSR-3 logger if one is bound; observability is optional.
+     * Resolve the app logger if one is bound; observability is optional here —
+     * the database must work in a bootstrap that has not wired a LoggerPort.
      */
-    private static function optionalLogger(mixed $container): ?LoggerInterface
+    private static function optionalLogger(mixed $container): ?LoggerPort
     {
         try {
-            $logger = $container->make(LoggerInterface::class);
+            $logger = $container->make(LoggerPort::class);
 
-            return $logger instanceof LoggerInterface ? $logger : null;
+            return $logger instanceof LoggerPort ? $logger : null;
         } catch (\Throwable) {
             return null;
         }

@@ -1,0 +1,15 @@
+{
+  "name": "logger",
+  "version": "1.0.0",
+  "solves": "logging.application",
+  "type": "module",
+
+  "requires": [],
+  "exposes": ["AlfacodeTeam\\PhpServicePlatform\\Kernel\\Ports\\LoggerPort"],
+
+  "config": [
+    { "key": "LOG_CHANNEL", "type": "string", "required": false },
+    { "key": "LOG_LEVEL", "type": "string", "required": false },
+    { "key": "LOG_FILE", "type": "string", "required": false }
+  ]
+}

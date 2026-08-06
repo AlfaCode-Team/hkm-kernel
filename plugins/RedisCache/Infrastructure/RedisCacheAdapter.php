@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Plugins\RedisCache\Infrastructure;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\Lock;
 
 /**
  * Redis-backed CachePort adapter (GDA rewrite of the 0.3 Redis cache layer).
@@ -115,5 +116,15 @@ final class RedisCacheAdapter implements CachePort
         }
         $this->deletePattern('*');
         return true;
+    }
+
+    public function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return new RedisLock($this->connection, $name, $seconds, $owner);
+    }
+
+    public function restoreLock(string $name, string $owner): Lock
+    {
+        return new RedisLock($this->connection, $name, 0, $owner);
     }
 }

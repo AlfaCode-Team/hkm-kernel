@@ -185,7 +185,7 @@ Wire the layers in the kernel builder; they run before any module loads and
 
 ```php
 ->withSecurity([
-    new FirewallLayer(...), new RateLimiterLayer(...), new CsrfTokenLayer(...),
+    new CsrfTokenLayer(...),   // the only layer the kernel ships
     new JwtAuthLayer(
         secret:      env('JWT_SECRET'),
         algo:        env('JWT_ALGO', 'HS256'),

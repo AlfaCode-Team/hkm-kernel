@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Plugins\Database\Infrastructure\Persistence;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
-use Psr\Log\LoggerInterface;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
 use Plugins\Database\API\Contracts\DatabaseConfigurationContract;
 use Plugins\Database\API\Contracts\DatabaseConnectionManagerContract;
 use Plugins\Database\Exceptions\ConnectionException;
@@ -30,7 +30,7 @@ final class ConnectionManager implements DatabaseConnectionManagerContract
 
     public function __construct(
         private readonly string $defaultName = 'default',
-        private readonly ?LoggerInterface $logger = null,
+        private readonly ?LoggerPort $logger = null,
         private readonly bool $logQueries = false,
     ) {}
 

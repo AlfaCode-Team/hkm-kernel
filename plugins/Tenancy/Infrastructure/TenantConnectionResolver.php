@@ -18,8 +18,8 @@ use Plugins\Tenancy\Domain\Entities\Tenant;
 use Plugins\Tenancy\Domain\Exceptions\TenantUnavailableException;
 use Plugins\Tenancy\Domain\Exceptions\UnknownTenantException;
 use Plugins\Tenancy\Domain\ValueObjects\TenantStatus;
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
+use Plugins\Logger\Infrastructure\NullLogger;
 
 /**
  * TenantConnectionResolver — maps tenant_id -> isolated DatabasePort.
@@ -49,7 +49,7 @@ final class TenantConnectionResolver implements TenantConnectionResolverContract
         private readonly TenantRegistryContract $registry,
         private readonly EncryptionPort $crypto,
         private readonly CachePort $cache,
-        private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly LoggerPort $logger = new NullLogger(),
         private readonly int $breakerThreshold = 5,
         private readonly int $breakerCooldown = 30,
         /**
