@@ -85,7 +85,10 @@ pub fn remoteFor(allocator: std.mem.Allocator, env: *EnvMap, folder: []const u8)
 /// The running kernel's version, parsed. Null when the build stamped something
 /// unparseable (never expected — the default is "0.0.0-dev").
 pub fn kernelVersion() ?semver.Version {
-    return semver.Version.parse(banner.version());
+    // parseDescribed, not parse: a build stamped from `git describe` carries a
+    // "-<commits>-g<sha>" trailer that plain semver reads as a pre-release,
+    // making a build made AFTER a release sort below it.
+    return semver.parseDescribed(banner.version());
 }
 
 /// Outcome of checking a plugin's kernel constraint.
