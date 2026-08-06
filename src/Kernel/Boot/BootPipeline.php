@@ -15,6 +15,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages\{
     CompileViewManifestStage,
     CompileJobManifestStage,
     CompileCommandManifestStage,
+    CompileConfigManifestStage,
     RegisterPortsStage,
     BindSecurityStage
 };
@@ -64,8 +65,9 @@ final class BootPipeline
             new CompileViewManifestStage($moduleClasses, reader: $reader),    // 6. views[] → view-manifest.php (project-first cascade)
             new CompileJobManifestStage($moduleClasses, reader: $reader),     // 7. jobs[] → job-manifest.php
             new CompileCommandManifestStage($moduleClasses, reader: $reader), // 8. commands[] → command-manifest.php
-            new RegisterPortsStage($core),                   // 9. Port → Adapter bindings validated
-            new BindSecurityStage($securityLayers),          // 10. SecurityGateway layers validated
+            new CompileConfigManifestStage($moduleClasses, reader: $reader),  // 9. config/*.php → config-manifest.php (project over plugin)
+            new RegisterPortsStage($core),                   // 10. Port → Adapter bindings validated
+            new BindSecurityStage($securityLayers),          // 11. SecurityGateway layers validated
         ];
     }
 

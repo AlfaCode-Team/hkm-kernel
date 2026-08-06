@@ -7,6 +7,8 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Container\{CoreContainer, ModuleConta
 use AlfacodeTeam\PhpServicePlatform\Kernel\Error\{ErrorPipeline, ErrorContext};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Loading\{DependencyGraphCalculator, OnDemandLoader};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\Contracts\JobContract;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\Retry\{ExponentialRetryStrategy, RetryStrategyContract};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\QueuePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
 /**
@@ -43,6 +45,8 @@ final class WorkerLoop
         private readonly ErrorPipeline $errorPipeline,
         private readonly WorkerPipeline $pipeline,
         private readonly string $signingSecret = '',
+        /** Backoff applied by release() in port mode. */
+        private readonly RetryStrategyContract $retry = new ExponentialRetryStrategy(),
     ) {
     }
 
@@ -52,26 +56,93 @@ final class WorkerLoop
     }
 
     /**
-     * Run the loop. $puller returns the next JobPayload or null when idle.
+     * Run the loop.
      *
-     * @param callable():?JobPayload $puller
-     * @param int $maxIterations 0 = run forever (until stop()).
+     * Two modes:
+     *
+     *  1. PORT MODE (preferred) — pass no $puller. The loop resolves QueuePort
+     *     from the core container and owns the full lifecycle:
+     *     pop → handle → ack / release / fail. Swapping the queue backend then
+     *     needs no code change anywhere.
+     *
+     *  2. PULLER MODE (legacy/exotic) — supply a callable returning the next
+     *     JobPayload or null. The CALLER owns ack/retry semantics; the loop only
+     *     executes. Kept for transports that cannot express the port (and for
+     *     tests), but a project should not need it.
+     *
+     * @param (callable():?JobPayload)|null $puller null = use the bound QueuePort
+     * @param int    $maxIterations 0 = run forever (until stop()).
+     * @param string $queue         which queue to drain in port mode
      */
-    public function run(callable $puller, int $maxIterations = 0): void
+    public function run(?callable $puller = null, int $maxIterations = 0, string $queue = 'default'): void
     {
+        $port = $puller === null ? $this->queuePort() : null;
+
+        if ($puller === null && $port === null) {
+            throw new \RuntimeException(
+                'WorkerLoop::run() needs either a QueuePort bound in the container '
+                . 'or an explicit $puller callable.'
+            );
+        }
+
         $iterations = 0;
         while (!$this->shouldStop) {
             if ($maxIterations > 0 && $iterations++ >= $maxIterations) {
                 break;
             }
 
-            $payload = $puller();
+            $payload = $port !== null ? $port->pop($queue) : $puller();
             if ($payload === null) {
                 usleep(100_000); // idle backoff
                 continue;
             }
 
+            if ($port === null) {
+                // Puller mode: the caller's driver owns retry/ack. Preserve the
+                // original contract, including letting a throw propagate.
+                $this->process($payload);
+                continue;
+            }
+
+            $this->processWithPort($port, $payload);
+        }
+    }
+
+    /**
+     * Port mode: run the job and resolve its queue state exactly once.
+     *
+     * process() rethrows when a job failed but still has attempts left, and
+     * returns a result once it has been dead-lettered by its own failed() hook.
+     * That distinction is what decides release vs fail here.
+     */
+    private function processWithPort(QueuePort $port, JobPayload $payload): void
+    {
+        try {
             $this->process($payload);
+
+            // Completed, skipped, or already dead-lettered by process() — either
+            // way it must not come back. Removing it is the whole point of ack.
+            $port->ack($payload);
+        } catch (\Throwable $e) {
+            if ($payload->hasExceededMaxAttempts()) {
+                $port->fail($payload, $e);
+
+                return;
+            }
+
+            $port->release($payload, $this->retry->delayFor($payload->attempts() + 1));
+        }
+    }
+
+    /** The bound QueuePort, or null when the project wired none. */
+    private function queuePort(): ?QueuePort
+    {
+        try {
+            $port = $this->core->has(QueuePort::class) ? $this->core->make(QueuePort::class) : null;
+
+            return $port instanceof QueuePort ? $port : null;
+        } catch (\Throwable) {
+            return null;
         }
     }
 

@@ -7,6 +7,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Error\{DebugPageRenderer, ErrorClassi
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\{
     FrameworkException,
     GatewayException,
+    HttpStatusAware,
     SecurityException,
     ServiceException,
     ValidationException
@@ -70,6 +71,20 @@ final class ErrorStage implements HttpStageContract
 
     private function resolveHttpCode(\Throwable $e): int
     {
+        // An exception that declares its own status wins. Without this, every
+        // plugin/project exception outside the kernel hierarchy became a 500 —
+        // opaque to the client AND classified CRITICAL, paging someone about an
+        // ordinary expected outcome like "that seat is taken".
+        if ($e instanceof HttpStatusAware) {
+            $declared = $e->httpStatus();
+
+            // 2xx/3xx would turn an error path into an apparent success or a
+            // redirect with no Location. Ignore and fall through.
+            if ($declared >= 400 && $declared <= 599) {
+                return $declared;
+            }
+        }
+
         if ($e instanceof SecurityException) {
             $code = $e->getCode();
             return in_array($code, [401, 403, 429], true) ? $code : 403;
