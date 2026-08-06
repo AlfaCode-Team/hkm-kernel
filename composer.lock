@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "58e21feb6f2ea0a8a95805afa209d27a",
+    "content-hash": "73f3771ab6032584840fafbda3e3f8cc",
     "packages": [
         {
             "name": "alfacode-team/http",
@@ -183,7 +183,7 @@
         },
         {
             "name": "alfacode-team/php-io-cli",
-            "version": "dev-8a785060118e72b04e2afa653ecbb6f1c62d6512",
+            "version": "dev-main",
             "dist": {
                 "type": "path",
                 "url": "modules/php-io-cli",
@@ -1240,11 +1240,11 @@
         },
         {
             "name": "phpshots/bind-it",
-            "version": "0.1.3",
+            "version": "dev-master",
             "dist": {
                 "type": "path",
                 "url": "modules/bind-it",
-                "reference": "13fd1dc586655e9861f69dbf28d443b07549b9ee"
+                "reference": "22d6d056580392ab630452ed4440bd0dfeea9484"
             },
             "require": {
                 "php": "^7.4 || ^8.0",
@@ -7887,6 +7887,7 @@
     "aliases": [],
     "minimum-stability": "dev",
     "stability-flags": {
+        "phpshots/bind-it": 20,
         "phpstan/phpstan": 20,
         "phpunit/phpunit": 20,
         "psr/http-message": 20,
