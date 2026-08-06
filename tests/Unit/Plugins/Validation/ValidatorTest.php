@@ -83,7 +83,10 @@ final class ValidatorTest extends TestCase
 
     public function test_uses_translator_when_provided(): void
     {
-        $translator = new Translator(\dirname(__DIR__, 4) . '/plugins/I18n/lang', 'en', 'en');
+        // Resolve from the class, not a repo-relative path — plugins ship as
+        // composer packages now and live under vendor/.
+        $langRoot   = \dirname((new \ReflectionClass(Translator::class))->getFileName()) . '/lang';
+        $translator = new Translator($langRoot, 'en', 'en');
         $errors = Validator::make(['age' => '5'], ['age' => 'integer|min:18'], [], $translator)->errors();
 
         $this->assertSame('The age field must be at least 18.', $errors['age'][0]);
