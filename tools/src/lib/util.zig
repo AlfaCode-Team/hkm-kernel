@@ -7,6 +7,26 @@ const Dir = std.Io.Dir;
 const Io = std.Io;
 const EnvMap = std.process.Environ.Map;
 
+/// Can this process write inside `dir`?
+///
+/// Probes by actually creating and removing a file rather than inspecting
+/// permission bits: the bits do not account for the effective uid, mount
+/// options (a read-only /opt), SELinux, or ACLs. A probe answers the question
+/// that is actually being asked — "will my write succeed?" — and the caller
+/// uses it to decide whether to shell out through sudo.
+pub fn canWrite(io: Io, dir: []const u8) bool {
+    // Sized for a real path. A 64-byte buffer overflowed on any ordinary
+    // directory, and because the overflow was swallowed as "cannot write" the
+    // caller silently escalated to sudo for targets it could have written
+    // directly — every copy then failed with no usable explanation.
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const probe = std.fmt.bufPrint(&buf, "{s}/.hkm-write-probe", .{dir}) catch return false;
+
+    Dir.cwd().writeFile(io, .{ .sub_path = probe, .data = "" }) catch return false;
+    Dir.cwd().deleteFile(io, probe) catch {};
+    return true;
+}
+
 /// Whether an environment variable is set to something meaning "yes".
 ///
 /// Accepts 1 / true / yes / on, case-insensitively. Anything else — including
