@@ -206,18 +206,32 @@ fn studly(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
 }
 
 /// Scaffold the project. Returns the process exit code.
+fn printHelp() void {
+    prompt.intro("hkm new — create a new PhpServicePlatform project");
+    prompt.section("Usage");
+    prompt.item("hkm new <path>", "scaffold into <path>");
+    prompt.item("  --project=<name>", "project name (default: derived from path)");
+    prompt.item("  --domains=a.com,b.com", "comma-separated domains to register");
+    prompt.item("  --no-register", "skip kernel registry registration");
+    prompt.item("  --help, -h", "show this help");
+    prompt.blank();
+    prompt.section("Example");
+    prompt.note("hkm new ./my-shop --project=shop --domains=shop.localhost,shop.local");
+    prompt.outro("Pass a target path to begin");
+}
+
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
+    // An explicit --help is a successful request and must exit 0; reaching the
+    // null branch below means the arguments were wrong, which is an error.
+    for (args[@min(2, args.len)..]) |a| {
+        if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
+            printHelp();
+            return 0;
+        }
+    }
+
     var opts = (try parse(allocator, args)) orelse {
-        prompt.intro("hkm new — create a new PhpServicePlatform project");
-        prompt.section("Usage");
-        prompt.item("hkm new <path>", "scaffold into <path>");
-        prompt.item("  --project=<name>", "project name (default: derived from path)");
-        prompt.item("  --domains=a.com,b.com", "comma-separated domains to register");
-        prompt.item("  --no-register", "skip kernel registry registration");
-        prompt.blank();
-        prompt.section("Example");
-        prompt.note("hkm new ./my-shop --project=shop --domains=shop.localhost,shop.local");
-        prompt.outro("Pass a target path to begin");
+        printHelp();
         return 2;
     };
 
