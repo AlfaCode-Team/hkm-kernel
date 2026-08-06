@@ -53,8 +53,8 @@ use Plugins\Tenancy\Infrastructure\Provisioning\DdlTenantProvisioner;
 use Plugins\Tenancy\Infrastructure\Persistence\TenantHostRepository;
 use Plugins\Tenancy\Infrastructure\Persistence\TenantRegistry;
 use Plugins\Tenancy\Infrastructure\TenantConnectionResolver;
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
+use Plugins\Logger\Infrastructure\NullLogger;
 
 /**
  * Provider — wires the Tenancy control plane.
@@ -365,12 +365,12 @@ final class Provider implements ModuleContract
         }
     }
 
-    private static function optionalLogger(mixed $container): LoggerInterface
+    private static function optionalLogger(mixed $container): LoggerPort
     {
         try {
-            $logger = $container->make(LoggerInterface::class);
+            $logger = $container->make(LoggerPort::class);
 
-            return $logger instanceof LoggerInterface ? $logger : new NullLogger();
+            return $logger instanceof LoggerPort ? $logger : new NullLogger();
         } catch (\Throwable) {
             return new NullLogger();
         }

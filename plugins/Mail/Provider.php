@@ -132,17 +132,30 @@ final class Provider implements ModuleContract
         return new DkimSigner($domain, $selector, $key);
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Mail configuration, from the compiled config manifest.
+     *
+     * The manifest deep-merges this plugin's config/mail.php with the project's,
+     * so a project overriding one key (say mail.from.address) inherits every
+     * other default instead of having to copy the whole file — which is what the
+     * previous project-file-REPLACES-plugin-file lookup forced.
+     *
+     * Falls back to reading the shipped file directly when no manifest exists,
+     * so the plugin still works in a unit test that never ran the BootPipeline.
+     *
+     * @return array<string,mixed>
+     */
     private function config(): array
     {
-        $default = __DIR__ . '/config/mail.php';
-        $path = function_exists('config_path') && is_file(config_path('mail.php'))
-            ? config_path('mail.php')
-            : $default;
+        $config = \function_exists('config') ? config('mail') : null;
 
-        /** @var array<string,mixed> $config */
-        $config = is_file($path) ? require $path : [];
+        if (\is_array($config) && $config !== []) {
+            return $config;
+        }
 
-        return is_array($config) ? $config : [];
+        /** @var array<string,mixed> $fallback */
+        $fallback = require __DIR__ . '/config/mail.php';
+
+        return \is_array($fallback) ? $fallback : [];
     }
 }

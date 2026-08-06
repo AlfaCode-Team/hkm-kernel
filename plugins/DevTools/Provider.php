@@ -10,6 +10,8 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
+use Plugins\DevTools\Commands\ConfigClearCommand;
+use Plugins\DevTools\Commands\ConfigShowCommand;
 use Plugins\DevTools\Commands\MakePluginCommand;
 use Plugins\DevTools\Commands\MakeServiceCommand;
 use Plugins\DevTools\Commands\ModuleListCommand;
@@ -55,5 +57,7 @@ final class Provider implements ModuleContract
         $cli->command(ModuleInfoCommand::class);
         $cli->command(RoutesListCommand::class);
         $cli->command(ProjectListCommand::class);
+        $cli->command(ConfigShowCommand::class);
+        $cli->command(ConfigClearCommand::class);
     }
 }

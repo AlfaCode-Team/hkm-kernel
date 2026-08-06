@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Plugins\Commands\Logging;
 
-use Psr\Log\LoggerInterface;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
 use Psr\Log\LogLevel;
 
 final class CommandExecutionLogger
@@ -13,7 +13,7 @@ final class CommandExecutionLogger
     private string $commandName = '';
 
     public function __construct(
-        private readonly LoggerInterface $logger,
+        private readonly LoggerPort $logger,
     ) {
         $this->startTime = microtime(true);
     }

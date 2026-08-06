@@ -124,11 +124,14 @@ final class Provider implements ModuleContract
         );
 
         // Register enterprise feature classes (all use the single infrastructure service!)
-        $container->singleton(\Psr\Log\LoggerInterface::class, fn($c) =>
-            new \Psr\Log\NullLogger()
-        );
+        //
+        // NOTE: this used to bind Psr\Log\LoggerInterface to a NullLogger — the
+        // ONLY logger binding in the codebase — so every command-audit line, and
+        // every line the Database/Tenancy/EventBus components wrote, was silently
+        // discarded. Resolve the real LoggerPort instead; the Logger plugin
+        // supplies a file-backed default when the project has not wired one.
         $container->singleton(CommandExecutionLogger::class, fn($c) =>
-            new CommandExecutionLogger($c->make(\Psr\Log\LoggerInterface::class))
+            new CommandExecutionLogger($c->make(\AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort::class))
         );
         $container->singleton(DeploymentLockManager::class, fn($c) =>
             new DeploymentLockManager($c->make(CommandsInfrastructureService::class))
