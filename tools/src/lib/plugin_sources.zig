@@ -171,6 +171,10 @@ pub const ModuleMeta = struct {
     doc: ?[]const u8 = null,
     /// "description" — fallback doc text.
     description: ?[]const u8 = null,
+    /// "kernel" — semver constraint on the kernel this plugin supports
+    /// (e.g. "^1.0"). Absent means "no opinion" and never blocks installation;
+    /// see plugin_registry.checkKernel.
+    kernel: ?[]const u8 = null,
 };
 
 /// Read `<pluginsDir>/<name>/module.json`. Returns null when absent/invalid.
@@ -190,6 +194,7 @@ pub fn readModuleMeta(allocator: std.mem.Allocator, io: Io, pluginsDir: []const 
         .requires = try strArrayField(allocator, parsed.object, "requires"),
         .doc = try docField(allocator, parsed.object, "documentation"),
         .description = strField(parsed.object, "description"),
+        .kernel = strField(parsed.object, "kernel"),
     };
 }
 
