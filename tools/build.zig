@@ -53,6 +53,25 @@ pub fn build(b: *std.Build) void {
         b.getInstallStep().dependOn(&to_bin.step);
     }
 
+    // `zig build test` — unit tests for the library modules.
+    //
+    // Rooted at src/main.zig rather than at individual files so that relative
+    // imports like `@import("../constants.zig")` resolve inside the module.
+    // Running `zig test src/lib/memory.zig` directly makes src/lib the module
+    // root and that import fails, which is misleading rather than useful.
+    const unit_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    unit_tests.root_module.addOptions("build_info", build_info);
+
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    const test_step = b.step("test", "Run the tools unit tests");
+    test_step.dependOn(&run_unit_tests.step);
+
     const run_launcher = b.addRunArtifact(launcher);
 
     const run_step = b.step("run", "Run hkm launcher");

@@ -7,6 +7,21 @@ const Dir = std.Io.Dir;
 const Io = std.Io;
 const EnvMap = std.process.Environ.Map;
 
+/// Whether an environment variable is set to something meaning "yes".
+///
+/// Accepts 1 / true / yes / on, case-insensitively. Anything else — including
+/// an unset variable, an empty value, or "0" — is false. Centralised so every
+/// HKM_* toggle agrees on what truthy means; a variable that reads as enabled
+/// to one command and disabled to another is a confusing bug to chase.
+pub fn envIsTruthy(env: *EnvMap, key: []const u8) bool {
+    const raw = env.get(key) orelse return false;
+    const v = std.mem.trim(u8, raw, " \t\r\n");
+    for ([_][]const u8{ "1", "true", "yes", "on" }) |t| {
+        if (eqlIgnoreCase(v, t)) return true;
+    }
+    return false;
+}
+
 /// Restrict a file to owner-only (chmod 0600). No-op on Windows. Best-effort —
 /// used for secret-bearing files like a project's .env.
 pub fn chmod600(io: Io, path: []const u8) void {

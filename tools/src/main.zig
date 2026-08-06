@@ -15,6 +15,7 @@ const util = @import("lib/util.zig");
 const userconfig = @import("lib/userconfig.zig");
 const banner = @import("lib/banner.zig");
 const prompt = @import("lib/prompt.zig");
+const memory = @import("lib/memory.zig");
 
 fn printHelp() void {
     banner.print();
@@ -35,6 +36,7 @@ fn printHelp() void {
     prompt.item("hkm version", "show the HKM banner + version (also --version, -v)");
     prompt.item("hkm help", "show this help");
     prompt.item("hkm <cmd> --dev", "use the development kernel (this monorepo) instead of the installed stable copy");
+    prompt.item("hkm <cmd> --mem", "print the memory inspector dashboard when the command finishes (debug builds)");
     prompt.blank();
 
     prompt.section("Environment");
@@ -46,6 +48,8 @@ fn printHelp() void {
     prompt.item("PSP_PROJECTS_DIR", "dir holding the kernel projects.json registry");
     prompt.item("HKM_KERNEL_HOME", "kernel root (registry at <root>/projects/projects.json)");
     prompt.item("HKM_DEV_HOME", "development kernel checkout used by --dev (set once via hkm-config)");
+    prompt.item("HKM_MEM_INSPECT", "always print the memory dashboard (same as passing --mem)");
+    prompt.item("HKM_MEM_STRICT", "exit 70 when a leak is detected — for CI");
 
     prompt.outro("Run 'hkm <command> --help' for command details");
 }
@@ -66,10 +70,96 @@ fn phpBin(allocator: std.mem.Allocator, env_map: *std.process.Environ.Map) ![]co
     return try allocator.dupe(u8, "php");
 }
 
+/// Entry point.
+///
+/// Deliberately thin: it owns the memory manager and is the ONLY place that
+/// calls std.process.exit(). Everything else returns an exit code up to here.
+///
+/// This used to matter less than it looks. Every command arm called
+/// std.process.exit(code) directly, and std.process.exit does NOT run deferred
+/// code — so `threaded.deinit()` and the arena's `deinit()` never executed on
+/// any successful command. The process exiting made that harmless in practice,
+/// but it also meant a memory report or leak check could never run, because
+/// control never returned from the dispatch. Routing the exit code back here is
+/// what makes the inspector possible at all.
 pub fn main(init: std.process.Init.Minimal) !void {
-    var arena_allocator: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    var mm = memory.Manager.init();
+
+    const code = dispatch(init, &mm) catch |err| {
+        // Still tear down on the error path, so a failing command reports its
+        // leaks too.
+        _ = mm.deinit(reportRuntime());
+        return err;
+    };
+
+    const teardown = mm.deinit(reportRuntime());
+
+    // HKM_MEM_STRICT turns a leak into a failing exit status, so CI can treat
+    // leaks as build failures rather than something a human has to notice in
+    // scrollback. Never overrides a real command failure.
+    if (teardown == .leaked and code == 0 and memory_strict) {
+        std.process.exit(70); // EX_SOFTWARE
+    }
+
+    std.process.exit(code);
+}
+
+/// The runtime label for the dashboard, or null to stay silent.
+///
+/// Reporting is opt-in: `hkm` is a CLI whose output gets piped and parsed, so
+/// an unrequested dashboard on every invocation would be actively harmful.
+fn reportRuntime() ?[]const u8 {
+    if (!memory_inspect_requested) return null;
+    return "hkm";
+}
+
+/// Set during argument parsing when `--mem` is passed (or HKM_MEM_INSPECT is
+/// truthy). A file-level flag rather than a parameter because the decision is
+/// made deep in dispatch() but consumed in main() after it returns.
+var memory_inspect_requested: bool = false;
+
+/// Set from HKM_MEM_STRICT. Read in main() after dispatch() has returned, by
+/// which point the environment map it was read from is out of scope.
+var memory_strict: bool = false;
+
+/// A per-command allocation scope.
+///
+/// Tags the memory group and then opens a fresh arena, in that order. The order
+/// is the whole point: the arena requests memory from the manager in large
+/// chunks, so whichever group is active when it takes its FIRST chunk gets
+/// charged for everything served out of it. With one process-wide arena opened
+/// during startup, every command's memory was attributed to "startup" and the
+/// group breakdown showed nothing useful.
+///
+/// Giving each command its own arena also means its memory is genuinely
+/// released when it finishes, rather than accumulating until process exit.
+const CmdScope = struct {
+    arena: std.heap.ArenaAllocator,
+
+    fn begin(mm: *memory.Manager, name: []const u8) CmdScope {
+        mm.group(name);
+        return .{ .arena = memory.scratch(mm.allocator()) };
+    }
+
+    fn allocator(self: *CmdScope) std.mem.Allocator {
+        return self.arena.allocator();
+    }
+
+    fn end(self: *CmdScope) void {
+        self.arena.deinit();
+    }
+};
+
+fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
+    // The arena is kept — command code allocates many short-lived strings and
+    // dropping them in one call is the right shape. It is now backed by the
+    // memory manager rather than the page allocator directly, so everything the
+    // CLI spends shows up in the inspector and the debug allocator can prove the
+    // arena itself was released.
+    var arena_allocator: std.heap.ArenaAllocator = memory.scratch(mm.allocator());
     defer arena_allocator.deinit();
     const allocator = arena_allocator.allocator();
+    mm.group("startup");
     // global_single_threaded uses a `.failing` allocator, which makes
     // std.process.spawn OOM (it allocates argv/env before fork). Use a real
     // allocator-backed Threaded io so spawning child processes works.
@@ -95,9 +185,17 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var dev_mode = false;
     var args_list: std.ArrayList([]const u8) = .empty;
     defer args_list.deinit(allocator);
+    memory_inspect_requested = util.envIsTruthy(&env_map, "HKM_MEM_INSPECT");
+    memory_strict = util.envIsTruthy(&env_map, "HKM_MEM_STRICT");
     for (raw_args) |a| {
         if (std.mem.eql(u8, a, "--dev")) {
             dev_mode = true;
+            continue;
+        }
+        // `--mem` prints the memory dashboard when the command finishes. Like
+        // --dev it is stripped here so downstream arg parsing never sees it.
+        if (std.mem.eql(u8, a, "--mem")) {
+            memory_inspect_requested = true;
             continue;
         }
         try args_list.append(allocator, a);
@@ -119,7 +217,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
                     dev_home = try allocator.dupe(u8, t);
                 } else {
                     prompt.err(try std.fmt.allocPrint(allocator, "HKM_DEV_HOME points to {s} but that is not a kernel checkout (no composer.json).", .{t}));
-                    std.process.exit(1);
+                    return 1;
                 }
             }
         }
@@ -135,92 +233,107 @@ pub fn main(init: std.process.Init.Minimal) !void {
             prompt.muted(try std.fmt.allocPrint(allocator, "dev mode: using kernel at {s}", .{home}));
         } else {
             prompt.err("--dev: no development kernel found. Set HKM_DEV_HOME to your checkout, or run the repo-built tools/zig-out/bin/hkm from inside it.");
-            std.process.exit(1);
+            return 1;
         }
     }
 
     if (args.len <= 1) {
         printHelp();
-        return;
+        return 0;
     }
 
     const cmd = args[1];
     if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "--help") or std.mem.eql(u8, cmd, "-h")) {
         printHelp();
-        return;
+        return 0;
     }
     if (std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-v")) {
         banner.printShort();
-        return;
+        return 0;
     }
     if (std.mem.eql(u8, cmd, "version")) {
         banner.print();
-        return;
+        return 0;
     }
     if (std.mem.eql(u8, cmd, "upgrade") or std.mem.eql(u8, cmd, "self-update")) {
-        const code = try upgrade_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "upgrade");
+        defer scope.end();
+        return try upgrade_cmd.run(scope.allocator(), io, &env_map, args);
     }
 
     // `new` / `update` are handled natively in Zig (no PHP required).
     if (std.mem.eql(u8, cmd, "new")) {
-        const code = try new_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "new");
+        defer scope.end();
+        return try new_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "update")) {
-        const code = try update_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "update");
+        defer scope.end();
+        return try update_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "run") or std.mem.eql(u8, cmd, "serve")) {
-        const code = try run_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "run");
+        defer scope.end();
+        return try run_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "ls")) {
-        const code = try list_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "list");
+        defer scope.end();
+        return try list_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "discover") or std.mem.eql(u8, cmd, "scan")) {
-        const code = try discover_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "discover");
+        defer scope.end();
+        return try discover_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "module")) {
-        const code = try module_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "module");
+        defer scope.end();
+        return try module_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "plugins") or std.mem.eql(u8, cmd, "modules")) {
-        const code = try plugins_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "plugins");
+        defer scope.end();
+        return try plugins_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "ui")) {
-        const code = try ui_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "ui");
+        defer scope.end();
+        return try ui_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "cli")) {
-        const code = try cli_cmd.run(allocator, io, &env_map, args, false);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "cli");
+        defer scope.end();
+        return try cli_cmd.run(scope.allocator(), io, &env_map, args, false);
     }
     if (std.mem.eql(u8, cmd, "worker")) {
-        const code = try cli_cmd.run(allocator, io, &env_map, args, true);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "worker");
+        defer scope.end();
+        return try cli_cmd.run(scope.allocator(), io, &env_map, args, true);
     }
     if (std.mem.eql(u8, cmd, "doctor")) {
-        const code = try doctor_cmd.run(allocator, io, &env_map, args);
-        std.process.exit(code);
+        var scope = CmdScope.begin(mm, "doctor");
+        defer scope.end();
+        return try doctor_cmd.run(scope.allocator(), io, &env_map, args);
     }
 
-    const php = try phpBin(allocator, &env_map);
-    const cli = try findCliPath(allocator, io, &env_map);
+    var scope = CmdScope.begin(mm, "passthrough");
+    defer scope.end();
+    const pass = scope.allocator();
+    const php = try phpBin(pass, &env_map);
+    const cli = try findCliPath(pass, io, &env_map);
 
     var child_argv: std.ArrayList([]const u8) = .empty;
-    defer child_argv.deinit(allocator);
+    defer child_argv.deinit(pass);
 
-    try child_argv.append(allocator, php);
-    try child_argv.append(allocator, cli);
+    try child_argv.append(pass, php);
+    try child_argv.append(pass, cli);
 
     // pass-through remaining arguments
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
-        try child_argv.append(allocator, args[i]);
+        try child_argv.append(pass, args[i]);
     }
 
     var child = try std.process.spawn(io, .{
@@ -232,8 +345,27 @@ pub fn main(init: std.process.Init.Minimal) !void {
     });
 
     const term = try child.wait(io);
-    switch (term) {
-        .exited => |code| std.process.exit(code),
-        else => std.process.exit(1),
-    }
+    return switch (term) {
+        .exited => |code| code,
+        else => 1,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Test collection
+//
+// Zig only runs `test` blocks from files it actually analyses. A top-level
+// `@import` is not enough on its own: without referencing the imported file
+// from an analysed declaration, its tests are silently skipped and `zig build
+// test` reports success having run nothing. Referencing each module here is
+// what pulls their tests into the binary.
+//
+// Verified by mutation — breaking an assertion in lib/memory.zig must turn this
+// step red. If it does not, the module below is not being reached.
+// ---------------------------------------------------------------------------
+test {
+    _ = @import("lib/memory.zig");
+    _ = @import("lib/util.zig");
+    _ = @import("lib/inspector/tracked.zig");
+    _ = @import("lib/inspector/meminspector.zig");
 }
