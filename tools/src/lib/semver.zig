@@ -91,6 +91,49 @@ pub const Version = struct {
     }
 };
 
+/// Parse a version that may carry a `git describe` suffix.
+///
+/// `git describe --tags` yields "v1.0.21-138-gbdbbf34" — meaning "138 commits
+/// after v1.0.21" — and tools/bundle.sh stamps exactly that into a build made
+/// between releases. Plain semver reads the "-138-gbdbbf34" part as a
+/// PRE-RELEASE, which sorts BELOW 1.0.21. The result is that a build made 138
+/// commits AFTER v1.0.21 is considered older than v1.0.21, and a plugin
+/// requiring ">=1.0.21" is refused on it.
+///
+/// The describe suffix is recognised and dropped, so the build is treated as
+/// its base version. That is deliberately conservative: the true version is
+/// somewhere between this tag and the next, and claiming the lower bound can
+/// only ever refuse a plugin that a newer kernel would have accepted — never
+/// admit one it should have rejected.
+///
+/// A genuine pre-release ("1.0.0-rc.1") keeps its tag and its lower precedence.
+pub fn parseDescribed(raw: []const u8) ?Version {
+    const v = Version.parse(raw) orelse return null;
+    if (v.pre.len == 0) return v;
+    if (!isDescribeSuffix(v.pre)) return v;
+
+    return .{ .major = v.major, .minor = v.minor, .patch = v.patch, .pre = "" };
+}
+
+/// Does `pre` look like git-describe's "<commits>-g<sha>" trailer?
+fn isDescribeSuffix(pre: []const u8) bool {
+    // Split on the LAST '-': "138-gbdbbf34" → "138" and "gbdbbf34".
+    const dash = std.mem.lastIndexOfScalar(u8, pre, '-') orelse return false;
+    const count = pre[0..dash];
+    const gsha = pre[dash + 1 ..];
+
+    if (count.len == 0 or gsha.len < 2) return false;
+    if (gsha[0] != 'g') return false;
+
+    for (count) |c| {
+        if (!std.ascii.isDigit(c)) return false;
+    }
+    for (gsha[1..]) |c| {
+        if (!std.ascii.isHex(c)) return false;
+    }
+    return true;
+}
+
 /// Why a constraint could not be evaluated, so callers can explain themselves.
 pub const MatchError = error{
     /// The constraint string could not be understood.
@@ -340,4 +383,39 @@ test "a malformed constraint is an error, not a silent yes" {
     // check exists to prevent.
     try std.testing.expectError(MatchError.BadConstraint, satisfies(Version.parse("1.0.0").?, ">=nope"));
     try std.testing.expectError(MatchError.BadConstraint, satisfies(Version.parse("1.0.0").?, "^abc"));
+}
+
+test "a git describe suffix does not make a build look older than its tag" {
+    // tools/bundle.sh stamps `git describe --tags`, so any build between
+    // releases carries this shape. Read as plain semver it is a PRE-release of
+    // 1.0.21 and sorts below it, which refuses plugins the build can actually
+    // run.
+    const described = parseDescribed("1.0.21-138-gbdbbf34").?;
+
+    try std.testing.expectEqualStrings("", described.pre);
+    try std.testing.expect(try satisfies(described, ">=1.0.21"));
+    try std.testing.expect(try satisfies(described, "^1.0"));
+
+    // Plain parse still shows the problem this exists to solve.
+    const naive = Version.parse("1.0.21-138-gbdbbf34").?;
+    try std.testing.expect(!try satisfies(naive, ">=1.0.21"));
+}
+
+test "a real pre-release keeps its lower precedence" {
+    // Only the describe trailer is stripped. An rc must still sort below the
+    // release, or a release candidate would satisfy a constraint requiring the
+    // final version.
+    const rc = parseDescribed("1.0.0-rc.1").?;
+    try std.testing.expectEqualStrings("rc.1", rc.pre);
+    try std.testing.expect(!try satisfies(rc, ">=1.0.0"));
+
+    const dev = parseDescribed("0.0.0-dev").?;
+    try std.testing.expectEqualStrings("dev", dev.pre);
+}
+
+test "describe detection does not fire on lookalikes" {
+    // "1.0.0-1-gz" has a non-hex sha; "1.0.0-beta-g1" has a non-numeric count.
+    try std.testing.expectEqualStrings("1-gz", parseDescribed("1.0.0-1-gz").?.pre);
+    try std.testing.expectEqualStrings("beta-g1", parseDescribed("1.0.0-beta-g1").?.pre);
+    try std.testing.expectEqualStrings("138", parseDescribed("1.0.21-138").?.pre);
 }
