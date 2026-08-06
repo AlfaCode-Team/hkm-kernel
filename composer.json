@@ -46,35 +46,7 @@
         "league/flysystem": "^3.34",
         "league/flysystem-aws-s3-v3": "^3.34",
         "symfony/http-foundation": "^8.1",
-        "symfony/mime": "^8.1",
-        "alfacode-team/hkm-plugin-audit": "@dev",
-        "alfacode-team/hkm-plugin-auth": "@dev",
-        "alfacode-team/hkm-plugin-authorization": "@dev",
-        "alfacode-team/hkm-plugin-commands": "@dev",
-        "alfacode-team/hkm-plugin-cookie": "@dev",
-        "alfacode-team/hkm-plugin-crypto": "@dev",
-        "alfacode-team/hkm-plugin-database": "@dev",
-        "alfacode-team/hkm-plugin-dev-tools": "@dev",
-        "alfacode-team/hkm-plugin-edge": "@dev",
-        "alfacode-team/hkm-plugin-feedback": "@dev",
-        "alfacode-team/hkm-plugin-http-client": "@dev",
-        "alfacode-team/hkm-plugin-i18n": "@dev",
-        "alfacode-team/hkm-plugin-logger": "@dev",
-        "alfacode-team/hkm-plugin-mail": "@dev",
-        "alfacode-team/hkm-plugin-oauth2": "@dev",
-        "alfacode-team/hkm-plugin-pageflow": "@dev",
-        "alfacode-team/hkm-plugin-redis-cache": "@dev",
-        "alfacode-team/hkm-plugin-security-filters": "@dev",
-        "alfacode-team/hkm-plugin-session": "@dev",
-        "alfacode-team/hkm-plugin-settings": "@dev",
-        "alfacode-team/hkm-plugin-siteseo": "@dev",
-        "alfacode-team/hkm-plugin-social-auth": "@dev",
-        "alfacode-team/hkm-plugin-storage": "@dev",
-        "alfacode-team/hkm-plugin-tenancy": "@dev",
-        "alfacode-team/hkm-plugin-user": "@dev",
-        "alfacode-team/hkm-plugin-validation": "@dev",
-        "alfacode-team/hkm-plugin-view": "@dev",
-        "alfacode-team/hkm-plugin-vitemanifest": "@dev"
+        "symfony/mime": "^8.1"
     },
     "require-dev": {
         "phpunit/phpunit": "13.2.x-dev",
@@ -85,13 +57,6 @@
         "composer/composer": "^2.7"
     },
     "repositories": [
-        {
-            "type": "path",
-            "url": "../plugins/hkm-plugin-*",
-            "options": {
-                "symlink": true
-            }
-        },
         {
             "type": "path",
             "url": "modules/http"
