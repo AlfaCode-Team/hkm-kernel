@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit\Plugins\User\Support;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\Lock;
+use Project\Infrastructure\ProcessLocalLock;
 
 /** In-memory CachePort for lockout tests. */
 final class FakeCache implements CachePort
@@ -29,5 +31,23 @@ final class FakeCache implements CachePort
     }
 
     public function deletePattern(string $pattern): int { return 0; }
-    public function flush(): bool { $this->store = []; return true; }
+    public function flush(): bool { $this->store = []; $this->locks = []; return true; }
+
+    /**
+     * Lock table shared with every ProcessLocalLock handed out — single-process
+     * only, which is exactly what a test needs.
+     *
+     * @var array<string, array{owner: string, expires: int}>
+     */
+    public array $locks = [];
+
+    public function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return new ProcessLocalLock($this, $name, $seconds, $owner);
+    }
+
+    public function restoreLock(string $name, string $owner): Lock
+    {
+        return new ProcessLocalLock($this, $name, 0, $owner);
+    }
 }

@@ -19,6 +19,16 @@ final class ScopeRegistryTest extends TestCase
             public function exists(string $scope): bool { return array_key_exists($scope, $this->map); }
             public function all(): array { return array_keys($this->map); }
             public function describe(): array { return $this->map; }
+            public function put(string $id, string $description): void { $this->map[$id] = $description; }
+            public function delete(string $id): bool
+            {
+                if (!array_key_exists($id, $this->map)) {
+                    return false;
+                }
+                unset($this->map[$id]);
+
+                return true;
+            }
         };
 
         return new ScopeRegistry($store);

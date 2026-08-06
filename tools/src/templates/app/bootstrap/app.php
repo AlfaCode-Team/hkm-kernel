@@ -240,7 +240,9 @@ return Kernel::configure()
     // (WordPress-nonce style): the token is signed with APP_KEY and bound to the
     // opaque `csrf_bind` cookie, so no cookie VALUE is ever trusted as the token.
     // /api is exempt because APIs authenticate per request, not via a browser
-    // CSRF token. Add a FirewallLayer / RateLimiterLayer here as needed.
+    // CSRF token — the only security layer the kernel ships. For IP filtering
+    // and rate limiting, declare the 'shield' / 'throttle' route filters from
+    // plugins/SecurityFilters on the routes that need them.
     ->withSecurity([
         new CsrfTokenLayer(
             bindCookie: 'csrf_bind',
