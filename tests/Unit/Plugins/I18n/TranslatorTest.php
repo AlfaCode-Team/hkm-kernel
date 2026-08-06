@@ -13,7 +13,14 @@ final class TranslatorTest extends TestCase
 {
     private function translator(): Translator
     {
-        return new Translator(\dirname(__DIR__, 4) . '/plugins/I18n/lang', 'en', 'en');
+        // Locate the catalogue from the Translator class itself rather than a
+        // hardcoded plugins/ path. Plugins now ship as composer packages, so
+        // their files live under vendor/ (a symlink into the plugins workspace)
+        // — a repo-relative path would silently break the moment the plugin is
+        // consumed as a dependency rather than a sibling directory.
+        $pluginRoot = \dirname((new \ReflectionClass(Translator::class))->getFileName());
+
+        return new Translator($pluginRoot . '/lang', 'en', 'en');
     }
 
     public function test_resolves_a_key_with_interpolation(): void
