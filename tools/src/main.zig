@@ -366,6 +366,11 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
 test {
     _ = @import("lib/memory.zig");
     _ = @import("lib/util.zig");
+    _ = @import("lib/semver.zig");
+    _ = @import("lib/plugin_registry.zig");
+    _ = @import("lib/plugin_lock.zig");
+    _ = @import("lib/plugin_git.zig");
+    _ = @import("lib/plugin_install.zig");
     _ = @import("lib/inspector/tracked.zig");
     _ = @import("lib/inspector/meminspector.zig");
 }
