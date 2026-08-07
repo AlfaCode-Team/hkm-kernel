@@ -35,8 +35,15 @@ jobs:
       - name: Read top CHANGELOG version
         id: ver
         run: |
-          # First "## [x.y.z]" heading — skips "## [Unreleased]".
-          VERSION="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md \
+          # First versioned heading — skips "## [Unreleased]".
+          #
+          # The pre-release suffix is part of the pattern: without it a
+          # "## [1.1.0-dev.2]" heading was skipped entirely and the NEXT
+          # heading down ("## [1.0.21]") matched instead. That version already
+          # has a tag, so the run reported "nothing to release" and a dev
+          # release merged to main would silently do nothing — while looking
+          # like it had been considered.
+          VERSION="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?\]' CHANGELOG.md \
                      | tr -d '## []')"
           if [ -z "$VERSION" ]; then
             echo "No versioned CHANGELOG entry found — nothing to release."
