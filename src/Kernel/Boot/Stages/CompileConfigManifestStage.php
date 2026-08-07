@@ -2,7 +2,7 @@
 
 namespace AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages;
 
-use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, ManifestReader, ManifestWriter};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, ManifestWriter};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
 /**
@@ -39,10 +39,17 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
  */
 final class CompileConfigManifestStage implements BootStageContract
 {
-    /** @param list<class-string> $moduleClasses */
+    /**
+     * No ManifestReader here, unlike the sibling stages: this one locates a
+     * plugin's config by DIRECTORY (config/*.php next to its Provider), never
+     * by reading module.json. It used to accept one anyway, purely for
+     * signature symmetry with the other stages — an injected dependency that
+     * was never read, implying a manifest lookup that does not happen.
+     *
+     * @param list<class-string> $moduleClasses
+     */
     public function __construct(
         private readonly array $moduleClasses,
-        private readonly ManifestReader $reader = new ManifestReader(),
     ) {}
 
     public function run(): void

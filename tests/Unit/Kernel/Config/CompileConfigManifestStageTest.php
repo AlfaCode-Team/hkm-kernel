@@ -78,7 +78,7 @@ final class CompileConfigManifestStageTest extends TestCase
         file_put_contents($providerFile, "<?php class {$class} {}");
         require $providerFile;
 
-        (new CompileConfigManifestStage([$class], new ManifestReader()))->run();
+        (new CompileConfigManifestStage([$class]))->run();
 
         return new Repository(ManifestReader::readCompiled('config-manifest.php'));
     }
@@ -120,6 +120,6 @@ final class CompileConfigManifestStageTest extends TestCase
 
         $this->expectExceptionMessageMatches('/must return an array, got string/');
 
-        (new CompileConfigManifestStage([], new ManifestReader()))->run();
+        (new CompileConfigManifestStage([]))->run();
     }
 }

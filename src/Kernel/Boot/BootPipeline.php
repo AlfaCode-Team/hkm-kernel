@@ -67,7 +67,7 @@ final class BootPipeline
             new CompileLangManifestStage($moduleClasses, reader: $reader),    // 7. lang[] → lang-manifest.php (project-first cascade)
             new CompileJobManifestStage($moduleClasses, reader: $reader),     // 8. jobs[] → job-manifest.php
             new CompileCommandManifestStage($moduleClasses, reader: $reader), // 9. commands[] → command-manifest.php
-            new CompileConfigManifestStage($moduleClasses, reader: $reader),  // 10. config/*.php → config-manifest.php (project over plugin)
+            new CompileConfigManifestStage($moduleClasses),                   // 10. config/*.php → config-manifest.php (project over plugin)
             new RegisterPortsStage($core),                   // 11. Port → Adapter bindings validated
             new BindSecurityStage($securityLayers),          // 12. SecurityGateway layers validated
         ];

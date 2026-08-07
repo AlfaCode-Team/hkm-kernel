@@ -50,6 +50,7 @@ final class Repository
             return $this->resolved[$key];
         }
 
+        $miss  = false;
         $value = $this->lookup($key, $miss);
 
         if ($miss) {
@@ -62,6 +63,7 @@ final class Repository
     /** True when the dotted path exists, even if its value is null. */
     public function has(string $key): bool
     {
+        $miss = false;
         $this->lookup($key, $miss);
 
         return !$miss;
@@ -89,7 +91,7 @@ final class Repository
      * Walk the dotted path. $miss is set by reference so a stored null is
      * distinguishable from an absent key.
      */
-    private function lookup(string $key, ?bool &$miss): mixed
+    private function lookup(string $key, bool &$miss): mixed
     {
         $miss = false;
 
