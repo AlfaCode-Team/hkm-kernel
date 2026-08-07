@@ -142,5 +142,16 @@ jobs:
           # auto-generated "What's Changed" / contributors below it.
           body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release-body.md' || '' }}
           generate_release_notes: true
-          draft: false
+          # Created as a DRAFT, then published by the step below.
+          #
+          # This repository has immutable releases enabled, which forbid
+          # attaching assets after a release is published. Publishing first and
+          # uploading second produced a release with NO binaries on it and no
+          # way to add them — the artifacts built fine and simply had nowhere to
+          # go. Assets must land while the release is still a draft.
+          draft: true
           prerelease: ${{ contains(steps.notes.outputs.version, '-') }}
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v${{ steps.notes.outputs.version }}" --draft=false --repo "$GITHUB_REPOSITORY"
