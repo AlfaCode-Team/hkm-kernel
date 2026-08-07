@@ -17,6 +17,11 @@ const boot = @import("../lib/plugin_bootstrap.zig");
 const assets = @import("../lib/plugin_assets.zig");
 const ui = @import("../lib/plugin_ui.zig");
 const deps = @import("../lib/plugin_deps.zig");
+const installer = @import("../lib/plugin_install.zig");
+const pgit = @import("../lib/plugin_git.zig");
+const plock = @import("../lib/plugin_lock.zig");
+const pregistry = @import("../lib/plugin_registry.zig");
+const banner = @import("../lib/banner.zig");
 const services = @import("../lib/services.zig");
 
 const Dir = std.Io.Dir;
@@ -28,7 +33,7 @@ const Located = sources.Located;
 const Enabled = boot.Enabled;
 const Activation = boot.Activation;
 
-const Action = enum { analyze, verify, recover, enable, disable, update, upgrade, create, delete, make_migration, make_seeder, make_factory };
+const Action = enum { analyze, verify, recover, enable, disable, update, upgrade, create, delete, make_migration, make_seeder, make_factory, install, uninstall, versions, outdated, sync_lock };
 
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
     var action: Action = .analyze;
@@ -37,6 +42,12 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     var dry_run = false;
     var want_kernel = false;
     var fix = false;
+    // --version=vX.Y.Z for install/update; empty means "newest allowed".
+    var want_version: []const u8 = "";
+    // --force: overwrite a working copy with uncommitted changes.
+    var force = false;
+    // --full: clone full history instead of --depth 1.
+    var full_clone = false;
 
     var operands: std.ArrayList([]const u8) = .empty;
     var saw_action = false;
@@ -54,6 +65,12 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
             want_kernel = true;
         } else if (std.mem.eql(u8, a, "--fix") or std.mem.eql(u8, a, "-f")) {
             fix = true;
+        } else if (std.mem.startsWith(u8, a, "--version=")) {
+            want_version = a["--version=".len..];
+        } else if (std.mem.eql(u8, a, "--force")) {
+            force = true;
+        } else if (std.mem.eql(u8, a, "--full")) {
+            full_clone = true;
         } else if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
             printHelp();
             return 0;
@@ -71,6 +88,38 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
 
     switch (action) {
         .analyze => return analyze(allocator, io, env, op(ops, 0), show_all),
+        .install => {
+            if (ops.len == 0) {
+                prompt.err("Usage: hkm plugins install <plugin> [path|name] [--version=vX.Y.Z] [--force] [--full] [--dry-run]");
+                return 2;
+            }
+            return installCmd(allocator, io, env, op(ops, 0), op(ops, 1), .{
+                .version = want_version,
+                .dry_run = dry_run,
+                .force = force,
+                .full = full_clone,
+            });
+        },
+        .uninstall => {
+            if (ops.len == 0) {
+                prompt.err("Usage: hkm plugins uninstall <plugin> [path|name] [--dry-run]");
+                return 2;
+            }
+            return uninstallCmd(allocator, io, env, op(ops, 0), op(ops, 1), dry_run, force);
+        },
+        .versions => {
+            if (ops.len == 0) {
+                prompt.err("Usage: hkm plugins versions <plugin>");
+                return 2;
+            }
+            return versionsCmd(allocator, io, env, op(ops, 0));
+        },
+        .outdated => return outdatedCmd(allocator, io, env, op(ops, 0)),
+        .sync_lock => return lockCmd(allocator, io, env, op(ops, 0), dry_run, .{
+            .version = want_version,
+            .force = force,
+            .full = full_clone,
+        }),
         .verify => return verifyPlugins(allocator, io, env, op(ops, 0), fix),
         .recover => return recoverAssets(allocator, io, env, op(ops, 0), dry_run),
         .enable, .disable => {
@@ -148,6 +197,13 @@ fn actionFromWordOpt(a: []const u8) ?Action {
         std.mem.eql(u8, a, "seeder")) return .make_seeder;
     if (std.mem.eql(u8, a, "make:factory") or std.mem.eql(u8, a, "make-factory") or
         std.mem.eql(u8, a, "factory")) return .make_factory;
+    // Git-backed lifecycle. `fetch`/`get` alias install because that is what
+    // people type first.
+    if (std.mem.eql(u8, a, "install") or std.mem.eql(u8, a, "fetch") or std.mem.eql(u8, a, "get")) return .install;
+    if (std.mem.eql(u8, a, "uninstall")) return .uninstall;
+    if (std.mem.eql(u8, a, "versions") or std.mem.eql(u8, a, "releases")) return .versions;
+    if (std.mem.eql(u8, a, "outdated")) return .outdated;
+    if (std.mem.eql(u8, a, "lock")) return .sync_lock;
     if (std.mem.eql(u8, a, "list") or std.mem.eql(u8, a, "ls")) return .analyze;
     if (std.mem.eql(u8, a, "verify") or std.mem.eql(u8, a, "check") or std.mem.eql(u8, a, "doctor") or
         std.mem.eql(u8, a, "scan") or std.mem.eql(u8, a, "audit")) return .verify;
@@ -592,8 +648,35 @@ fn enableWithDeps(
     essential: bool,
     dry_run: bool,
 ) !u8 {
-    if (located == null)
-        prompt.warn(try std.fmt.allocPrint(allocator, "{s} not found in any plugins source — wiring by name anyway.", .{folder}));
+    // Not on disk: fetch it from its git remote before wiring it.
+    //
+    // This used to wire the plugin into the bootstrap "by name anyway", which
+    // produced a project that referenced a Provider class that did not exist —
+    // the failure landed at boot, as a class-not-found, rather than here where
+    // the cause is obvious. Fetching first means enable either works or says
+    // why it cannot.
+    var fetched: ?installer.Outcome = null;
+    if (located == null and !dry_run) {
+        prompt.muted(try std.fmt.allocPrint(allocator, "{s} is not installed — fetching it…", .{folder}));
+
+        const outcome = try installer.install(allocator, io, env, root, folder, .{});
+        switch (outcome) {
+            .refused => |why| {
+                prompt.err(why);
+                return 1;
+            },
+            .installed, .up_to_date, .updated => {
+                fetched = outcome;
+                _ = try installer.report(allocator, folder, outcome, false);
+            },
+        }
+    } else if (located == null) {
+        prompt.warn(try std.fmt.allocPrint(
+            allocator,
+            "{s} is not installed. A real run would fetch it from git first.",
+            .{folder},
+        ));
+    }
 
     // Build the ordered enable list: unmet dependencies first, target last.
     var needed: std.ArrayList(deps.Provider) = .empty;
@@ -611,6 +694,16 @@ fn enableWithDeps(
     if (!target_enabled) {
         const dir = if (located) |l| l.dir else if (deps.findByName(cat, folder)) |p| p.located.dir else null;
         try steps.append(allocator, .{ .folder = folder, .dir = dir, .essential = essential, .dependency = false });
+    }
+
+    if (fetched) |outcome| {
+        // Record it only after the fetch succeeded, so the lock never names a
+        // plugin the project does not actually have.
+        switch (outcome) {
+            .installed, .up_to_date => |e| try installer.recordInLock(allocator, io, root, e),
+            .updated => |u| try installer.recordInLock(allocator, io, root, u.to),
+            .refused => {},
+        }
     }
 
     if (steps.items.len == 0) {
@@ -1560,6 +1653,13 @@ fn printHelp() void {
     prompt.item("hkm plugins upgrade [proj]", "full upgrade after plugins changed: heal new deps, publish/migrate, reconcile plugin SPLITS (moves migration ownership without dropping data)");
     prompt.item("hkm plugins create <name> [proj]", "scaffold a new plugin (project, or --kernel)");
     prompt.item("hkm plugins delete <name> [proj]", "delete a plugin folder from disk");
+    prompt.blank();
+    prompt.section("From git");
+    prompt.item("hkm plugins install <plugin> [proj]", "fetch a plugin from its git remote (aliases: fetch/get)");
+    prompt.item("hkm plugins uninstall <plugin> [proj]", "delete an installed plugin and drop it from the lock");
+    prompt.item("hkm plugins versions <plugin>", "list the releases available on the remote");
+    prompt.item("hkm plugins outdated [proj]", "show which locked plugins have a newer release");
+    prompt.item("hkm plugins lock [proj]", "restore every plugin at the exact version plugins.lock.json records");
     prompt.item("hkm plugins make:migration <plugin> <name>", "add a migration INTO a plugin (not published)");
     prompt.item("hkm plugins make:seeder|make:factory <plugin> <name>", "add a seeder/factory into a plugin");
     prompt.blank();
@@ -1568,6 +1668,9 @@ fn printHelp() void {
     prompt.item("--essential, -e", "enable into withEssentialModules() (default: on-demand)");
     prompt.item("--kernel, -k", "create/delete a KERNEL plugin (kernel monorepo only)");
     prompt.item("--dry-run, -n", "preview the change without writing");
+    prompt.item("--version=<tag>", "install/update to a specific release instead of the newest");
+    prompt.item("--force", "overwrite a plugin working copy that has uncommitted changes");
+    prompt.item("--full", "clone full history instead of a shallow --depth 1");
     prompt.item("--fix, -f", "verify: publish missing assets + wire Support requires");
     prompt.item("--help, -h", "show this help");
     prompt.blank();
@@ -1590,4 +1693,229 @@ fn printHelp() void {
     prompt.item("name", "a project registered in the kernel registry");
     prompt.item("(none)", "the current working directory");
     prompt.outro("Reads app/bootstrap/app.php + kernel plugins/*/module.json");
+}
+
+// ── git-backed plugin lifecycle ───────────────────────────────────────────────
+
+/// `hkm plugins install <plugin> [proj]` — fetch a plugin from its git remote
+/// into the project's plugins/ and record it in plugins.lock.json.
+fn installCmd(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    plugin: []const u8,
+    target: []const u8,
+    opts: installer.Options,
+) !u8 {
+    const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
+
+    prompt.intro("hkm plugins install");
+    prompt.ok(try std.fmt.allocPrint(allocator, "project  {s}", .{root}));
+
+    const remote = try pregistry.remoteFor(allocator, env, plugin);
+    prompt.muted(try std.fmt.allocPrint(allocator, "remote   {s}", .{remote}));
+
+    const outcome = try installer.install(allocator, io, env, root, plugin, opts);
+    const code = try installer.report(allocator, plugin, outcome, opts.dry_run);
+
+    // Only a real change touches the lock file; a dry run must leave the
+    // project byte-identical.
+    if (!opts.dry_run) {
+        switch (outcome) {
+            .installed, .up_to_date => |e| try installer.recordInLock(allocator, io, root, e),
+            .updated => |u| try installer.recordInLock(allocator, io, root, u.to),
+            .refused => {},
+        }
+    }
+
+    if (code == 0) {
+        prompt.outro(if (opts.dry_run) "Dry run — nothing was written" else "Enable it with: hkm plugins enable " ++ "");
+    }
+    return code;
+}
+
+/// `hkm plugins uninstall <plugin> [proj]` — delete the plugin folder and drop
+/// it from the lock. Deliberately does NOT touch the bootstrap: disabling is a
+/// separate, reversible decision, and removing wiring here would make an
+/// uninstall silently change which routes a project serves.
+fn uninstallCmd(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    plugin: []const u8,
+    target: []const u8,
+    dry_run: bool,
+    force: bool,
+) !u8 {
+    const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
+    const dir = try installer.targetDir(allocator, root, plugin);
+
+    prompt.intro("hkm plugins uninstall");
+
+    if (!util.dirExists(Dir.cwd(), io, dir)) {
+        prompt.warn(try std.fmt.allocPrint(allocator, "{s} is not installed in this project.", .{plugin}));
+        return 0;
+    }
+
+    // Uncommitted work in a plugin folder is usually a local fix in progress.
+    if (!force and pgit.isRepo(io, dir, allocator) and pgit.isDirty(allocator, io, env, dir)) {
+        prompt.err(try std.fmt.allocPrint(
+            allocator,
+            "{s} has uncommitted local changes. Commit or stash them, or pass --force to delete anyway.",
+            .{plugin},
+        ));
+        return 1;
+    }
+
+    if (dry_run) {
+        prompt.muted(try std.fmt.allocPrint(allocator, "would delete  {s}", .{dir}));
+        prompt.outro("Dry run — nothing was written");
+        return 0;
+    }
+
+    Dir.cwd().deleteTree(io, dir) catch {
+        prompt.err(try std.fmt.allocPrint(allocator, "could not delete {s}", .{dir}));
+        return 1;
+    };
+
+    var lock = try plock.read(allocator, io, root);
+    _ = lock.remove(plugin);
+    try plock.write(allocator, io, root, &lock, banner.version());
+
+    prompt.ok(try std.fmt.allocPrint(allocator, "removed  {s}", .{plugin}));
+    prompt.outro("It may still be wired in the bootstrap — run: hkm plugins disable");
+    return 0;
+}
+
+/// `hkm plugins versions <plugin>` — list the releases on the remote, marking
+/// which ones this kernel can actually run.
+fn versionsCmd(allocator: std.mem.Allocator, io: Io, env: *EnvMap, plugin: []const u8) !u8 {
+    if (!pgit.available(allocator, io, env)) {
+        prompt.err("git is not installed or not on PATH — it is required to query plugin releases.");
+        return 1;
+    }
+
+    const remote = try pregistry.remoteFor(allocator, env, plugin);
+
+    prompt.intro(try std.fmt.allocPrint(allocator, "Releases of {s}", .{plugin}));
+    prompt.muted(try std.fmt.allocPrint(allocator, "remote  {s}", .{remote}));
+
+    const tags = pgit.listTags(allocator, io, env, remote) catch |e| {
+        prompt.err(try std.fmt.allocPrint(allocator, "{s}: {s}", .{ plugin, pgit.explain(e) }));
+        return 1;
+    };
+
+    if (tags.len == 0) {
+        prompt.warn("no release tags — this plugin has never been tagged.");
+        prompt.outro("A plugin must be tagged before it can be installed");
+        return 0;
+    }
+
+    prompt.blank();
+    prompt.section("Available");
+    for (tags) |t| {
+        prompt.item(t.name, "");
+    }
+    prompt.outro(try std.fmt.allocPrint(allocator, "kernel {s} — install with --version=<tag>", .{banner.version()}));
+    return 0;
+}
+
+/// `hkm plugins outdated [proj]` — compare every locked plugin against its
+/// remote and report what has a newer release.
+fn outdatedCmd(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []const u8) !u8 {
+    const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
+
+    if (!pgit.available(allocator, io, env)) {
+        prompt.err("git is not installed or not on PATH.");
+        return 1;
+    }
+
+    const lock = try plock.read(allocator, io, root);
+
+    prompt.intro("hkm plugins outdated");
+    prompt.ok(try std.fmt.allocPrint(allocator, "project  {s}", .{root}));
+
+    if (lock.entries.items.len == 0) {
+        prompt.muted("no plugins are recorded in plugins.lock.json.");
+        prompt.outro("Install one with: hkm plugins install <plugin>");
+        return 0;
+    }
+
+    var behind: usize = 0;
+    prompt.blank();
+    for (lock.entries.items) |e| {
+        const remote = if (e.remote.len > 0) e.remote else try pregistry.remoteFor(allocator, env, e.name);
+        const latest = pgit.resolveVersion(allocator, io, env, remote, "") catch null;
+
+        if (latest) |l| {
+            if (!std.mem.eql(u8, l.name, e.version)) {
+                behind += 1;
+                prompt.item(e.name, try std.fmt.allocPrint(allocator, "{s} → {s}", .{
+                    if (e.version.len > 0) e.version else "(unpinned)",
+                    l.name,
+                }));
+            } else {
+                prompt.muted(try std.fmt.allocPrint(allocator, "{s}  {s} (current)", .{ e.name, e.version }));
+            }
+        } else {
+            prompt.warn(try std.fmt.allocPrint(allocator, "{s}  could not reach {s}", .{ e.name, remote }));
+        }
+    }
+
+    if (behind == 0) {
+        prompt.outro("Everything is on its latest release");
+        return 0;
+    }
+    prompt.outro(try std.fmt.allocPrint(allocator, "{d} plugin(s) behind — update with: hkm plugins install <plugin>", .{behind}));
+    return 0;
+}
+
+/// `hkm plugins lock [proj]` — reconcile the project against plugins.lock.json.
+///
+/// This is the command a fresh checkout runs: it installs every plugin the lock
+/// names, at the exact version it names. Without it a lock file is only a
+/// record; with it, it is reproducible.
+fn lockCmd(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    target: []const u8,
+    dry_run: bool,
+    base: installer.Options,
+) !u8 {
+    const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
+    const lock = try plock.read(allocator, io, root);
+
+    prompt.intro("hkm plugins lock");
+    prompt.ok(try std.fmt.allocPrint(allocator, "project  {s}", .{root}));
+
+    if (lock.entries.items.len == 0) {
+        prompt.muted("plugins.lock.json is empty or absent — nothing to restore.");
+        return 0;
+    }
+
+    var failed: usize = 0;
+    prompt.blank();
+    for (lock.entries.items) |e| {
+        if (std.mem.eql(u8, e.source, "local")) {
+            prompt.muted(try std.fmt.allocPrint(allocator, "{s}  local copy — skipped", .{e.name}));
+            continue;
+        }
+        // Pin to the EXACT locked version. Restoring a lock and getting a
+        // different version than it records would defeat the entire point.
+        const outcome = try installer.install(allocator, io, env, root, e.name, .{
+            .version = e.version,
+            .dry_run = dry_run,
+            .force = base.force,
+            .full = base.full,
+        });
+        if ((try installer.report(allocator, e.name, outcome, dry_run)) != 0) failed += 1;
+    }
+
+    if (failed > 0) {
+        prompt.outro(try std.fmt.allocPrint(allocator, "{d} plugin(s) could not be restored", .{failed}));
+        return 1;
+    }
+    prompt.outro(if (dry_run) "Dry run — nothing was written" else "Project matches plugins.lock.json");
+    return 0;
 }

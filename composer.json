@@ -37,7 +37,7 @@
         "symfony/console": "^8.0",
         "composer/pcre": "^3.3",
         "phpshots/common-type-alias": "0.1.1",
-        "phpshots/bind-it": "*",
+        "phpshots/bind-it": "^0.1.4 || dev-master",
         "alfacode-team/php-io-cli": "*",
         "alfacode-team/let-migrate": "*",
         "symfony/expression-language": "^7.0",
@@ -82,17 +82,10 @@
         "psr-4": {
             "AlfacodeTeam\\PhpServicePlatform\\": "src/",
             "AlfacodeTeam\\PhpServicePlatform\\System\\": "src/System/",
-            "Project\\": "projects/",
-            "Plugins\\": "plugins/"
+            "Project\\": "projects/"
         },
         "files": [
-            "src/Kernel/Support/helpers.php",
-            "plugins/I18n/Support/helpers.php",
-            "plugins/Auth/Support/helpers.php",
-            "plugins/Authorization/Engine/functions.php",
-            "plugins/Cookie/Support/helpers.php",
-            "plugins/Pageflow/Support/helpers.php",
-            "plugins/Edge/Support/helpers.php"
+            "src/Kernel/Support/helpers.php"
         ],
         "exclude-from-classmap": [
             "**/database/seeders/**",

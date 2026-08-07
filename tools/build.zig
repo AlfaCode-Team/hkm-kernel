@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
     const version = b.option([]const u8, "version", "Version string stamped into the binary") orelse "0.0.0-dev";
     const build_info = b.addOptions();
     build_info.addOption([]const u8, "version", version);
-    build_info.addOption([]const u8, "repo", "AlfaCode-Team/php-service-platform");
+    build_info.addOption([]const u8, "repo", "AlfaCode-Team/hkm-kernel");
 
     const launcher = b.addExecutable(.{
         .name = "hkm",
@@ -52,6 +52,69 @@ pub fn build(b: *std.Build) void {
     if (target.query.isNative()) {
         b.getInstallStep().dependOn(&to_bin.step);
     }
+
+    // `zig build test` — unit tests for the library modules.
+    //
+    // Rooted at src/main.zig rather than at individual files so that relative
+    // imports like `@import("../constants.zig")` resolve inside the module.
+    // Running `zig test src/lib/memory.zig` directly makes src/lib the module
+    // root and that import fails, which is misleading rather than useful.
+    const stamp_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/stamp.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const unit_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    unit_tests.root_module.addOptions("build_info", build_info);
+
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    const test_step = b.step("test", "Run the tools unit tests");
+    test_step.dependOn(&run_unit_tests.step);
+    test_step.dependOn(&b.addRunArtifact(stamp_tests).step);
+
+    // ── Stamp the version into composer.json ────────────────────────────────
+    //
+    // Only when -Dversion was passed explicitly (which tools/bundle.sh does for
+    // a release). A plain `zig build` is 0.0.0-dev, and writing that into
+    // composer.json would dirty the working tree on every build and eventually
+    // be committed by accident.
+    //
+    // The field is needed because the native distribution ships WITHOUT a .git
+    // directory: a .deb or zip has no tags for composer to derive a version
+    // from, so this is the installed kernel's only version marker. It is also
+    // why the field is a liability in a git checkout — a literal version
+    // OVERRIDES the tags, and the two silently drift apart.
+    const stamper = b.addExecutable(.{
+        .name = "hkm-stamp",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/stamp.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+
+    if (!std.mem.eql(u8, version, "0.0.0-dev")) {
+        const stamp_run = b.addRunArtifact(stamper);
+        stamp_run.addFileArg(b.path("../composer.json"));
+        stamp_run.addArg(version);
+        b.getInstallStep().dependOn(&stamp_run.step);
+    }
+
+    // `zig build stamp -Dversion=X` runs it on demand regardless.
+    const stamp_step = b.step("stamp", "Write -Dversion into the kernel composer.json");
+    const stamp_manual = b.addRunArtifact(stamper);
+    stamp_manual.addFileArg(b.path("../composer.json"));
+    stamp_manual.addArg(version);
+    stamp_step.dependOn(&stamp_manual.step);
 
     const run_launcher = b.addRunArtifact(launcher);
 

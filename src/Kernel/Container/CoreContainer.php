@@ -20,9 +20,12 @@ use PHPShots\Common\Interfaces\ContainerInterface as BindItContainerInterface;
  *
  * ── Swoole / OpenSwoole safety rules (also enforced under FPM) ───────────────
  *
- *  1. FROZEN after build — Kernel::build() calls freeze() so any call to
- *     bind(), singleton(), instance(), or extend() after that point throws a
- *     LogicException. Request code must NOT mutate this container.
+ *  1. FROZEN after MATERIALIZE — not after build(). build() is compile-only;
+ *     the kernel calls freeze() at the end of materialize(), which runs on the
+ *     first http()/cli()/workerLoop() call, once every module's boot() has had
+ *     its chance to register. After that, bind(), singleton(), instance() and
+ *     extend() all throw LogicException. Request code must NOT mutate this
+ *     container.
  *
  *  2. getInstance() disabled — global container singletons are unsafe under
  *     OpenSwoole (shared across coroutines) and wrong under FPM. Inject the
@@ -41,7 +44,7 @@ final class CoreContainer extends Container
 
     /**
      * Bind a pre-built instance directly (used for port adapters and kernel
-     * services). Must be called before Kernel::build() completes.
+     * services). Must be called before the kernel materializes.
      */
     public function instance(string $abstract, object $instance): void
     {
@@ -71,8 +74,9 @@ final class CoreContainer extends Container
 
     /**
      * Lock the container against further registration.
-     * Called automatically by Kernel after build() — after this point only
-     * reads (make / has / get) are permitted. Any write throws LogicException.
+     * Called automatically by Kernel at the end of materialize() — after this
+     * point only reads (make / has / get) are permitted. Any write throws
+     * LogicException.
      */
     public function freeze(): void
     {

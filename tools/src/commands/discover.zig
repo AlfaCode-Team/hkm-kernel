@@ -43,6 +43,8 @@ const runtime_dirs = [_][]const u8{
 const Options = struct {
     /// Root directory to scan (default: current directory).
     root: []const u8,
+    /// --help/-h was passed: print usage and do nothing else.
+    help: bool = false,
     /// Max directory depth to descend from `root` (default 4).
     depth: usize = 4,
     /// --dry-run: report matches without touching the registry.
@@ -53,6 +55,7 @@ fn parse(args: []const []const u8) Options {
     var root: []const u8 = ".";
     var depth: usize = 4;
     var dry_run = false;
+    var help = false;
 
     var i: usize = 2;
     while (i < args.len) : (i += 1) {
@@ -61,13 +64,35 @@ fn parse(args: []const []const u8) Options {
             dry_run = true;
         } else if (std.mem.startsWith(u8, a, "--depth=")) {
             depth = std.fmt.parseInt(usize, a["--depth=".len..], 10) catch depth;
+        } else if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
+            // Must be matched BEFORE the catch-all below. It used to fall into
+            // the `--` branch and be silently ignored, so `hkm discover --help`
+            // ran a full scan and wrote every project it found into the
+            // registry — a documented flag doing the opposite of nothing.
+            help = true;
         } else if (std.mem.startsWith(u8, a, "--")) {
             continue;
         } else {
             root = a;
         }
     }
-    return .{ .root = root, .depth = depth, .dry_run = dry_run };
+    return .{ .root = root, .depth = depth, .dry_run = dry_run, .help = help };
+}
+
+fn printHelp() void {
+    prompt.intro("hkm discover");
+    prompt.section("Usage");
+    prompt.item("hkm discover [root]", "find projects on disk and register them (alias: scan)");
+    prompt.blank();
+    prompt.section("Options");
+    prompt.item("--dry-run, -n", "list what WOULD be registered, change nothing");
+    prompt.item("--depth=<n>", "how deep the scan descends (default 4)");
+    prompt.item("--help, -h", "show this help");
+    prompt.blank();
+    prompt.section("Notes");
+    prompt.muted("A project is any folder holding a proj.json. Matches are upserted into");
+    prompt.muted("the kernel registry by name, with their absolute path and domains.");
+    prompt.outro("vendor, node_modules, var, .git, dist and zig caches are never scanned");
 }
 
 /// One discovered project, resolved from its proj.json.
@@ -80,6 +105,11 @@ const Found = struct {
 
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
     const opts = parse(args);
+
+    if (opts.help) {
+        printHelp();
+        return 0;
+    }
 
     prompt.intro(try std.fmt.allocPrint(allocator, "Discover projects under '{s}'", .{opts.root}));
 

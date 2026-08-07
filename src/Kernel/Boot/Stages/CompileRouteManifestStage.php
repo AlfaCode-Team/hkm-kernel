@@ -3,6 +3,7 @@
 namespace AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, ManifestReader, ManifestWriter};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteParameter;
 
 /** Reads routes[] from every module.json -> route-manifest.php (OPcache-cached). */
 final class CompileRouteManifestStage implements BootStageContract
@@ -31,6 +32,16 @@ final class CompileRouteManifestStage implements BootStageContract
     public function run(): void
     {
         $routes = [];
+
+        /**
+         * Declared route names => the route key that claimed them. Names must be
+         * unique across the whole application (they are a flat namespace, like
+         * filter aliases), so a collision is a BOOT failure rather than a
+         * last-one-wins surprise at URL-generation time.
+         *
+         * @var array<string, string>
+         */
+        $names = [];
 
         // PASS 1 — read every module manifest once and collect the full set of
         // domains some module solves(). Building this BEFORE compiling any route
@@ -61,6 +72,8 @@ final class CompileRouteManifestStage implements BootStageContract
                         "Route handler [{$route['handler']}] in [{$moduleClass}] must be in 'Controller@method' format."
                     );
                 }
+                $this->validateParameterTypes($route['path'], "Route in [{$moduleClass}]");
+
                 $key = strtoupper($route['method']) . ' ' . $route['path'];
                 if (isset($routes[$key])) {
                     throw new BootException(
@@ -71,6 +84,7 @@ final class CompileRouteManifestStage implements BootStageContract
                     'handler' => $route['handler'],
                     'module' => $moduleClass,
                     'solves' => $manifest['solves'],
+                    'name' => $this->routeName($route, $key, $names, "[{$moduleClass}]"),
                     'filters' => $this->normalizeFilters($route['filters'] ?? []),
                     'requires' => $this->validateRequires(
                         $this->normalizeRequires($route['requires'] ?? []),
@@ -87,6 +101,15 @@ final class CompileRouteManifestStage implements BootStageContract
         // key so a project may disable a plugin route AND declare its own on it
         // without a duplicate-route boot failure.
         $routes = $this->applyDisablePolicy($routes);
+
+        // A disabled plugin route releases its name. Otherwise a project that
+        // vetoes GET /register and declares its own named 'auth.register' would
+        // collide with the very route it just removed.
+        foreach ($names as $name => $owningKey) {
+            if (!isset($routes[$owningKey])) {
+                unset($names[$name]);
+            }
+        }
 
         // PASS 2b — project-layer routes (Kernel::withRoutes / proj.json), not in
         // any module.json. They carry no module and resolve under the synthetic
@@ -107,12 +130,29 @@ final class CompileRouteManifestStage implements BootStageContract
             // plugin route and OVERRIDE a plugin route declaring the same
             // "METHOD path". This is the default project-over-plugin precedence —
             // never the reverse. Plugins cannot reclaim a route the project owns.
+            $this->validateParameterTypes($route['path'], 'Project route');
+
             $key = strtoupper($route['method']) . ' ' . $route['path'];
+
+            // A project override INHERITS the overridden plugin route's name
+            // unless it declares its own. Overriding changes where a name points,
+            // not whether it exists — otherwise every route('user.show') in a
+            // plugin's own views would break the moment a project customised that
+            // page, which is the single most common thing a project does.
+            $inherited = $routes[$key]['name'] ?? null;
+            $declared  = $this->routeName($route, $key, $names, 'the project');
+
+            if ($declared === null && $inherited !== null) {
+                // Already claimed by the plugin route being replaced — the name
+                // survives, still pointing at exactly one route.
+                $declared = $inherited;
+            }
 
             $routes[$key] = [
                 'handler' => $route['handler'],
                 'module' => null,
                 'solves' => self::PROJECT_SCOPE,
+                'name' => $declared,
                 'overrides' => $routes[$key]['module'] ?? null,
                 'filters' => $this->normalizeFilters($route['filters'] ?? []),
                 // Per-route module dependencies seeded into this request's graph
@@ -212,6 +252,68 @@ final class CompileRouteManifestStage implements BootStageContract
      * @param mixed $filters
      * @return list<string>
      */
+    /**
+     * Resolve and claim a route's optional `"name"`.
+     *
+     * Names are OPTIONAL — an unnamed route is unchanged in every way and simply
+     * cannot be addressed by UrlGenerator::route(). They live in one flat,
+     * application-wide namespace, so a duplicate fails the boot: silently letting
+     * the last declaration win would make route('user.show') resolve to whichever
+     * plugin happened to load last.
+     *
+     * @param array<string, mixed>  $route
+     * @param array<string, string> $names  claimed names => owning route key
+     */
+    private function routeName(array $route, string $key, array &$names, string $owner): ?string
+    {
+        $name = $route['name'] ?? null;
+
+        if ($name === null || $name === '') {
+            return null;
+        }
+
+        if (!is_string($name)) {
+            throw new BootException("Route [{$key}] in {$owner} has a non-string name.");
+        }
+
+        if (isset($names[$name])) {
+            throw new BootException(
+                "Duplicate route name [{$name}] in {$owner} - already claimed by [{$names[$name]}]. "
+                . 'Route names are application-wide and must be unique.'
+            );
+        }
+
+        $names[$name] = $key;
+
+        return $name;
+    }
+
+    /**
+     * Fail the BOOT on an unknown `{name:type}` placeholder type.
+     *
+     * A typo like `{id:number}` would otherwise compile to a route that simply
+     * never matches — a silent 404 that looks like a missing controller. Same
+     * anti-typo guard already applied to unknown requires[] domains and to
+     * disable specs that match nothing.
+     */
+    private function validateParameterTypes(string $path, string $context): void
+    {
+        foreach (RouteParameter::parse($path) as $placeholder) {
+            if ($placeholder['type'] === '' || RouteParameter::isValidType($placeholder['type'])) {
+                continue;
+            }
+
+            throw new BootException(sprintf(
+                '%s declares path [%s] with unknown parameter type [%s] on {%s}. Valid types: %s.',
+                $context,
+                $path,
+                $placeholder['type'],
+                $placeholder['name'],
+                implode(', ', RouteParameter::names()),
+            ));
+        }
+    }
+
     private function normalizeFilters(mixed $filters): array
     {
         if (is_string($filters)) {

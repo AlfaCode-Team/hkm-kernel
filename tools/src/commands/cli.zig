@@ -41,8 +41,11 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         if (std.mem.eql(u8, a, "--")) {
             pass_through = true;
         } else if (std.mem.eql(u8, a, "-h") or std.mem.eql(u8, a, "--help")) {
+            // 0, not 2. Asking for help and getting it is a success; exiting
+            // non-zero makes `hkm cli --help` look like a failed command to any
+            // script, Makefile or shell that checks the status.
             printHelp(is_worker);
-            return 2;
+            return 0;
         } else if (std.mem.eql(u8, a, "-p") or std.mem.eql(u8, a, "--project")) {
             if (i + 1 >= args.len) {
                 prompt.err("-p/--project needs a value.");
