@@ -14,6 +14,33 @@ parameters:
         - */__dev__/*
         - projects/*/var/*
         - projects/*/userdata/*
+        # ── Project scaffolding that binds to PLUGIN contracts ──────────────
+        #
+        # These are shipped to projects as opt-in base classes and helpers, and
+        # they reference Plugins\Cookie, Plugins\View and Plugins\SiteSEO by
+        # design (see CLAUDE.md, "Base controllers"). Since the plugin
+        # decoupling those plugins are no longer dependencies of THIS
+        # repository — the kernel depends on no plugins — so the classes cannot
+        # be resolved here and every reference reports class.notFound.
+        #
+        # Listed FILE BY FILE rather than excluding projects/ wholesale, so any
+        # new project-layer code is still analysed. The rest of projects/
+        # (Support/Casting, Support/Entity, Infrastructure, ApiController) is
+        # plugin-free and stays covered.
+        #
+        # These files are analysed where their dependencies actually exist: in a
+        # project that has installed the plugins.
+        - projects/Http/Controllers/ViewController.php
+        - projects/Http/Controllers/Concerns/InteractsWithCookies.php
+        # Names no plugin itself, but calls CookieJar methods that the
+        # sibling trait above provides — a transitive plugin dependency.
+        - projects/Http/Controllers/Concerns/InteractsWithCsrf.php
+        - projects/Http/Controllers/Concerns/InteractsWithSeo.php
+        - projects/Http/Controllers/Concerns/InteractsWithGraphSeo.php
+        - projects/Http/Controllers/Concerns/InteractsWithAuthManager.php
+        - projects/Support/Seo/SitemapGenerator.php
+        - projects/Support/Seo/RichGraph.php
+        - projects/Support/Seo/SeoHead.php
     treatPhpDocTypesAsCertain: false
     reportUnmatchedIgnoredErrors: false
     # Optional Swoole/OpenSwoole coroutine calls — runtime-guarded by

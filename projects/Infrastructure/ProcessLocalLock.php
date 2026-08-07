@@ -32,11 +32,18 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\AbstractLock;
 final class ProcessLocalLock extends AbstractLock
 {
     /**
-     * @param object{locks: array<string, array{owner: string, expires: int}>} $registry
-     *        the owning cache instance, so every lock it hands out shares one table
+     * @param InMemoryCache $registry the owning cache, so every lock it hands
+     *        out shares one table
+     *
+     * Typed as the concrete cache rather than an `object{locks: ...}` shape.
+     * PHPStan treats an anonymous object shape's properties as READ-ONLY, so
+     * every write to $registry->locks below was reported as an error against a
+     * type that only described the shape and never named the one class that
+     * actually satisfies it. InMemoryCache is the sole owner of that table and
+     * the only caller, which is what the docblock already said.
      */
     public function __construct(
-        private readonly object $registry,
+        private readonly InMemoryCache $registry,
         string $name,
         int $seconds,
         ?string $owner = null,
