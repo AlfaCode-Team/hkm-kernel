@@ -114,7 +114,8 @@ final class UrlGenerator
             );
         }
 
-        $path = $this->substitute($name, $template, $parameters, $remaining);
+        $remaining = [];
+        $path      = $this->substitute($name, $template, $parameters, $remaining);
 
         if ($remaining !== []) {
             $path .= '?' . http_build_query($remaining);
@@ -215,9 +216,9 @@ final class UrlGenerator
      * declared type. Unconsumed parameters are returned via $remaining.
      *
      * @param array<string, string|int|float|bool> $parameters
-     * @param array<string, string|int|float|bool>|null $remaining
+     * @param array<string, string|int|float|bool> $remaining
      */
-    private function substitute(string $name, string $template, array $parameters, ?array &$remaining): string
+    private function substitute(string $name, string $template, array $parameters, array &$remaining): string
     {
         $remaining = $parameters;
 

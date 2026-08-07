@@ -2,8 +2,11 @@ parameters:
     level: 5
     paths:
         - src
-        - plugins
         - projects
+    # `plugins` was removed when the kernel stopped shipping them (they live in
+    # their own repositories now and are fetched with `hkm plugins install`).
+    # The path stayed in this list, so every run since has failed with
+    # "Path .../plugins does not exist" before analysing a single file.
     scanDirectories:
         - modules
     excludePaths:
