@@ -82,6 +82,7 @@ use Plugins\Database\Infrastructure\Pool\PoolConfiguration;
 
 // Plugins — module providers (registered into the kernel below).
 use Plugins\Crypto\Provider as CryptoProvider;
+use Plugins\Logger\Provider as LoggerProvider;
 use Plugins\I18n\Provider as I18nProvider;
 use Plugins\Database\Provider as DatabaseProvider;
 use Plugins\Commands\Provider as CommandsProvider;
@@ -258,7 +259,9 @@ return Kernel::configure()
     // (WordPress-nonce style): the token is signed with APP_KEY and bound to the
     // opaque `csrf_bind` cookie, so no cookie VALUE is ever trusted as the token.
     // /api is exempt because APIs authenticate per request, not via a browser
-    // CSRF token. Add a FirewallLayer / RateLimiterLayer here as needed.
+    // CSRF token — the only security layer the kernel ships. For IP filtering
+    // and rate limiting, declare the 'shield' / 'throttle' route filters from
+    // plugins/SecurityFilters on the routes that need them.
     ->withSecurity([
         new CsrfTokenLayer(
             bindCookie: 'csrf_bind',
@@ -271,6 +274,13 @@ return Kernel::configure()
     // in. Use for capabilities only SOME routes need (views, outbound HTTP,
     // storage). A route opts in via its "requires" in proj.json / module.json.
     ->withModules([
+        // Logger (solves: logging.application) — supplies the LoggerPort adapter.
+        // Channel/level come from config/logger.php (LOG_CHANNEL, LOG_LEVEL,
+        // LOG_FILE). Keep this registered: components that log (Database,
+        // Tenancy, EventBus, command auditing) degrade to silence without it,
+        // and silent logging is indistinguishable from nothing having happened.
+        LoggerProvider::class,
+
         // Crypto (solves: crypto.services) — provides the concrete AesEncrypter and
         // PasswordHasher classes behind the Encryption/Hashing port factories,
         // plus crypto helpers other modules consume.

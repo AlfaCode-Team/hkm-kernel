@@ -36,6 +36,14 @@ pub fn print() void {
 }
 
 /// One-line version, for `hkm --version` piped/scripted use.
-pub fn printShort() void {
-    std.debug.print("hkm (HKM Kernel) {s}\n", .{build_info.version});
+///
+/// Goes to STDOUT. It used to use std.debug.print, which writes to stderr — so
+/// the one function whose entire purpose is to be captured
+/// (VERSION=$(hkm --version)) returned an empty string, while the version went
+/// somewhere the caller was not looking. The docblock claimed scripted use the
+/// whole time.
+pub fn printShort(io: std.Io) void {
+    var buf: [128]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "hkm (HKM Kernel) {s}\n", .{build_info.version}) catch return;
+    std.Io.File.stdout().writeStreamingAll(io, line) catch {};
 }

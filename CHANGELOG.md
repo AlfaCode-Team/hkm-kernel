@@ -6,6 +6,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0-dev.2] - 2026-08-07
+
+Development pre-release. Published so the new tooling can be exercised against
+real projects before a stable 1.1.0; `hkm upgrade` will NOT offer it unless you
+ask for it with `--pre`.
+
+### Added
+- **Plugins install from git.** `hkm plugins install|uninstall|versions|outdated|lock`
+  fetch a plugin from its own repository, and `hkm plugins enable` now installs a
+  missing plugin instead of wiring it into the bootstrap by name and failing at
+  boot with a class-not-found. Installs resolve to a TAG, never a branch.
+- **`plugins.lock.json`** records the remote, tag, commit and kernel version for
+  every installed plugin, so an install is reproducible and reviewable.
+  `hkm plugins lock` restores a project to exactly what it records.
+- **Kernel compatibility gate.** A plugin declares `"kernel": "^1.0"` in its
+  module.json and an incompatible pairing is refused at install time rather than
+  surfacing at request time as a missing method on a contract.
+- **Translation catalogue cascade.** `CompileLangManifestStage` compiles every
+  plugin's `lang` declaration into `lang-manifest.php` using the same
+  project-first priority model as views, so plugins can finally ship messages.
+  Groups MERGE across the cascade, so overriding one key does not require
+  copying the rest.
+- **English + French catalogues** for every plugin with user-facing text
+  (validation, auth emails, OAuth consent/device/admin, tenancy admin, user
+  screens and the verification email).
+- **`hkm upgrade --local`** installs the local checkout over the installed
+  kernel, for testing a kernel change against real projects without cutting a
+  release.
+- **Memory inspector** wired into the CLI: `--mem` prints per-command
+  allocation stats and leak backtraces, `HKM_MEM_STRICT` turns a leak into a
+  non-zero exit for CI.
+- `zig build test` step (there was none) and `zig build stamp` to write the
+  build version into composer.json for the native distribution.
+
+### Fixed
+- **Releases published with no binaries attached.** This repository has
+  immutable releases enabled, which forbid attaching assets after publishing;
+  the workflow published first and uploaded second, so every artifact it built
+  had nowhere to go. Assets now attach while the release is a draft, which is
+  published afterwards. (v1.1.0-dev.1 was withdrawn for this reason — it exists
+  as a burned version number and was never installable.)
+- **`**` array-repeat was removed in Zig 0.17**, so the memory inspector's
+  border drawing failed to compile under the pinned toolchain that every release
+  is built with, while compiling fine on 0.16.
+- **PHPStan had been unable to run since the plugin decoupling** — it still
+  analysed a `plugins` path the kernel no longer has, and died before reading a
+  single file.
+- **Deferred cleanup never ran.** Every command exited via `std.process.exit`,
+  which skips defers, so `threaded.deinit()` and the arena teardown never
+  executed and no end-of-run reporting was possible.
+- **`--help` was broken in five commands.** `hkm discover --help` ignored the
+  flag and ran a full registering scan; `cli`/`worker` printed help and exited
+  2; `run` could not distinguish `--help` from bad arguments; `new`/`update` had
+  no handling at all.
+- **`hkm --version` wrote to stderr**, so `VERSION=$(hkm --version)` returned an
+  empty string despite the function documenting itself as being for scripted use.
+- **A `git describe` build sorted below its own tag.** "1.0.21-138-gbdbbf34" was
+  read as a pre-release of 1.0.21, so a build made after v1.0.21 was treated as
+  older than it and refused plugins it could run.
+- **A pre-release tag was treated as the latest release**, which would have
+  pushed a dev build to every stable user on `hkm upgrade`.
+- `hkm upgrade` queried the pre-rename repository name and only worked via
+  GitHub's redirect.
+- Release-mode builds inherited the debug allocator's `never_unmap` and
+  `retain_metadata`, neither of which belongs in a shipped binary.
+
 ## [1.0.21] - 2026-07-22
 
 ### Changed
