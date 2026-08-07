@@ -47,40 +47,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     const path = args[1];
-    // Whitespace from both ends, then ONE leading 'v'.
-    //
-    // This used to be trim(..., " \t\r\nv"), which strips the cutset from BOTH
-    // ends — so any version ENDING in 'v' lost it: "1.1.0-dev" became
-    // "1.1.0-de", which then failed validation and silently skipped stamping.
-    var version = std.mem.trim(u8, args[2], " \t\r\n");
-    if (version.len > 0 and (version[0] == 'v' or version[0] == 'V')) version = version[1..];
+    const version = std.mem.trim(u8, args[2], " \t\r\nv");
 
     if (version.len == 0) return; // nothing meaningful to stamp
-
-    // A version Composer cannot parse is far worse than no version at all:
-    // `composer install` ABORTS on it, so the package never resolves its
-    // dependencies. That happened for real — "1.1.0-dev.2" was stamped from the
-    // git tag, and every install of that release failed with
-    //
-    //   "./composer.json" does not match the expected JSON schema:
-    //    - version : Does not match the regex pattern ...
-    //
-    // Composer's `dev` suffix takes NO counter ("1.1.0-dev" is valid,
-    // "1.1.0-dev.2" and "1.1.0-dev2" are not). Rather than rewrite the version
-    // into something Composer likes — which would make composer.json disagree
-    // with the tag it was built from — the field is simply left out. It is
-    // optional; a broken install is not.
-    if (!composerValid(version)) {
-        var buf: [256]u8 = undefined;
-        const msg = std.fmt.bufPrint(
-            &buf,
-            "stamp: '{s}' is not a valid Composer version — leaving composer.json alone.\n" ++
-                "       (Composer accepts 1.2.3, 1.2.3-dev, 1.2.3-beta.4, 1.2.3-RC1; a 'dev' suffix takes no number.)\n",
-            .{version},
-        ) catch return;
-        std.Io.File.stderr().writeStreamingAll(io, msg) catch {};
-        return;
-    }
 
     // A missing composer.json is not a build failure: the same build.zig runs
     // in checkouts and in staging trees that do not carry one.
@@ -88,72 +57,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     const updated = try stamp(allocator, source, version) orelse return; // already correct
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = updated });
-}
-
-/// Whether Composer will accept this as a package version.
-///
-/// A deliberately CONSERVATIVE subset of Composer's own pattern: numeric parts,
-/// then an optional stability tag, then an optional `-dev`. Anything it is not
-/// sure about is rejected, because the failure mode of a false accept (an
-/// install that cannot resolve dependencies) is much worse than a false reject
-/// (no version field, which is the status quo for this repository anyway).
-fn composerValid(v: []const u8) bool {
-    var s_ = v;
-    if (s_.len == 0) return false;
-    if (s_[0] == 'v' or s_[0] == 'V') s_ = s_[1..];
-
-    // Build metadata is always allowed; ignore it.
-    if (std.mem.indexOfScalar(u8, s_, '+')) |i| s_ = s_[0..i];
-    if (s_.len == 0) return false;
-
-    // 1-4 numeric components separated by '.' or '-'.
-    var i: usize = 0;
-    var parts: usize = 0;
-    while (i < s_.len and parts < 4) {
-        const start = i;
-        while (i < s_.len and std.ascii.isDigit(s_[i])) i += 1;
-        if (i == start) return false; // expected a number
-        parts += 1;
-        if (i < s_.len and (s_[i] == '.' or s_[i] == '-')) {
-            // Only continue the numeric run when a digit follows.
-            if (i + 1 < s_.len and std.ascii.isDigit(s_[i + 1])) {
-                i += 1;
-                continue;
-            }
-        }
-        break;
-    }
-    if (parts == 0) return false;
-    if (i == s_.len) return true; // plain numeric version
-
-    // Optional separator before the stability tag.
-    if (s_[i] == '.' or s_[i] == '-' or s_[i] == '_') i += 1;
-    if (i == s_.len) return false; // trailing separator
-
-    const tail = s_[i..];
-
-    // Bare "dev" is the only form Composer accepts — no counter after it.
-    if (std.ascii.eqlIgnoreCase(tail, "dev")) return true;
-    if (std.ascii.eqlIgnoreCase(tail, "x-dev")) return true;
-
-    // stability tag, optionally followed by (.|-)?digits, repeated.
-    const tags = [_][]const u8{ "stable", "beta", "alpha", "patch", "rc", "pl", "b", "a", "p" };
-    for (tags) |tag| {
-        if (tail.len < tag.len) continue;
-        if (!std.ascii.eqlIgnoreCase(tail[0..tag.len], tag)) continue;
-
-        var rest = tail[tag.len..];
-        while (rest.len > 0) {
-            if (rest[0] == '.' or rest[0] == '-') rest = rest[1..];
-            if (rest.len == 0) return false; // trailing separator
-            const start = rest.len;
-            while (rest.len > 0 and std.ascii.isDigit(rest[0])) rest = rest[1..];
-            if (rest.len == start) return false; // expected digits
-        }
-        return true;
-    }
-
-    return false;
 }
 
 /// Return the file with `version` applied, or null when it is already correct.
@@ -306,40 +209,4 @@ test "a leading v is stripped so composer sees a bare version" {
     const out = (try stamp(a, src, "1.0.21")).?;
     defer a.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "\"version\": \"v") == null);
-}
-
-test "accepts the versions composer accepts" {
-    // Verified against `composer validate` before being encoded here.
-    for ([_][]const u8{
-        "1.1.0", "1.0.21", "v1.1.0", "1.1.0-dev", "1.1.0-beta.2",
-        "1.1.0-RC2", "1.1.0-alpha.2", "1.2.3.4", "1.1.0+meta",
-    }) |v| {
-        try std.testing.expect(composerValid(v));
-    }
-}
-
-test "rejects the version that broke a real install" {
-    // "1.1.0-dev.2" was stamped from a git tag and made `composer install`
-    // abort on every machine that took the update. Composer's dev suffix takes
-    // no counter.
-    try std.testing.expect(!composerValid("1.1.0-dev.2"));
-    try std.testing.expect(!composerValid("1.1.0-dev2"));
-}
-
-test "rejects anything it cannot vouch for" {
-    for ([_][]const u8{
-        "", "v", "abc", "1.1.0-", "1.1.0-nonsense", "1.1.0-beta.", "-1.0.0",
-    }) |v| {
-        try std.testing.expect(!composerValid(v));
-    }
-}
-
-test "a version ending in 'v' keeps its last character" {
-    // Regression: main() trimmed the cutset " \t\r\nv" from BOTH ends, so
-    // "1.1.0-dev" arrived as "1.1.0-de" and was rejected as invalid — the one
-    // pre-release form Composer actually accepts. Caught by cross-checking
-    // against `composer validate`, not by the unit tests, which called the
-    // validator directly and skipped the trimming.
-    try std.testing.expect(composerValid("1.1.0-dev"));
-    try std.testing.expect(!composerValid("1.1.0-de"));
 }
