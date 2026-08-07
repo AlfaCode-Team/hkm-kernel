@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0-dev.1] - 2026-08-06
+## [1.1.0-dev.2] - 2026-08-07
 
 Development pre-release. Published so the new tooling can be exercised against
 real projects before a stable 1.1.0; `hkm upgrade` will NOT offer it unless you
@@ -41,6 +41,18 @@ ask for it with `--pre`.
   build version into composer.json for the native distribution.
 
 ### Fixed
+- **Releases published with no binaries attached.** This repository has
+  immutable releases enabled, which forbid attaching assets after publishing;
+  the workflow published first and uploaded second, so every artifact it built
+  had nowhere to go. Assets now attach while the release is a draft, which is
+  published afterwards. (v1.1.0-dev.1 was withdrawn for this reason — it exists
+  as a burned version number and was never installable.)
+- **`**` array-repeat was removed in Zig 0.17**, so the memory inspector's
+  border drawing failed to compile under the pinned toolchain that every release
+  is built with, while compiling fine on 0.16.
+- **PHPStan had been unable to run since the plugin decoupling** — it still
+  analysed a `plugins` path the kernel no longer has, and died before reading a
+  single file.
 - **Deferred cleanup never ran.** Every command exited via `std.process.exit`,
   which skips defers, so `threaded.deinit()` and the arena teardown never
   executed and no end-of-run reporting was possible.
