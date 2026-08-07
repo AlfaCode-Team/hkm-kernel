@@ -102,11 +102,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // Installed so it can be run and tested directly. Without this the only
-    // copies live in .zig-cache under content-hashed directories, and verifying
-    // its behaviour against real composer means guessing which one is current.
-    b.installArtifact(stamper);
-
     if (!std.mem.eql(u8, version, "0.0.0-dev")) {
         const stamp_run = b.addRunArtifact(stamper);
         stamp_run.addFileArg(b.path("../composer.json"));
