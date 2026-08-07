@@ -13,6 +13,27 @@ const reset = "\x1b[0m";
 
 const WIDTH = 46; // inner content width
 
+/// Repeat a string at comptime.
+///
+/// Replaces the old `"─" ** WIDTH`. Zig 0.17 removed the `**` array-repeat operator —
+/// it now parses as two pointer-type `*` tokens, so the expression failed with
+/// the misleading "binary operator '*' has whitespace on one side, but not the
+/// other". It still compiled on 0.16, which is why it reached a release build
+/// before anything caught it; tools/.zig-version pins 0.17, and that is the
+/// version that matters.
+///
+/// `inline` so the body is evaluated at comptime and the result is a constant
+/// slice — a plain fn returning a comptime-built slice is rejected as
+/// "function called at runtime cannot return value at comptime".
+inline fn repeat(comptime s: []const u8, comptime n: usize) []const u8 {
+    comptime var out: []const u8 = "";
+    comptime {
+        var i: usize = 0;
+        while (i < n) : (i += 1) out = out ++ s;
+    }
+    return out;
+}
+
 fn p(comptime fmt: []const u8, args: anytype) void {
     std.debug.print(fmt, args);
 }
@@ -67,10 +88,10 @@ pub fn render(mi: *MemInspector, runtime: []const u8) void {
     // ---- title ----
     var rt: [48]u8 = undefined;
     const rtline = std.fmt.bufPrint(&rt, "runtime · {s}", .{runtime}) catch "runtime";
-    p("\n{s}{s}╭{s}╮{s}\n", .{ bold, blue, "─" ** WIDTH, reset });
+    p("\n{s}{s}╭{s}╮{s}\n", .{ bold, blue, repeat("─", WIDTH), reset });
     centerLine(bold, "HKM  MEMORY  INSPECTOR");
     centerLine(dim, rtline);
-    p("{s}╰{s}╯{s}\n", .{ blue, "─" ** WIDTH, reset });
+    p("{s}╰{s}╯{s}\n", .{ blue, repeat("─", WIDTH), reset });
 
     // ---- overview ----
     header("MEMORY OVERVIEW");
