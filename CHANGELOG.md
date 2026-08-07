@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0-dev.3] - 2026-08-07
+
+Re-cut of `1.1.0-dev.2` from `main` rather than `master`, so the artefacts
+include the PHPStan work that landed with #107. Contents are otherwise
+identical — see `[1.1.0-dev.2]` below for the full list.
+
+### Fixed
+- **`ProcessLocalLock` could not write its own lock table.** The registry was
+  typed as an anonymous `object{locks: ...}` shape, whose properties PHPStan
+  treats as read-only, so every write was an error against a type that
+  described the shape but never named the one class satisfying it.
+- PHPStan is green again: the project scaffolding that binds to plugin
+  contracts is scoped out of analysis here, since those plugins are
+  deliberately not dependencies of the kernel. It is analysed in a project that
+  has installed them.
+
 ## [1.1.0-dev.2] - 2026-08-07
 
 Development pre-release. Published so the new tooling can be exercised against
