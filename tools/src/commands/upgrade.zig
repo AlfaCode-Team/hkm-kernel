@@ -12,45 +12,42 @@ const banner = @import("../lib/banner.zig");
 const kernel = @import("../lib/kernel.zig");
 const run_cmd = @import("run.zig");
 const util = @import("../lib/util.zig");
+const semver = @import("../lib/semver.zig");
 const prompt = @import("../lib/prompt.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
 const EnvMap = std.process.Environ.Map;
 
-const Ver = struct {
-    major: u32 = 0,
-    minor: u32 = 0,
-    patch: u32 = 0,
+/// Version handling comes from lib/semver.zig rather than a local copy.
+///
+/// The local `Ver` this replaces STRIPPED any pre-release suffix before
+/// comparing, so "v1.1.0-dev.1" was indistinguishable from a stable "v1.1.0"
+/// and sorted above "v1.0.21" — meaning publishing a single dev tag would have
+/// offered, and installed, that dev build to every stable user running
+/// `hkm upgrade`. semver.Version sorts a pre-release BELOW its release, which
+/// is what makes a dev tag safe to publish at all.
+const Ver = semver.Version;
 
-    fn parse(s: []const u8) Ver {
-        var t = s;
-        if (t.len > 0 and (t[0] == 'v' or t[0] == 'V')) t = t[1..];
-        // Ignore any pre-release / build suffix (-dev, -rc1, +meta).
-        if (std.mem.indexOfAny(u8, t, "-+")) |i| t = t[0..i];
-        var v: Ver = .{};
-        var it = std.mem.splitScalar(u8, t, '.');
-        v.major = std.fmt.parseInt(u32, it.next() orelse "0", 10) catch 0;
-        v.minor = std.fmt.parseInt(u32, it.next() orelse "0", 10) catch 0;
-        v.patch = std.fmt.parseInt(u32, it.next() orelse "0", 10) catch 0;
-        return v;
-    }
-
-    fn order(a: Ver, b: Ver) std.math.Order {
-        if (a.major != b.major) return std.math.order(a.major, b.major);
-        if (a.minor != b.minor) return std.math.order(a.minor, b.minor);
-        return std.math.order(a.patch, b.patch);
-    }
-};
+/// Parse a tag or stamped version, tolerating the `git describe` trailer that
+/// tools/bundle.sh produces for builds between releases.
+fn parseVer(s_: []const u8) Ver {
+    return semver.parseDescribed(s_) orelse .{};
+}
 
 const Latest = union(enum) {
-    tag: []const u8, // highest v* tag found
+    tag: []const u8, // highest matching tag found
     none, // repo reachable but has no release tags yet
     unreachable_, // git failed / offline
 };
 
 /// Query the remote repo for the highest v* tag.
-fn latestTag(allocator: std.mem.Allocator, io: Io, env: *EnvMap) Latest {
+///
+/// PRE-RELEASE TAGS ARE SKIPPED unless `include_pre` is set. A dev or rc tag is
+/// published precisely so people can opt IN to it; treating it as the latest
+/// release would push unfinished work to everyone who runs `hkm upgrade`, which
+/// is the opposite of what publishing a pre-release is for.
+fn latestTag(allocator: std.mem.Allocator, io: Io, env: *EnvMap, include_pre: bool) Latest {
     const url = std.fmt.allocPrint(allocator, "https://github.com/{s}.git", .{banner.repo()}) catch return .unreachable_;
     const res = std.process.run(allocator, io, .{
         .argv = &.{ "git", "ls-remote", "--tags", "--refs", url },
@@ -69,7 +66,8 @@ fn latestTag(allocator: std.mem.Allocator, io: Io, env: *EnvMap) Latest {
         const idx = std.mem.indexOf(u8, line, marker) orelse continue;
         const tag = std.mem.trim(u8, line[idx + marker.len ..], " \t\r");
         if (tag.len == 0) continue;
-        const v = Ver.parse(tag);
+        const v = semver.Version.parse(tag) orelse continue; // skip non-semver tags
+        if (v.pre.len > 0 and !include_pre) continue;
         if (best == null or v.order(best_ver) == .gt) {
             best = allocator.dupe(u8, tag) catch continue;
             best_ver = v;
@@ -103,11 +101,15 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     var from_local = false;
     var dry_run = false;
     var assume_yes = false;
+    // Opt IN to dev / rc releases. Off by default: a pre-release must never
+    // reach someone who did not ask for one.
+    var include_pre = false;
     for (args[1..]) |a| {
         if (std.mem.eql(u8, a, "--check") or std.mem.eql(u8, a, "-c")) check_only = true;
         if (std.mem.eql(u8, a, "--local") or std.mem.eql(u8, a, "-l")) from_local = true;
         if (std.mem.eql(u8, a, "--dry-run") or std.mem.eql(u8, a, "-n")) dry_run = true;
         if (std.mem.eql(u8, a, "--yes") or std.mem.eql(u8, a, "-y")) assume_yes = true;
+        if (std.mem.eql(u8, a, "--pre")) include_pre = true;
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
             printHelp();
             return 0;
@@ -118,10 +120,10 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
 
     if (from_local) return localUpgrade(allocator, io, env, dry_run, assume_yes);
 
-    const current = Ver.parse(banner.version());
+    const current = parseVer(banner.version());
 
     prompt.muted("checking for updates…");
-    const latest = switch (latestTag(allocator, io, env)) {
+    const latest = switch (latestTag(allocator, io, env, include_pre)) {
         .tag => |t| t,
         .none => {
             prompt.item("repo", banner.repo());
@@ -134,7 +136,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
             return 1;
         },
     };
-    const latest_ver = Ver.parse(latest);
+    const latest_ver = parseVer(latest);
 
     prompt.item("installed", banner.version());
     prompt.item("latest", latest);
@@ -280,6 +282,7 @@ fn printHelp() void {
     prompt.item("--local, -l", "source the update from the local checkout instead of GitHub");
     prompt.item("--dry-run, -n", "show what --local would copy, write nothing");
     prompt.item("--yes, -y", "skip the confirmation prompt");
+    prompt.item("--pre", "consider pre-releases (dev / rc) when checking for updates");
     prompt.item("--check, -c", "check only");
     prompt.item("--help, -h", "show this help");
     prompt.outro("--local needs write access to the installed kernel (usually sudo)");
