@@ -6,6 +6,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0-beta.1] - 2026-08-07
+
+First **installable** pre-release of the 1.1.0 line. `1.1.0-dev.2` and
+`1.1.0-dev.3` are withdrawn — see below.
+
+### Fixed
+- **`composer install` aborted on every machine that took `1.1.0-dev.2` or
+  `-dev.3`.** The build stamps its version into `composer.json`, and
+  `1.1.0-dev.N` is not a valid Composer version: Composer's `dev` suffix takes
+  no counter. `composer install` refuses to run at all on an unparseable
+  version, so the package unpacked and then failed to resolve its dependencies.
+  The stamper now validates and skips rather than writing something Composer
+  rejects, and this release is named `-beta.1`, which Composer accepts — so the
+  version marker the native distribution needs is actually present again.
+- The stamper trimmed `v` from both ends of the version, so any version ending
+  in `v` lost it — `1.1.0-dev` became `1.1.0-de`, the one pre-release form
+  Composer does accept.
+
+### Note on upgrading from 1.0.21
+A 1.0.21 client has no pre-release filter: it strips the suffix, sees
+`1.1.0 > 1.0.21` and offers this automatically. That filter ships **in** this
+release, so the behaviour self-corrects after one upgrade. If you took
+`1.1.0-dev.2` or `-dev.3` and the install reported a composer schema error,
+upgrading to this release repairs it.
+
+## [1.1.0-dev.3] - 2026-08-07
+
+Re-cut of `1.1.0-dev.2` from `main` rather than `master`, so the artefacts
+include the PHPStan work that landed with #107. Contents are otherwise
+identical — see `[1.1.0-dev.2]` below for the full list.
+
+### Fixed
+- **`ProcessLocalLock` could not write its own lock table.** The registry was
+  typed as an anonymous `object{locks: ...}` shape, whose properties PHPStan
+  treats as read-only, so every write was an error against a type that
+  described the shape but never named the one class satisfying it.
+- PHPStan is green again: the project scaffolding that binds to plugin
+  contracts is scoped out of analysis here, since those plugins are
+  deliberately not dependencies of the kernel. It is analysed in a project that
+  has installed them.
+
 ## [1.1.0-dev.2] - 2026-08-07
 
 Development pre-release. Published so the new tooling can be exercised against
