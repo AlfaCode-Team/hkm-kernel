@@ -30,6 +30,8 @@ const prompt = @import("../lib/prompt.zig");
 const util = @import("../lib/util.zig");
 const services = @import("../lib/services.zig");
 const plugin_assets = @import("../lib/plugin_assets.zig");
+const plugin_boot = @import("../lib/plugin_bootstrap.zig");
+const installer = @import("../lib/plugin_install.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -293,7 +295,21 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         try composerInstall(allocator, io, env, opts);
     }
 
-    // 6. publish the assets (config/migrations/seeders/factories/resources) of
+    // 6. fetch the plugins the scaffolded bootstrap wires.
+    //
+    // The template enables a dozen providers (Logger, Crypto, Database, …) and
+    // maps Plugins\ to the project's plugins/ directory — but nothing put them
+    // there. The kernel stopped shipping plugins when they moved to their own
+    // repositories, so a freshly scaffolded project died on its first request
+    // with `Class "Plugins\Logger\Provider" does not exist`. They are fetched
+    // from git here, which is the same path `hkm plugins install` uses.
+    if (opts.install) {
+        installBootstrapPlugins(allocator, io, env, opts) catch {
+            prompt.warn("Could not install the bootstrap's plugins — run 'hkm plugins install <name>' later.");
+        };
+    }
+
+    // 7. publish the assets (config/migrations/seeders/factories/resources) of
     //    every plugin the project bootstrap enables (copy only — no migrate).
     plugin_assets.publishEnabled(allocator, io, env, opts.path) catch {
         prompt.warn("Could not publish plugin assets — run 'hkm plugins enable <p>' later.");
@@ -473,4 +489,59 @@ fn domainsJson(allocator: std.mem.Allocator, domains: []const []const u8) ![]con
     }
     try out.appendSlice(allocator, "    ]");
     return out.toOwnedSlice(allocator);
+}
+
+/// Install every plugin the scaffolded bootstrap enables.
+///
+/// Reads app/bootstrap/app.php rather than a hard-coded list, so the set can
+/// never drift from what the template actually wires — a list here that fell
+/// behind the template would reproduce exactly the missing-class failure this
+/// exists to prevent.
+fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, opts: Options) !void {
+    const bootstrap = try util.join(allocator, opts.path, "app/bootstrap/app.php");
+    const source = Dir.cwd().readFileAlloc(io, bootstrap, allocator, .limited(4 * 1024 * 1024)) catch return;
+
+    var aliases: std.ArrayList(plugin_boot.Alias) = .empty;
+    try plugin_boot.collectAliases(allocator, source, &aliases);
+
+    var enabled: std.ArrayList(plugin_boot.Enabled) = .empty;
+    try plugin_boot.collectEnabled(allocator, source, aliases.items, &enabled);
+
+    if (enabled.items.len == 0) return;
+
+    prompt.section("Installing plugins");
+
+    var ok: usize = 0;
+    var failed: usize = 0;
+    for (enabled.items) |e| {
+        const outcome = installer.install(allocator, io, env, opts.path, e.name, .{}) catch {
+            failed += 1;
+            continue;
+        };
+        switch (outcome) {
+            .refused => |why| {
+                failed += 1;
+                prompt.warn(why);
+            },
+            .installed, .up_to_date, .updated => {
+                ok += 1;
+                _ = installer.report(allocator, e.name, outcome, false) catch {};
+                switch (outcome) {
+                    .installed, .up_to_date => |entry| installer.recordInLock(allocator, io, opts.path, entry) catch {},
+                    .updated => |u| installer.recordInLock(allocator, io, opts.path, u.to) catch {},
+                    .refused => {},
+                }
+            },
+        }
+    }
+
+    if (failed > 0) {
+        prompt.warn(try std.fmt.allocPrint(
+            allocator,
+            "{d} of {d} plugin(s) could not be installed — the project will not boot until they are. Retry with 'hkm plugins install <name>'.",
+            .{ failed, enabled.items.len },
+        ));
+    } else {
+        prompt.ok(try std.fmt.allocPrint(allocator, "{d} plugin(s) installed", .{ok}));
+    }
 }
