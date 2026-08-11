@@ -20,14 +20,20 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Contracts\HttpStageCon
  *   $http->filter('auth',     RequireAuthStage::class);
  *   $http->filter('throttle', ApiRateLimitStage::class);
  *
- * The alias map is global and stateless (built once at module boot). Stages are
- * resolved per request from the CoreContainer, exactly like hook stages, so they
- * remain OpenSwoole-safe (no per-request state on the registry).
+ * The alias map is global and stateless (built once at module boot). A resolved
+ * stage is MEMOIZED and shared across requests — the same lifetime HttpPipeline
+ * already gives its hook stages, and safe for the same reason: an
+ * HttpStageContract carries no per-request state (everything it needs travels on
+ * the Request). Without this, a route declaring `["auth","throttle:60,1"]` built
+ * two fresh stage objects on every single hit.
  */
 final class FilterRegistry
 {
     /** @var array<string, class-string<HttpStageContract>> */
     private array $aliases = [];
+
+    /** @var array<string, HttpStageContract> resolved once, reused */
+    private array $instances = [];
 
     /**
      * @param class-string<HttpStageContract> $stageClass
@@ -40,6 +46,13 @@ final class FilterRegistry
             );
         }
         $this->aliases[$alias] = $stageClass;
+        unset($this->instances[$alias]);
+    }
+
+    /** @return list<string> every registered alias — used for boot-time validation. */
+    public function aliases(): array
+    {
+        return array_keys($this->aliases);
     }
 
     public function has(string $alias): bool
@@ -50,9 +63,15 @@ final class FilterRegistry
     /**
      * Resolve an alias to a stage instance (from the core container when bound,
      * otherwise a plain no-arg construction — mirrors HttpPipeline::resolveHook).
+     *
+     * Memoized: a stage is constructed at most once per worker.
      */
     public function resolve(string $alias, CoreContainer $core): HttpStageContract
     {
+        if (isset($this->instances[$alias])) {
+            return $this->instances[$alias];
+        }
+
         if (!isset($this->aliases[$alias])) {
             throw new \InvalidArgumentException(
                 "Unknown route filter alias [{$alias}]. Register it in a Provider::boot() via \$http->filter()."
@@ -61,6 +80,6 @@ final class FilterRegistry
 
         $class = $this->aliases[$alias];
 
-        return $core->has($class) ? $core->make($class) : new $class();
+        return $this->instances[$alias] = $core->has($class) ? $core->make($class) : new $class();
     }
 }

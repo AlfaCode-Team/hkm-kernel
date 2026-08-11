@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\ManifestReader;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Config\Repository;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\UrlGenerator;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 use Project\Support\Collection;
 
@@ -85,7 +86,7 @@ if (!function_exists('env')) {
 
         return ($value === false || $value === null) ? $default : $value;
     }
-}
+} 
 
 
 
@@ -127,5 +128,59 @@ if (!function_exists('collect')) {
     function collect(iterable $items = []): Collection
     {
         return new Collection($items);
+    }
+}
+
+if (!function_exists('url')) {
+    /**
+     * The shared URL generator, built from the compiled route-name index.
+     *
+     * Named routes exist so that a link SURVIVES a project overriding or moving
+     * the page it points at — but that only pays off if something actually calls
+     * the generator, so it gets a helper like config() does. Built once per
+     * process; the base URL comes from APP_URL (leave it empty and every URL is
+     * relative, which is what a single-host deployment wants).
+     */
+    function url(): UrlGenerator
+    {
+        /** @var UrlGenerator|null $generator */
+        static $generator = null;
+
+        return $generator ??= UrlGenerator::fromManifest((string) (env('APP_URL') ?: ''));
+    }
+}
+
+if (!function_exists('route')) {
+    /**
+     * The URL for a NAMED route.
+     *
+     *     route('user.show', ['id' => 7]);            // /users/7
+     *     route('user.show', ['id' => 7], true);      // https://app.test/users/7
+     *
+     * Throws on an unknown name or a value its placeholder type forbids — a
+     * broken link fails at the call site instead of 404ing in production.
+     *
+     * @param array<string, string|int|float|bool> $parameters
+     */
+    function route(string $name, array $parameters = [], bool $absolute = false): string
+    {
+        return url()->route($name, $parameters, $absolute);
+    }
+}
+
+if (!function_exists('signed_route')) {
+    /**
+     * A tamper-proof URL for a named route (email verification, one-time actions).
+     *
+     * @param array<string, string|int|float|bool> $parameters
+     * @param int|null $expiresIn seconds from now; null = no expiry
+     */
+    function signed_route(
+        string $name,
+        array $parameters = [],
+        ?int $expiresIn = null,
+        bool $absolute = false,
+    ): string {
+        return url()->signedRoute($name, $parameters, $expiresIn, $absolute);
     }
 }

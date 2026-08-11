@@ -39,7 +39,8 @@ declare(strict_types=1);
  *                                               `composer require` the kernel
  *                                               locally, this alone is enough and
  *                                               the steps below are skipped.
- *   2. $PSP_GLOBAL_AUTOLOAD                    — explicit override env var. Point
+ *   2. $HKM_KERNEL_HOME/vendor/autoload.php   — the installed kernel.
+ *   2b. $PSP_GLOBAL_AUTOLOAD                   — explicit override env var. Point
  *                                               it at any vendor/autoload.php
  *                                               (e.g. the monorepo's) to reuse a
  *                                               specific kernel + its plugins.
@@ -105,19 +106,40 @@ if (!function_exists('psp_require_kernel_autoload')) {
             $candidates[] = $explicit;
         }
 
-        // (3) Composer's configured home directory, if COMPOSER_HOME is set.
+        // (3) The installed kernel, via HKM_KERNEL_HOME.
+        //
+        // This is how `hkm` installs itself — a system install under
+        // /opt/hkm-kernel, or a user install under ~/.local/share/hkm/kernel —
+        // and without it that kernel is invisible to PHP. `hkm run` papered
+        // over the gap by exporting PSP_GLOBAL_AUTOLOAD for its child, so the
+        // dev server worked and NOTHING else did: the same project served by
+        // nginx/PHP-FPM, or a worker started by systemd, or a plain
+        // `php app/cli/run.php`, died on "Could not load the global kernel
+        // autoload" with a correctly installed kernel sitting on disk.
+        $kernelHome = getenv('HKM_KERNEL_HOME');
+        if (is_string($kernelHome) && $kernelHome !== '') {
+            $candidates[] = rtrim($kernelHome, '/\\') . '/vendor/autoload.php';
+        }
+
+        // (4) Composer's configured home directory, if COMPOSER_HOME is set.
         $composerHome = getenv('COMPOSER_HOME');
         if (is_string($composerHome) && $composerHome !== '') {
             $candidates[] = rtrim($composerHome, '/\\') . '/vendor/autoload.php';
         }
 
-        // (4)+(5) Default global Composer homes on Linux/macOS.
+        // (5)+(6) Default global Composer homes on Linux/macOS, plus the
+        // standard `hkm upgrade --user` install path — the one place a kernel
+        // lands when the operator has no root and never exported anything.
         $home = getenv('HOME');
         if (is_string($home) && $home !== '') {
             $home = rtrim($home, '/\\');
             $candidates[] = $home . '/.config/composer/vendor/autoload.php'; // current default
             $candidates[] = $home . '/.composer/vendor/autoload.php';        // legacy default
+            $candidates[] = $home . '/.local/share/hkm/kernel/vendor/autoload.php';
         }
+
+        // (7) The system install path used by the .deb / install.sh.
+        $candidates[] = '/opt/hkm-kernel/vendor/autoload.php';
 
         // Try each candidate; the first one that makes the kernel class
         // resolvable wins and we return immediately.

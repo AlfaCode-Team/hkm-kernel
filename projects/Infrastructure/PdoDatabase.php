@@ -31,10 +31,11 @@ final class PdoDatabase implements DatabasePort
         ?string $password = null,
     ) {
         $this->pdo = new PDO($dsn, $username, $password, [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
+            PDO::ATTR_EMULATE_PREPARES => false,
         ]);
+
     }
 
     public function query(string $sql, array $params = []): array
@@ -65,28 +66,32 @@ final class PdoDatabase implements DatabasePort
             return 0;
         }
 
-        $columns      = array_keys($values);
+        $columns = array_keys($values);
         $updateColumns ??= array_values(array_diff($columns, $conflictColumns));
-        $driver       = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
-        $quote        = static fn (string $i): string => $driver === 'mysql'
+        $driver = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $quote = static fn(string $i): string => $driver === 'mysql'
             ? '`' . str_replace('`', '', $i) . '`'
             : '"' . str_replace('"', '', $i) . '"';
 
-        $cols   = implode(', ', array_map($quote, $columns));
-        $binds  = implode(', ', array_map(static fn (string $c): string => ':' . $c, $columns));
+        $cols = implode(', ', array_map($quote, $columns));
+        $binds = implode(', ', array_map(static fn(string $c): string => ':' . $c, $columns));
         $insert = "INSERT INTO {$quote($table)} ({$cols}) VALUES ({$binds})";
 
         if ($driver === 'mysql') {
             $sql = $updateColumns === []
                 ? "{$insert} ON DUPLICATE KEY UPDATE {$quote($conflictColumns[0] ?? $columns[0])} = {$quote($conflictColumns[0] ?? $columns[0])}"
                 : "{$insert} ON DUPLICATE KEY UPDATE " . implode(', ', array_map(
-                    static fn (string $c): string => "{$quote($c)} = VALUES({$quote($c)})", $updateColumns));
+                    static fn(string $c): string => "{$quote($c)} = VALUES({$quote($c)})",
+                    $updateColumns
+                ));
         } else {
             $target = implode(', ', array_map($quote, $conflictColumns));
             $sql = $updateColumns === []
                 ? "{$insert} ON CONFLICT ({$target}) DO NOTHING"
                 : "{$insert} ON CONFLICT ({$target}) DO UPDATE SET " . implode(', ', array_map(
-                    static fn (string $c): string => "{$quote($c)} = EXCLUDED.{$quote($c)}", $updateColumns));
+                    static fn(string $c): string => "{$quote($c)} = EXCLUDED.{$quote($c)}",
+                    $updateColumns
+                ));
         }
 
         return $this->execute($sql, $values);

@@ -71,6 +71,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // with the tag it was built from — the field is simply left out. It is
     // optional; a broken install is not.
     if (!composerValid(version)) {
+        // A `git describe` version ("1.1.0-dev.2-12-g29dccfb") is what every
+        // build from a checkout between releases looks like. It is EXPECTED to
+        // be unstampable, so saying so on every single dev build trains people
+        // to ignore the message — and then they ignore it on the release build
+        // where it matters. Skip quietly for that shape; warn for anything else.
+        if (isDescribeVersion(version)) return;
+
         var buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(
             &buf,
@@ -88,6 +95,28 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     const updated = try stamp(allocator, source, version) orelse return; // already correct
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = updated });
+}
+
+/// Does this look like `git describe` output — "<version>-<commits>-g<sha>"?
+///
+/// Matched on the trailing "-<digits>-g<hex>" only, so a real pre-release
+/// ("1.1.0-beta.1") is not mistaken for one and still gets the warning.
+fn isDescribeVersion(v: []const u8) bool {
+    const g = std.mem.lastIndexOfScalar(u8, v, '-') orelse return false;
+    const sha = v[g + 1 ..];
+    if (sha.len < 2 or sha[0] != 'g') return false;
+    for (sha[1..]) |c| {
+        if (!std.ascii.isHex(c)) return false;
+    }
+
+    const head = v[0..g];
+    const d = std.mem.lastIndexOfScalar(u8, head, '-') orelse return false;
+    const count = head[d + 1 ..];
+    if (count.len == 0) return false;
+    for (count) |c| {
+        if (!std.ascii.isDigit(c)) return false;
+    }
+    return true;
 }
 
 /// Whether Composer will accept this as a package version.
@@ -342,4 +371,16 @@ test "a version ending in 'v' keeps its last character" {
     // validator directly and skipped the trimming.
     try std.testing.expect(composerValid("1.1.0-dev"));
     try std.testing.expect(!composerValid("1.1.0-de"));
+}
+
+test "a git describe version is recognised so dev builds stay quiet" {
+    try std.testing.expect(isDescribeVersion("1.1.0-dev.2-12-g29dccfb"));
+    try std.testing.expect(isDescribeVersion("1.0.21-138-gbdbbf34"));
+
+    // A real pre-release must NOT be mistaken for one: those are release
+    // intents, and silently skipping them is how a release ships unstamped.
+    try std.testing.expect(!isDescribeVersion("1.1.0-beta.1"));
+    try std.testing.expect(!isDescribeVersion("1.1.0-dev.2"));
+    try std.testing.expect(!isDescribeVersion("1.1.0"));
+    try std.testing.expect(!isDescribeVersion("1.1.0-12-gzz"));
 }

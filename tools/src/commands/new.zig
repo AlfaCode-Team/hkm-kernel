@@ -30,6 +30,7 @@ const prompt = @import("../lib/prompt.zig");
 const util = @import("../lib/util.zig");
 const services = @import("../lib/services.zig");
 const plugin_assets = @import("../lib/plugin_assets.zig");
+const plugins_cmd = @import("plugins.zig");
 const plugin_boot = @import("../lib/plugin_bootstrap.zig");
 const installer = @import("../lib/plugin_install.zig");
 
@@ -117,6 +118,12 @@ const Options = struct {
     /// Domains for proj.json + the kernel registry. Null until resolved (flag or
     /// interactive prompt); see resolveDomains().
     domains: ?[]const []const u8 = null,
+    /// --verify-plugins: run each plugin's own test suite while installing.
+    /// Off by default — scaffolding installs ~19 pinned, already-released
+    /// plugins, and testing each costs a composer install plus a phpunit run.
+    verify_plugins: bool = false,
+    /// Template variant: "" for the full starter, "simple" for the empty one.
+    variant: []const u8 = "",
     /// --no-register skips writing to the kernel projects.json registry.
     register: bool = true,
     /// --no-install skips running `composer install` after scaffolding.
@@ -135,6 +142,8 @@ fn parse(allocator: std.mem.Allocator, args: []const []const u8) !?Options {
     var register = true;
     var install = true;
     var key = true;
+    var verify_plugins = false;
+    var variant: []const u8 = "";
 
     var i: usize = 2;
     while (i < args.len) : (i += 1) {
@@ -151,6 +160,14 @@ fn parse(allocator: std.mem.Allocator, args: []const []const u8) !?Options {
             if (i + 1 >= args.len) return error.MissingDomainsValue;
             i += 1;
             domains_csv = args[i];
+        } else if (std.mem.eql(u8, a, "--simple") or std.mem.eql(u8, a, "--empty") or
+            std.mem.eql(u8, a, "--minimal"))
+        {
+            variant = "simple";
+        } else if (std.mem.startsWith(u8, a, "--template=")) {
+            variant = a["--template=".len..];
+        } else if (std.mem.eql(u8, a, "--verify-plugins")) {
+            verify_plugins = true;
         } else if (std.mem.eql(u8, a, "--no-register")) {
             register = false;
         } else if (std.mem.eql(u8, a, "--no-install")) {
@@ -173,6 +190,8 @@ fn parse(allocator: std.mem.Allocator, args: []const []const u8) !?Options {
         .name = try allocator.dupe(u8, resolved_name),
         .studly = try studly(allocator, resolved_name),
         .domains = if (domains_csv) |csv| try splitDomains(allocator, csv) else null,
+        .verify_plugins = verify_plugins,
+        .variant = variant,
         .register = register,
         .install = install,
         .key = key,
@@ -215,6 +234,9 @@ fn printHelp() void {
     prompt.item("  --project=<name>", "project name (default: derived from path)");
     prompt.item("  --domains=a.com,b.com", "comma-separated domains to register");
     prompt.item("  --no-register", "skip kernel registry registration");
+    prompt.item("  --simple", "empty project: no plugins at all (aliases: --empty/--minimal)");
+    prompt.item("  --template=<name>", "scaffold from a template variant under templates/<name>/");
+    prompt.item("  --verify-plugins", "run each plugin's test suite while installing (slow)");
     prompt.item("  --help, -h", "show this help");
     prompt.blank();
     prompt.section("Example");
@@ -265,8 +287,10 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         return 1;
     };
     prompt.muted(try std.fmt.allocPrint(allocator, "templates: {s}", .{tpl_dir}));
+    var written: usize = 0;
     for (templates) |t| {
-        const raw = (try templateBody(allocator, io, tpl_dir, t)) orelse {
+        if (skippedByVariant(opts.variant, t.dest)) continue;
+        const raw = (try templateBody(allocator, io, tpl_dir, t, opts.variant)) orelse {
             prompt.err(try std.fmt.allocPrint(
                 allocator,
                 "Missing template '{s}' in {s}",
@@ -277,8 +301,9 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         const data = try render(allocator, raw, opts);
         const p = try util.join(allocator, opts.path, t.dest);
         try cwd.writeFile(io, .{ .sub_path = p, .data = data });
+        written += 1;
     }
-    prompt.ok(try std.fmt.allocPrint(allocator, "Scaffolded {d} files", .{templates.len}));
+    prompt.ok(try std.fmt.allocPrint(allocator, "Scaffolded {d} files", .{written}));
 
     // 3. register the project in the kernel's projects.json registry.
     if (opts.register) {
@@ -303,10 +328,22 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // repositories, so a freshly scaffolded project died on its first request
     // with `Class "Plugins\Logger\Provider" does not exist`. They are fetched
     // from git here, which is the same path `hkm plugins install` uses.
+    var plugins_missing: usize = 0;
     if (opts.install) {
-        installBootstrapPlugins(allocator, io, env, opts) catch {
+        plugins_missing = installBootstrapPlugins(allocator, io, env, opts) catch blk: {
             prompt.warn("Could not install the bootstrap's plugins — run 'hkm plugins install <name>' later.");
+            break :blk 1;
         };
+    }
+
+    // 6b. wire each installed plugin's Support/helpers.php require.
+    //
+    // A helpers file defines global functions (`view()`, `cookie()`, …) that the
+    // plugin's own code calls. Nothing autoloads a bare function file, so an
+    // unwired one is an undefined-function fatal at the first call — a project
+    // that scaffolds cleanly and dies on its first request.
+    if (opts.install) {
+        _ = plugins_cmd.healSupportRequires(allocator, io, env, opts.path, false) catch 0;
     }
 
     // 7. publish the assets (config/migrations/seeders/factories/resources) of
@@ -320,7 +357,25 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     prompt.note("Next steps:");
     prompt.muted(try std.fmt.allocPrint(allocator, "  cd {s}", .{opts.path}));
     if (!opts.install) prompt.muted("  composer install");
-    prompt.muted("  hkm run                       # or: php -S localhost:8000 -t app/public");
+    // Only offer `hkm run` when running it would actually work — otherwise the
+    // next step is installing what is missing, listed above.
+    if (plugins_missing > 0) {
+        prompt.muted("  # install the missing plugins listed above first");
+    } else {
+        prompt.muted("  hkm run                       # or: php -S localhost:8000 -t app/public");
+    }
+
+    // Saying "ready" when the providers the bootstrap wires are not on disk
+    // sends the user to `hkm run` for a fatal they were already warned about
+    // twenty lines earlier — and the last line is the one that gets read.
+    if (plugins_missing > 0) {
+        prompt.outro(try std.fmt.allocPrint(
+            allocator,
+            "Project '{s}' scaffolded — but {d} plugin(s) are missing, so it will not boot yet",
+            .{ opts.name, plugins_missing },
+        ));
+        return 1;
+    }
 
     prompt.outro(try std.fmt.allocPrint(allocator, "Project '{s}' is ready", .{opts.name}));
     return 0;
@@ -452,10 +507,45 @@ fn registerProject(allocator: std.mem.Allocator, io: Io, env: *EnvMap, opts: Opt
 /// The body for one template: read `<dir>/<src>` from disk. Templates with no
 /// `src` (.gitkeep) are always empty. Returns null when a required source file
 /// is missing on disk (the caller turns this into a clear error).
-fn templateBody(allocator: std.mem.Allocator, io: Io, dir: []const u8, t: Template) !?[]const u8 {
+/// Read a template file, letting a VARIANT override individual files.
+///
+/// A variant ships only what differs — `templates/simple/` is one file, the
+/// bootstrap — and everything else resolves to the shared template. A full
+/// parallel tree would double every file in it and start drifting on the first
+/// edit that only landed in one copy.
+fn templateBody(allocator: std.mem.Allocator, io: Io, dir: []const u8, t: Template, variant: []const u8) !?[]const u8 {
     const src = t.src orelse return "";
+
+    if (variant.len > 0) {
+        const override = try std.fmt.allocPrint(allocator, "{s}/{s}/{s}", .{ dir, variant, src });
+        if (Dir.cwd().readFileAlloc(io, override, allocator, .limited(8 * 1024 * 1024))) |body| {
+            return body;
+        } else |_| {}
+    }
+
     const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir, src });
     return Dir.cwd().readFileAlloc(io, path, allocator, .limited(8 * 1024 * 1024)) catch null;
+}
+
+/// Files that only make sense alongside the plugin they configure.
+///
+/// `config/storage.php` configures the Storage plugin, `config/let-migrate.php`
+/// the Database one. Scaffolding them into a project with no plugins leaves a
+/// beginner reading configuration for something that is not installed and
+/// wondering what they are missing. `hkm plugins install storage` publishes its
+/// own config when the plugin actually arrives.
+const plugin_owned_config = [_][]const u8{
+    "config/storage.php",
+    "config/let-migrate.php",
+    "resources/welcome.php",
+};
+
+fn skippedByVariant(variant: []const u8, dest: []const u8) bool {
+    if (!std.mem.eql(u8, variant, "simple")) return false;
+    for (plugin_owned_config) |p| {
+        if (std.mem.eql(u8, p, dest)) return true;
+    }
+    return false;
 }
 
 // --------------------------------------------------------------------------
@@ -497,9 +587,10 @@ fn domainsJson(allocator: std.mem.Allocator, domains: []const []const u8) ![]con
 /// never drift from what the template actually wires — a list here that fell
 /// behind the template would reproduce exactly the missing-class failure this
 /// exists to prevent.
-fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, opts: Options) !void {
+/// Returns the number of plugins that could NOT be installed.
+fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, opts: Options) !usize {
     const bootstrap = try util.join(allocator, opts.path, "app/bootstrap/app.php");
-    const source = Dir.cwd().readFileAlloc(io, bootstrap, allocator, .limited(4 * 1024 * 1024)) catch return;
+    const source = Dir.cwd().readFileAlloc(io, bootstrap, allocator, .limited(4 * 1024 * 1024)) catch return 0;
 
     var aliases: std.ArrayList(plugin_boot.Alias) = .empty;
     try plugin_boot.collectAliases(allocator, source, &aliases);
@@ -507,27 +598,38 @@ fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, o
     var enabled: std.ArrayList(plugin_boot.Enabled) = .empty;
     try plugin_boot.collectEnabled(allocator, source, aliases.items, &enabled);
 
-    if (enabled.items.len == 0) return;
+    if (enabled.items.len == 0) return 0;
 
     prompt.section("Installing plugins");
 
     var ok: usize = 0;
-    var failed: usize = 0;
+    // Names, not just a count: the message that follows is the only place the
+    // user learns WHICH plugins are missing, and "3 of 19 failed" leaves them
+    // diffing the bootstrap against plugins/ to find out.
+    var failed: std.ArrayList([]const u8) = .empty;
     for (enabled.items) |e| {
-        const outcome = installer.install(allocator, io, env, opts.path, e.name, .{}) catch {
-            failed += 1;
+        const outcome = installer.install(allocator, io, env, opts.path, e.name, .{
+            .interactive = false,
+            // Scaffolding installs ~19 pinned, already-released plugins. Running
+            // each one's suite means a composer install plus a phpunit run per
+            // plugin — tens of minutes, for versions that were tested when they
+            // were released. Verification stays the default for a deliberate
+            // single install, where it is worth the wait; here it is opt-in.
+            .verify = opts.verify_plugins,
+        }) catch {
+            try failed.append(allocator, e.name);
             continue;
         };
         switch (outcome) {
             .refused => |why| {
-                failed += 1;
+                try failed.append(allocator, e.name);
                 prompt.warn(why);
             },
-            .installed, .up_to_date, .updated => {
+            .installed, .up_to_date, .linked, .updated => {
                 ok += 1;
                 _ = installer.report(allocator, e.name, outcome, false) catch {};
                 switch (outcome) {
-                    .installed, .up_to_date => |entry| installer.recordInLock(allocator, io, opts.path, entry) catch {},
+                    .installed, .up_to_date, .linked => |entry| installer.recordInLock(allocator, io, opts.path, entry) catch {},
                     .updated => |u| installer.recordInLock(allocator, io, opts.path, u.to) catch {},
                     .refused => {},
                 }
@@ -535,13 +637,23 @@ fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, o
         }
     }
 
-    if (failed > 0) {
+    if (failed.items.len > 0) {
         prompt.warn(try std.fmt.allocPrint(
             allocator,
-            "{d} of {d} plugin(s) could not be installed — the project will not boot until they are. Retry with 'hkm plugins install <name>'.",
-            .{ failed, enabled.items.len },
+            "{d} of {d} plugin(s) could not be installed — the project will not boot until they are:",
+            .{ failed.items.len, enabled.items.len },
         ));
+        // One command per plugin, and no separate list of bare names above it:
+        // the commands already name every one, and printing both meant reading
+        // the same nineteen names twice. `install` takes a SINGLE plugin — its
+        // second positional is the project path, so space-joining the names
+        // would install the first and treat the rest as a directory.
+        for (failed.items) |name| {
+            prompt.muted(try std.fmt.allocPrint(allocator, "  hkm plugins install {s}", .{name}));
+        }
     } else {
         prompt.ok(try std.fmt.allocPrint(allocator, "{d} plugin(s) installed", .{ok}));
     }
+
+    return failed.items.len;
 }

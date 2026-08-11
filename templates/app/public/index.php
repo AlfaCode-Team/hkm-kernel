@@ -46,7 +46,14 @@ try {
     //    attribute (never via a global — coroutine/Swoole safe).
     $request = Request::capture();
     if (isset($domain) && $domain !== null) {
-        $request = $request->withAttribute('domain', $domain);
+        $request = $request
+            ->withAttribute('domain', $domain)
+            // The FACE (admin/api/project/public) and the HOST let a route declare
+            // where it exists. Both come from the host DomainResolver already
+            // VALIDATED against projects.json — never the raw Host header, which
+            // the client controls and could otherwise pick its own route table.
+            ->withAttribute('route_face', $domain->type->value)
+            ->withAttribute('route_host', $domain->host);
     }
 
     // Run the HTTP pipeline (security → resolve → load → execute) and emit the

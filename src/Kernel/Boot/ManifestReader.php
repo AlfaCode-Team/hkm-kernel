@@ -16,6 +16,16 @@ final class ManifestReader
     private array $cache = [];
 
     /**
+     * Absolute module.json paths this reader has read, in first-seen order.
+     *
+     * BootStamp records them (with mtime+size) so a later build can tell whether
+     * anything the compile depended on has actually changed.
+     *
+     * @var array<string, true>
+     */
+    private array $files = [];
+
+    /**
      * @param class-string $moduleClass
      * @return array<string, mixed>
      * @throws BootException when the file is missing or invalid
@@ -37,6 +47,8 @@ final class ManifestReader
             throw new BootException("module.json not found for [{$moduleClass}] — expected at {$path}");
         }
 
+        $this->files[$path] = true;
+
         $raw     = file_get_contents($path);
         $decoded = $raw !== false ? json_decode($raw, true) : null;
         if (!is_array($decoded)) {
@@ -44,6 +56,16 @@ final class ManifestReader
         }
 
         return $this->cache[$moduleClass] = $decoded;
+    }
+
+    /**
+     * Every module.json this reader has read, absolute paths.
+     *
+     * @return list<string>
+     */
+    public function files(): array
+    {
+        return array_keys($this->files);
     }
 
     /**

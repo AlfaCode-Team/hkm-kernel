@@ -68,6 +68,16 @@ pub fn section(title: []const u8) void {
 /// A two-column help row: a cyan key padded to 30 cols, then a dimmed
 /// description. Use for usage lines, flags, env vars, and examples.
 pub fn item(key: []const u8, desc: []const u8) void {
+    // A key longer than the column still needs a gap before its description.
+    // Without one, every long usage line in `--help` read as one run-on word:
+    // "hkm plugins enable <plugin> [proj]wire a plugin into the project".
+    if (key.len >= 30) {
+        std.debug.print(
+            bar ++ "  " ++ cyan ++ "{s}" ++ reset ++ "  " ++ gray ++ "{s}" ++ reset ++ "\n",
+            .{ key, desc },
+        );
+        return;
+    }
     std.debug.print(
         bar ++ "  " ++ cyan ++ "{s: <30}" ++ reset ++ gray ++ "{s}" ++ reset ++ "\n",
         .{ key, desc },

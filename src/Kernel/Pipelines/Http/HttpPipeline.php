@@ -12,6 +12,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Stages\{
     CorrelationIdStage, SecurityStage, ResolveStage,
     LoadStage, RouteFilterStage, ExecuteStage, ErrorStage
 };
+use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteIndex;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\SecurityGateway;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
@@ -111,14 +112,23 @@ final class HttpPipeline
         $manifest = $this->loadManifest('service-manifest.php', ['services' => []]);
         $this->calculator ??= new DependencyGraphCalculator($manifest);
         $this->loader  ??= new OnDemandLoader($this->core, $this->essentialModules);
-        $this->matcher ??= new RouteMatcher($this->loadManifest('route-manifest.php', []));
+        $index = $this->routeIndex();
+        $this->matcher ??= RouteMatcher::fromCompiled(
+            $index,
+            self::flag('ROUTE_HEAD_FALLBACK', true),
+            self::policy(),
+        );
+
+        if (self::flag('ROUTE_STRICT_FILTERS', true)) {
+            $this->assertFiltersRegistered(RouteIndex::entries($index));
+        }
 
         return [
             new ErrorStage($this->errorPipeline), // outermost wrapper
             new CorrelationIdStage(),
             new SecurityStage($this->gateway),
             ...$this->resolveHook('after.security'),
-            new ResolveStage($this->matcher),
+            new ResolveStage($this->matcher, self::flag('ROUTE_METHOD_NOT_ALLOWED', false)),
             new LoadStage($this->calculator, $this->loader, self::essentialDomains($manifest, $this->essentialModules)),
             ...$this->resolveHook('after.load'),
             new RouteFilterStage($this->filters, $this->core),
@@ -165,6 +175,92 @@ final class HttpPipeline
         }
         $data = require $path;
         return is_array($data) ? $data : $default;
+    }
+
+    /**
+     * Prefer `route-index.php` — the matcher-ready index the boot compiler built,
+     * which removes per-worker regex construction entirely. A deploy whose cache
+     * predates that file falls back to deriving the index from the flat manifest,
+     * so an un-recompiled application still serves.
+     *
+     * @return array<string, mixed>
+     */
+    private function routeIndex(): array
+    {
+        $index = $this->loadManifest('route-index.php', []);
+
+        if (isset($index['static']) || isset($index['dynamic'])) {
+            return $index;
+        }
+
+        return RouteIndex::build($this->loadManifest('route-manifest.php', []));
+    }
+
+    /**
+     * Every filter alias a route names must have been registered by some
+     * Provider::boot(). Checked once, here, because this runs AFTER module boot
+     * (the compiler cannot know the aliases yet) and BEFORE the first request —
+     * turning a per-request 500 on an unreachable page into a startup failure
+     * that names the route.
+     *
+     * Set ROUTE_STRICT_FILTERS=false to fall back to the previous behaviour (the
+     * unknown alias throws when that one route is requested). The escape hatch
+     * exists because this check runs for the WHOLE table: an application that has
+     * been quietly serving with one mis-declared filter on a page nobody visits
+     * should be able to deploy the upgrade first and fix the route second.
+     *
+     * @param array<string, array<string, mixed>> $entries
+     */
+    private function assertFiltersRegistered(array $entries): void
+    {
+        foreach ($entries as $key => $entry) {
+            $specs = $entry['filter_specs'] ?? null;
+            $specs = is_array($specs)
+                ? array_column($specs, 'alias')
+                : array_map(
+                    static fn($f): string => explode(':', trim((string) $f), 2)[0],
+                    is_array($entry['filters'] ?? null) ? $entry['filters'] : [],
+                );
+
+            foreach ($specs as $alias) {
+                if ($alias === '' || $this->filters->has($alias)) {
+                    continue;
+                }
+
+                throw new \InvalidArgumentException(sprintf(
+                    'Route [%s] declares filter [%s], which no Provider::boot() registered. '
+                    . 'Registered aliases: %s. Register it with $http->filter() in the plugin that '
+                    . 'provides it, or remove it from the route.',
+                    $key,
+                    $alias,
+                    $this->filters->aliases() === [] ? '(none)' : implode(', ', $this->filters->aliases()),
+                ));
+            }
+        }
+    }
+
+    /** Read a boolean env flag once, at pipeline build. */
+    private static function flag(string $key, bool $default): bool
+    {
+        $value = \function_exists('env') ? env($key) : null;
+
+        if ($value === null || $value === '') {
+            return $default;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? $default;
+    }
+
+    /** ROUTE_TRAILING_SLASH: strict (default) | ignore | redirect. */
+    private static function policy(): string
+    {
+        $value = \function_exists('env') ? strtolower(trim((string) (env('ROUTE_TRAILING_SLASH') ?? ''))) : '';
+
+        return match ($value) {
+            RouteMatcher::TRAILING_IGNORE   => RouteMatcher::TRAILING_IGNORE,
+            RouteMatcher::TRAILING_REDIRECT => RouteMatcher::TRAILING_REDIRECT,
+            default                         => RouteMatcher::TRAILING_STRICT,
+        };
     }
 
     /**
