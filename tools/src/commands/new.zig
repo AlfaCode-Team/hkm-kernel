@@ -33,6 +33,7 @@ const plugin_assets = @import("../lib/plugin_assets.zig");
 const plugins_cmd = @import("plugins.zig");
 const plugin_boot = @import("../lib/plugin_bootstrap.zig");
 const installer = @import("../lib/plugin_install.zig");
+const lockfile = @import("../lib/plugin_lock.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -588,6 +589,28 @@ fn domainsJson(allocator: std.mem.Allocator, domains: []const []const u8) ![]con
 /// behind the template would reproduce exactly the missing-class failure this
 /// exists to prevent.
 /// Returns the number of plugins that could NOT be installed.
+/// Record an installed plugin in plugins.lock.json, naming it if that fails.
+///
+/// The install itself succeeded, so this is not fatal — but a silent failure
+/// leaves the lock disagreeing with what is on disk, and the user with no idea
+/// which plugin to re-add.
+fn recordOrWarn(
+    allocator: std.mem.Allocator,
+    io: Io,
+    projectRoot: []const u8,
+    name: []const u8,
+    entry: lockfile.Entry,
+) void {
+    installer.recordInLock(allocator, io, projectRoot, entry) catch {
+        const msg = std.fmt.allocPrint(
+            allocator,
+            "{s}: installed, but could not be recorded in plugins.lock.json — run `hkm plugins add {s}` to repair the lock.",
+            .{ name, name },
+        ) catch return;
+        prompt.warn(msg);
+    };
+}
+
 fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, opts: Options) !usize {
     const bootstrap = try util.join(allocator, opts.path, "app/bootstrap/app.php");
     const source = Dir.cwd().readFileAlloc(io, bootstrap, allocator, .limited(4 * 1024 * 1024)) catch return 0;
@@ -628,9 +651,13 @@ fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, o
             .installed, .up_to_date, .linked, .updated => {
                 ok += 1;
                 _ = installer.report(allocator, e.name, outcome, false) catch {};
+                // A lockfile write that fails is NOT a successful install:
+                // swallowing it left the command reporting success while
+                // plugins.lock.json did not record the plugin, so the next
+                // `hkm plugins` run cannot tell it is already there.
                 switch (outcome) {
-                    .installed, .up_to_date, .linked => |entry| installer.recordInLock(allocator, io, opts.path, entry) catch {},
-                    .updated => |u| installer.recordInLock(allocator, io, opts.path, u.to) catch {},
+                    .installed, .up_to_date, .linked => |entry| recordOrWarn(allocator, io, opts.path, e.name, entry),
+                    .updated => |u| recordOrWarn(allocator, io, opts.path, e.name, u.to),
                     .refused => {},
                 }
             },
