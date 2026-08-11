@@ -78,13 +78,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
         // where it matters. Skip quietly for that shape; warn for anything else.
         if (isDescribeVersion(version)) return;
 
+        // A version longer than the buffer would make bufPrint fail, and
+        // returning there skipped the marker with NO diagnostic at all — the
+        // silent failure this warning exists to prevent. Fall back to a fixed
+        // message so every rejected version is reported.
         var buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(
             &buf,
             "stamp: '{s}' is not a valid Composer version — leaving composer.json alone.\n" ++
                 "       (Composer accepts 1.2.3, 1.2.3-dev, 1.2.3-beta.4, 1.2.3-RC1; a 'dev' suffix takes no number.)\n",
             .{version},
-        ) catch return;
+        ) catch
+            "stamp: the requested version is not valid for Composer — leaving composer.json alone.\n";
         std.Io.File.stderr().writeStreamingAll(io, msg) catch {};
         return;
     }
@@ -95,6 +100,31 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     const updated = try stamp(allocator, source, version) orelse return; // already correct
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = updated });
+}
+
+/// Semver build metadata: dot-separated identifiers of [0-9A-Za-z-], each
+/// non-empty. Deliberately strict — this string is written verbatim into JSON.
+fn validMetadata(meta: []const u8) bool {
+    if (meta.len == 0) return false;
+
+    var it = std.mem.splitScalar(u8, meta, '.');
+    while (it.next()) |ident| {
+        if (ident.len == 0) return false;
+        for (ident) |c| {
+            if (!std.ascii.isAlphanumeric(c) and c != '-') return false;
+        }
+    }
+    return true;
+}
+
+/// Nothing that would break out of a JSON string, whatever validation decided.
+/// composerValid() is the gate; this is the seatbelt, because the cost of being
+/// wrong is a composer.json no install can parse.
+fn jsonSafe(v: []const u8) bool {
+    for (v) |c| {
+        if (c == '"' or c == '\\' or c < 0x20 or c == 0x7f) return false;
+    }
+    return true;
 }
 
 /// Does this look like `git describe` output — "<version>-<commits>-g<sha>"?
@@ -131,8 +161,15 @@ fn composerValid(v: []const u8) bool {
     if (s_.len == 0) return false;
     if (s_[0] == 'v' or s_[0] == 'V') s_ = s_[1..];
 
-    // Build metadata is always allowed; ignore it.
-    if (std.mem.indexOfScalar(u8, s_, '+')) |i| s_ = s_[0..i];
+    // Build metadata is allowed, but it still has to BE metadata. Discarding it
+    // unchecked let anything through — `composerValid("1.1.0+\"")` returned
+    // true, and stamp() writes the version raw between JSON quotes, so that one
+    // input produced an unparseable composer.json. Semver defines metadata as
+    // dot-separated [0-9A-Za-z-] identifiers; anything else is rejected.
+    if (std.mem.indexOfScalar(u8, s_, '+')) |i| {
+        if (!validMetadata(s_[i + 1 ..])) return false;
+        s_ = s_[0..i];
+    }
     if (s_.len == 0) return false;
 
     // 1-4 numeric components separated by '.' or '-'.
@@ -189,6 +226,10 @@ fn composerValid(v: []const u8) bool {
 ///
 /// Exposed for testing.
 pub fn stamp(allocator: std.mem.Allocator, source: []const u8, version: []const u8) !?[]const u8 {
+    // The version is written raw between JSON quotes below, so refuse outright
+    // anything that could terminate the string or embed a control character.
+    if (!jsonSafe(version)) return null;
+
     if (findVersionValue(source)) |span| {
         if (std.mem.eql(u8, source[span.start..span.end], version)) return null; // no-op
         var out: std.ArrayList(u8) = .empty;
@@ -371,6 +412,53 @@ test "a version ending in 'v' keeps its last character" {
     // validator directly and skipped the trimming.
     try std.testing.expect(composerValid("1.1.0-dev"));
     try std.testing.expect(!composerValid("1.1.0-de"));
+}
+
+test "build metadata is validated, not waved through" {
+    // The bug: metadata was discarded unchecked, so this returned true — and
+    // stamp() writes the version raw between JSON quotes, producing a
+    // composer.json no install can parse.
+    try std.testing.expect(!composerValid("1.1.0+\""));
+    try std.testing.expect(!composerValid("1.1.0+a\\b"));
+    try std.testing.expect(!composerValid("1.1.0+a\nb"));
+    try std.testing.expect(!composerValid("1.1.0+"));      // empty metadata
+    try std.testing.expect(!composerValid("1.1.0+a..b"));  // empty identifier
+    try std.testing.expect(!composerValid("1.1.0+a b"));
+
+    // …while real metadata still passes.
+    try std.testing.expect(composerValid("1.1.0+build.1"));
+    try std.testing.expect(composerValid("1.1.0+20260812"));
+    try std.testing.expect(composerValid("1.1.0+g29dccfb"));
+    try std.testing.expect(composerValid("1.1.0-beta.1+exp.sha.5114f85"));
+}
+
+test "stamp refuses a version that could break out of the JSON string" {
+    const a = std.testing.allocator;
+    const src =
+        \\{
+        \\    "name": "acme/pkg",
+        \\    "type": "library"
+        \\}
+    ;
+    for ([_][]const u8{ "1.0.0+\"", "1.0.0\\", "1.0.0\n", "1.0.0\x7f" }) |bad| {
+        try std.testing.expect((try stamp(a, src, bad)) == null);
+    }
+}
+
+test "a stamped composer.json is still parseable JSON" {
+    const a = std.testing.allocator;
+    const src =
+        \\{
+        \\    "name": "acme/pkg",
+        \\    "type": "library"
+        \\}
+    ;
+    const out = (try stamp(a, src, "1.2.0")) orelse return error.ExpectedOutput;
+    defer a.free(out);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, out, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("1.2.0", parsed.value.object.get("version").?.string);
 }
 
 test "a git describe version is recognised so dev builds stay quiet" {

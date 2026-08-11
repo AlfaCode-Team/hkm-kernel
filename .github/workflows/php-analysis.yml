@@ -7,8 +7,14 @@ name: PHP Analysis
 #   • PHPStan        — type/static analysis (non-blocking until a baseline lands)
 
 "on":
+  # `push` is limited to main — the same shape ci.yml uses. Listing master here
+  # too made every master->main PR run this workflow TWICE: the push event fires
+  # for refs/heads/master and the pull_request event for refs/pull/N/merge, and
+  # because the concurrency group is keyed on the ref, the two never collide.
+  # That is where the duplicate "composer audit", "PHPStan" and "Semgrep" checks
+  # on a PR came from. Changes to master still get analysed — through the PR.
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
     branches: [main, master]
   schedule:
