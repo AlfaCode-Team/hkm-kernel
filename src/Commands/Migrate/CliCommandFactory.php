@@ -61,7 +61,7 @@ final class CliCommandFactory
         return [
             ...$this->migrate(),
             ...$this->generate(),
-            ...$this->tenant(),
+            // ...$this->tenant(),
             ...$this->seed(),
             ...$this->make(),
             ...$this->maintenance(),
@@ -112,17 +112,17 @@ final class CliCommandFactory
      *
      * @return list<LetMigrateCommand>
      */
-    public function tenant(): array
-    {
-        $c = $this->config;
-        return [
-            new TenantMigrateRunCommand($c),
-            new TenantMigrateRollbackCommand($c),
-            new TenantMigrateResetCommand($c),
-            new TenantMigrateRefreshCommand($c),
-            new TenantMigrateStatusCommand($c),
-        ];
-    }
+    // public function tenant(): array
+    // {
+    //     $c = $this->config;
+    //     return [
+    //         new TenantMigrateRunCommand($c),
+    //         new TenantMigrateRollbackCommand($c),
+    //         new TenantMigrateResetCommand($c),
+    //         new TenantMigrateRefreshCommand($c),
+    //         new TenantMigrateStatusCommand($c),
+    //     ];
+    // }
  
     /**
      * Seeder commands.

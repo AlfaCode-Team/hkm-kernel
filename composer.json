@@ -3,6 +3,7 @@
     "description": "A modular PHP backend boilerplate built with OpenSwoole and a multi-repository architecture using Git submodules. Designed for scalable, high-performance microservices and service-oriented applications.",
     "type": "library",
     "license": "MIT",
+    "version": "1.2.0",
     "keywords": [
         "framework",
         "php",
@@ -82,7 +83,8 @@
         "psr-4": {
             "AlfacodeTeam\\PhpServicePlatform\\": "src/",
             "AlfacodeTeam\\PhpServicePlatform\\System\\": "src/System/",
-            "Project\\": "projects/"
+            "Project\\": "projects/",
+            "Plugins\\": "plugins/"
         },
         "files": [
             "src/Kernel/Support/helpers.php"

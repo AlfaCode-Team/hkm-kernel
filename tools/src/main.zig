@@ -17,8 +17,8 @@ const banner = @import("lib/banner.zig");
 const prompt = @import("lib/prompt.zig");
 const memory = @import("lib/memory.zig");
 
-fn printHelp() void {
-    banner.print();
+fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ.Map) void {
+    banner.print(allocator, io, env);
 
     prompt.section("Usage");
     prompt.item("hkm new <path> [opts]", "scaffold a new PhpServicePlatform project");
@@ -239,13 +239,13 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
     }
 
     if (args.len <= 1) {
-        printHelp();
+        printHelp(allocator, io, &env_map);
         return 0;
     }
 
     const cmd = args[1];
     if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "--help") or std.mem.eql(u8, cmd, "-h")) {
-        printHelp();
+        printHelp(allocator, io, &env_map);
         return 0;
     }
     if (std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-v")) {
@@ -253,7 +253,7 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         return 0;
     }
     if (std.mem.eql(u8, cmd, "version")) {
-        banner.print();
+        banner.print(allocator, io, &env_map);
         return 0;
     }
     if (std.mem.eql(u8, cmd, "upgrade") or std.mem.eql(u8, cmd, "self-update")) {

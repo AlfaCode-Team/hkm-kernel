@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Project\Support\Seo;
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteIndex;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
 /**
@@ -59,22 +60,37 @@ final class RouteCatalog
     /**
      * Public, static GET paths suitable for a sitemap (leading-slash paths).
      *
+     * DOMAIN GROUPS: a route may be grouped under a host, and a sitemap describes
+     * ONE host — so `$domain` selects which groups to enumerate. The default
+     * (null) returns only the shared, ungrouped routes, which is every route in a
+     * project that groups nothing and therefore leaves existing sitemaps
+     * byte-identical. Pass a host to get the groups that host matches (exact,
+     * wildcard or bare subdomain — see RouteIndex::hostCandidates) plus the shared
+     * ones, de-duplicated by path.
+     *
      * @param list<string> $excludePrefixes Extra path prefixes to skip.
      * @param list<string> $excludePaths    Extra exact paths to skip.
+     * @param string|null  $domain          Host to enumerate, or null for shared only.
      * @return list<string>
      */
-    public function publicPaths(array $excludePrefixes = [], array $excludePaths = []): array
+    public function publicPaths(array $excludePrefixes = [], array $excludePaths = [], ?string $domain = null): array
     {
         $prefixes = [...self::DEFAULT_EXCLUDED_PREFIXES, ...$excludePrefixes];
         $paths    = [...self::DEFAULT_EXCLUDED_PATHS, ...$excludePaths];
+        $wanted   = $domain === null ? [] : RouteIndex::hostCandidates($domain);
 
         $found = [];
 
         foreach ($this->manifest as $key => $entry) {
-            [$method, $path] = array_pad(explode(' ', $key, 2), 2, '');
+            $parsed = RouteIndex::parseKey($key);
+            $method = $parsed['method'];
+            $path   = $parsed['path'];
 
             if (strtoupper($method) !== 'GET') {
                 continue;
+            }
+            if ($parsed['domain'] !== '' && !in_array($parsed['domain'], $wanted, true)) {
+                continue;   // belongs to a different host — not this sitemap
             }
             if ($path === '' || str_contains($path, '{')) {
                 continue;   // dynamic — cannot enumerate from the manifest

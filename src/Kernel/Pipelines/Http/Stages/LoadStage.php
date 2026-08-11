@@ -42,6 +42,13 @@ final class LoadStage implements HttpStageContract
         $entry    = $request->attribute('route_entry');
         $extra    = is_array($entry) && is_array($entry['requires'] ?? null) ? $entry['requires'] : [];
 
+        // The cache key is constant per route, so the boot compiler bakes it into
+        // the entry as `graph_key`. The implode() below is the fallback for a
+        // manifest compiled by an older kernel.
+        $key = is_array($entry) && is_string($entry['graph_key'] ?? null)
+            ? $entry['graph_key']
+            : $service . '|' . implode(',', $extra);
+
         // Essential modules are registered on every request anyway (see
         // OnDemandLoader) — resolving their domains THROUGH the graph as well
         // brings their transitive requires[] with them, so an essential like
@@ -49,7 +56,6 @@ final class LoadStage implements HttpStageContract
         // unbound contract on routes that never pulled it in. The calculator
         // visits each domain once, so nothing registers twice. Graphs are
         // memoized per worker (see $graphs).
-        $key = $service . '|' . implode(',', $extra);
         $graph = $this->graphs[$key]
             ??= $this->calculator->resolve($service, [...$extra, ...$this->essentialDomains]);
         $container = $this->loader->load($graph, $request);

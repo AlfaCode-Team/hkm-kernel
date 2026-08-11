@@ -6,6 +6,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-12
+
+### Added
+- **Route groups.** `groups[]` in `module.json` / `proj.json` states a `prefix`,
+  `filters`, `requires`, `name` prefix and `domain` once for every route inside;
+  groups nest (max depth 16). Module-wide `routePrefix` / `routeFilters` /
+  `routeRequires` / `routeName` / `routeDomain` / `routeSubdomain` do the same for
+  a whole file. Expanded at BOOT into ordinary flat routes — zero request-time cost.
+- **Domain grouping.** A route may declare the host it answers on
+  (`"domain": "africavoting.local"`, `"domain": "*.example.com"`, or a bare
+  `"subdomain": "api"`). The domain is part of the route KEY, so one project can
+  answer `GET /` differently per host. Ungrouped routes stay global; a bare
+  subdomain answers on that label of every domain. A declared host is validated
+  against `proj.json` `"domains"`.
+- **Parameter types `path` and `enum(a|b)`, and optional `{id?}`.** `path` is a
+  traversal-safe catch-all (`any` is unchanged and still has no guard);
+  `enum` members are `preg_quote`d, so no regex can be injected from JSON.
+- `HEAD` requests are served by the `GET` route (`ROUTE_HEAD_FALLBACK`), with the
+  body stripped. Opt-in `405 Method Not Allowed` + `Allow`
+  (`ROUTE_METHOD_NOT_ALLOWED`) and trailing-slash policy (`ROUTE_TRAILING_SLASH`).
+- **`BOOT_CACHE`** — `Kernel::build()` skips recompiling manifests that are already
+  current. Under PHP-FPM the boot pipeline previously ran on *every request*
+  (~2 ms, ~150 KB of writes for ~130 routes); with the cache that becomes ~0.02 ms.
+  Off by default; clear `var/cache/manifests/` on deploy.
+- `route()`, `signed_route()` and `url()` global helpers; `UrlGenerator` bound in
+  the `CoreContainer`. Absolute URLs follow the route's own domain group.
+- `signed` route filter (SecurityFilters) — enforces a `signed_route()` link
+  declaratively, the URL counterpart to `hmac`.
+- Two derived manifests beside `route-manifest.php`: `route-index.php` (the
+  matcher-ready index) and `route-names.php` (the name index `UrlGenerator` reads).
+  Both optional at runtime — every consumer falls back to the flat manifest.
+
+### Fixed
+- **Captured route parameters are percent-decoded and re-validated against their
+  type.** `/files/..%2F..%2Fetc%2Fpasswd` no longer satisfies `{name}`, and
+  `/users/Jos%C3%A9` now reaches the controller as `José` rather than `Jos%C3%A9`.
+- Route patterns are anchored with the `D` modifier — a trailing newline in the
+  request path no longer satisfies `$`.
+- Literal path text is `preg_quote`d, so `/feed.xml/{id}` no longer matches
+  `/feedXxml/1`.
+- Signed-URL verification compares the query byte-for-byte instead of round-tripping
+  it through `parse_str()`, which rewrote `.`, ` ` and `[` in parameter names and
+  made some legitimately signed URLs impossible to verify.
+- `UrlGenerator` supports a repeated placeholder (`/a/{id}/b/{id}`), which
+  previously reported the second occurrence as a missing parameter.
+- `resolveEssentialModules()` no longer re-reads every `module.json` a second time
+  during `build()`.
+
+### Changed
+- Route filter stages are resolved once per worker instead of being reconstructed
+  on every request; filter specs, the handler split and the dependency-graph key
+  are precompiled into the manifest.
+- Dynamic routes are bucketed by their first literal path segment, so a request
+  tests only the patterns that could match its prefix.
+- These now FAIL THE BOOT instead of compiling into a route that silently never
+  matched: a path not starting with `/`, a duplicated or PCRE-invalid capture name,
+  a handler without exactly one `@`, a filter alias no `Provider::boot()`
+  registered, and a route domain absent from `proj.json` `"domains"`.
+- `RouteCatalog::publicPaths()` takes an optional `$domain` — the default is
+  unchanged (shared routes only).
+
+### Docs
+- `docs/Sentinel-Routing-Guide.pdf` — a practical, example-driven routing manual.
+
 ## [1.1.0-beta.1] - 2026-08-07
 
 First **installable** pre-release of the 1.1.0 line. `1.1.0-dev.2` and

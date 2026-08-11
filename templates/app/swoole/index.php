@@ -135,7 +135,12 @@ $server->on('request', static function (SwooleRequest $req, SwooleResponse $res)
         $hostHeader = $req->header['host'] ?? null;
         $domain = EntryHelpers::resolveDomain($rootPath, is_string($hostHeader) ? $hostHeader : null);
         if ($domain !== null) {
-            $request = $request->withAttribute('domain', $domain);
+            $request = $request
+                ->withAttribute('domain', $domain)
+                // Face + host come from the VALIDATED host (see the FPM entry point
+                // for why the raw Host header must never select a route table).
+                ->withAttribute('route_face', $domain->type->value)
+                ->withAttribute('route_host', $domain->host);
         }
 
         $response = $kernel->http()->handle($request);
