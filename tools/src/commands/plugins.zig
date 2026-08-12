@@ -15,6 +15,7 @@ const util = @import("../lib/util.zig");
 const sources = @import("../lib/plugin_sources.zig");
 const boot = @import("../lib/plugin_bootstrap.zig");
 const assets = @import("../lib/plugin_assets.zig");
+const penv = @import("../lib/plugin_env.zig");
 const ui = @import("../lib/plugin_ui.zig");
 const deps = @import("../lib/plugin_deps.zig");
 const installer = @import("../lib/plugin_install.zig");
@@ -998,6 +999,19 @@ fn enableOne(
                 for (preview.items) |p| prompt.muted(try std.fmt.allocPrint(allocator, "        {s}", .{p}));
                 prompt.muted("    + would run migrate:run --force");
             }
+
+            const vars = try penv.readVars(allocator, io, cd, folder);
+            if (vars.len > 0) {
+                const plan = try penv.seed(allocator, io, root, folder, vars, true);
+                if (plan.added.len > 0) {
+                    prompt.muted(try std.fmt.allocPrint(
+                        allocator,
+                        "    + would add {d} env var(s) to .env ({d} already present):",
+                        .{ plan.added.len, plan.skipped },
+                    ));
+                    for (plan.added) |v| prompt.muted(try std.fmt.allocPrint(allocator, "        {s}", .{v.key}));
+                }
+            }
         }
         return updated;
     }
@@ -1010,6 +1024,51 @@ fn enableOne(
         prompt.muted(try std.fmt.allocPrint(allocator, "    wired Support/helpers.php  (require_once {s})", .{expr}));
 
     if (chosenDir) |cd| {
+        // Seed the plugin's declared env vars BEFORE migrations run: a
+        // migration reads the database config, and the whole point of writing
+        // the block is that the operator can see and set it first.
+        const vars = try penv.readVars(allocator, io, cd, folder);
+        if (vars.len > 0) {
+            const seeded = penv.seed(allocator, io, root, folder, vars, false) catch |e| blk: {
+                prompt.warn(try std.fmt.allocPrint(
+                    allocator,
+                    "could not write .env ({t}) — add {s}'s config[] variables by hand.",
+                    .{ e, folder },
+                ));
+                break :blk penv.Seeded{ .added = &.{}, .skipped = 0, .path = "", .created = false };
+            };
+
+            if (seeded.added.len > 0) {
+                if (seeded.created) prompt.muted("    created .env");
+                prompt.ok(try std.fmt.allocPrint(
+                    allocator,
+                    "Added {d} env var(s) to .env ({d} already present)",
+                    .{ seeded.added.len, seeded.skipped },
+                ));
+
+                // Name the ones that BLOCK a boot separately. Everything else is
+                // a knob with a working default; these are the ones the operator
+                // has to act on, and burying them in a list of twenty would mean
+                // finding out from a failed boot instead.
+                var needs_value: usize = 0;
+                for (seeded.added) |v| {
+                    if (v.required and v.default == null) needs_value += 1;
+                }
+                if (needs_value > 0) {
+                    prompt.warn(try std.fmt.allocPrint(
+                        allocator,
+                        "{d} of them are REQUIRED and have no default — the boot fails until you set them:",
+                        .{needs_value},
+                    ));
+                    for (seeded.added) |v| {
+                        if (v.required and v.default == null) {
+                            prompt.muted(try std.fmt.allocPrint(allocator, "    {s}", .{v.key}));
+                        }
+                    }
+                }
+            }
+        }
+
         const fp = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ cd, folder });
         var published: std.ArrayList([]const u8) = .empty;
         try assets.publishAssets(allocator, io, fp, root, &published);
