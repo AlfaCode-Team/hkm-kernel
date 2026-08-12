@@ -48,9 +48,9 @@ jobs:
   # macOS universal binary is assembled with llvm-lipo. This needs only ONE
   # self-hosted Zig toolchain (Linux) and no macOS runner.
 
-  # ── Linux: .deb (amd64) ────────────────────────────────────────────────────
+  # ── Linux: portable tarball (default install) + .deb (system-wide) ────────
   build-linux:
-    name: Build Linux .deb
+    name: Build Linux tarball + .deb
     needs: test
     runs-on: ubuntu-22.04
     steps:
@@ -63,8 +63,16 @@ jobs:
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (linux)
         run: VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}" ./tools/bundle.sh linux
+      # TWO artifacts. The tarball is the DEFAULT install path — user-local,
+      # no root (tools/install.sh). The .deb is for multi-user machines and CI
+      # images where a system-wide install and apt-managed PHP are the point.
+      - uses: actions/upload-artifact@v5
+        with: { name: linux-tarball, path: dist/*linux*.tar.gz }
       - uses: actions/upload-artifact@v5
         with: { name: linux-deb, path: dist/*.deb }
+      # Published alongside the assets so `curl | sh` works without a checkout.
+      - uses: actions/upload-artifact@v5
+        with: { name: installer, path: tools/install.sh }
 
   # ── Windows: .zip (x86_64, cross-compiled) ────────────────────────────────
   build-windows:
@@ -135,9 +143,11 @@ jobs:
           # explicitly; on a tag push this matches GITHUB_REF_NAME anyway.
           tag_name: v${{ steps.notes.outputs.version }}
           files: |
+            artifacts/linux-tarball/*.tar.gz
             artifacts/linux-deb/*.deb
             artifacts/windows-zip/*.zip
             artifacts/macos-app/*.tar.gz
+            artifacts/installer/install.sh
           # Curated section (if present) goes first; GitHub appends the
           # auto-generated "What's Changed" / contributors below it.
           body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release-body.md' || '' }}
