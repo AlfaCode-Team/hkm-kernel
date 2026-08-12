@@ -335,7 +335,17 @@ fn removeModule(allocator: std.mem.Allocator, io: Io, env: *EnvMap, root: []cons
     _ = try runGit(allocator, io, env, root, &.{ "submodule", "deinit", "-f", rel });
     _ = try runGit(allocator, io, env, root, &.{ "rm", "-f", rel });
     Dir.cwd().deleteTree(io, try std.fmt.allocPrint(allocator, "{s}/.git/modules/{s}", .{ root, rel })) catch {};
-    Dir.cwd().deleteTree(io, modulePath) catch {};
+    // Kept, not swallowed: reporting "Removed submodule X" for a directory that
+    // is still on disk sends the reader looking for a different problem.
+    var delete_failed = false;
+    Dir.cwd().deleteTree(io, modulePath) catch {
+        delete_failed = true;
+    };
+    if (delete_failed) {
+        prompt.err(try std.fmt.allocPrint(allocator, "could not delete {s} — it is still on disk.", .{modulePath}));
+        prompt.muted("  remove it by hand, then re-run to finish unwiring composer.json.");
+        return 1;
+    }
     // `git rm` already strips the .gitmodules section on modern git, so this is a
     // best-effort fallback for older git — silence its "no such section" noise.
     _ = try runGitQuiet(allocator, io, env, root, &.{ "config", "-f", ".gitmodules", "--remove-section", try std.fmt.allocPrint(allocator, "submodule.{s}", .{rel}) });

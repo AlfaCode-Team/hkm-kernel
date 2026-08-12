@@ -15,7 +15,15 @@ final class ExecuteStage implements HttpStageContract
         $container = $request->container();
         $scope = $entry['solves'] ?? '';
 
-        [$controllerClass, $method] = explode('@', $entry['handler']);
+        // The handler split is constant per route, so the boot compiler bakes it
+        // into the entry. explode() is the fallback for a manifest compiled by an
+        // older kernel.
+        if (isset($entry['class'], $entry['action'])) {
+            $controllerClass = $entry['class'];
+            $method          = $entry['action'];
+        } else {
+            [$controllerClass, $method] = explode('@', $entry['handler'], 2);
+        }
 
         $controller = $container->makeInScope($controllerClass, $scope);
 
@@ -32,6 +40,25 @@ final class ExecuteStage implements HttpStageContract
             $response = $controller->$method($request, ...$params);
         }
 
-        return $response->withHeader('X-Correlation-ID', $request->attribute('correlation_id', ''));
+        $response = $response->withHeader('X-Correlation-ID', $request->attribute('correlation_id', ''));
+
+        // A HEAD request is served by the GET route (see RouteMatcher) and must
+        // return the GET headers with NO body. Rebuilding an empty response also
+        // discards any stream callback or file path, so a HEAD probe on a large
+        // download never reads the file.
+        return $request->method() === 'HEAD' ? self::withoutBody($response) : $response;
+    }
+
+    /**
+     * Same status and headers, empty body. Content-Length is dropped rather than
+     * faked: RFC 9110 permits omitting it on a HEAD response, and computing it
+     * would mean generating the very body we are trying not to produce.
+     */
+    private static function withoutBody(Response $response): Response
+    {
+        $headers = $response->headers();
+        unset($headers['content-length'], $headers['Content-Length']);
+
+        return Response::empty($response->status())->withHeaders($headers);
     }
 }
