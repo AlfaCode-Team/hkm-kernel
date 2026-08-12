@@ -237,9 +237,72 @@ See `plugins/User/ui/README.md` for a complete worked example (admin list/detail
 | `Link` | `@pageflow/react` | in-app navigation (no full reload); `only`, `as`, `preserveScroll` |
 | `useForm` | `@pageflow/react` | forms with CSRF, `processing`, `errors` |
 | `router` | `@pageflow/react` | imperative visits / partial reloads (`only: [...]`) |
+| `AdminLayout`, `useSetPageHeader`, `ResourceListShell`, `DataTable` | `@pageflow/admin` | the admin shell + kit (see below) |
 | `Button`, `Dialog`, … | `@ui/*` | the shared shadcn design system (49 components) |
 | `cn` | `@lib/utils` | Tailwind class merge |
-| `useTheme`, `ThemeProvider` | `@providers/theme` | light/dark |
+| `useTheme`, `ThemeProvider` | `@providers/theme` | light / dark / system |
+
+---
+
+## The admin shell — `@pageflow/admin`
+
+A third Pageflow entry point (beside `core` and `react`) carrying the admin
+shell, the navigation registry and the domain-free building blocks. Nothing in
+`@pageflow/core` or `@pageflow/react` imports it, so a public-only surface never
+bundles it.
+
+### Attach the layout as a PERSISTENT layout
+
+```tsx
+import type { ReactNode } from "react";
+import { AdminLayout, useSetPageHeader } from "@pageflow/admin";
+
+export default function Sales() {
+  useSetPageHeader({ title: "Sales", actions: [{ label: "Export", onClick: exportCsv }] });
+  return <main>…</main>;
+}
+
+Sales.layout = (page: ReactNode) => <AdminLayout>{page}</AdminLayout>;
+```
+
+Pageflow applies `Component.layout` **outside** the swapped page, so the shell
+survives navigation — sidebar scroll, open menus and the nav overflow
+calculation are all preserved. Wrapping the page's own return instead remounts
+the entire sidebar on every click.
+
+`AdminLayout` takes no data props: it reads the reserved **`adminShell`** shared
+prop (user, tenant, switchable tenants, feature flags, logout/account/settings
+URLs). Share it once server-side and every page has it.
+
+`AuthLayout` is the nav-free equivalent for login / register / consent pages.
+
+### Contribute a sidebar section from a plugin
+
+Each plugin declares its own navigation in `ui/admin/nav.ts`; the admin surface
+globs `/plugins/*/admin/nav.ts`, so the registry never names a business domain:
+
+```ts
+import { Building2 } from "lucide-react";
+import { registerModule, registerFeature } from "@pageflow/admin";
+
+registerFeature({ id: "rental", label: "Rental management" });
+
+registerModule({
+  id: "rental",
+  sectionLabel: "Rental",
+  order: 40,
+  features: ["rental"],                 // hidden unless proj.json enables it
+  items: [{ id: "properties", label: "Properties", icon: Building2,
+            path: "/admin/rental/properties" }],
+});
+```
+
+Visibility is driven by the server: `proj.json` `features[]` →
+`DomainContext->features` → `adminShell.features`. A flag matching nothing logs a
+warning naming it rather than silently doing nothing.
+
+Full reference — every export, the settings-tab registry, the list/table kit:
+`plugins/hkm-plugin-pageflow/ui/admin/README.md`.
 
 Add more shadcn components with `npx shadcn add <name>` (writes into
 `src/shared/ui/`, driven by `components.json`).
