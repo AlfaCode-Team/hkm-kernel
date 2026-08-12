@@ -255,17 +255,26 @@ final class CompileRouteManifestStage implements BootStageContract
      */
     private function flatten(array $source, string $owner): array
     {
-        return $this->flattenInto($source, [
+        $scope = [
             'prefix'   => $this->normalizePrefix($source['routePrefix'] ?? '', $owner),
             'name'     => $this->stringOrEmpty($source['routeName'] ?? '', $owner, 'routeName'),
             'filters'  => $this->normalizeFilters($source['routeFilters'] ?? [], $owner),
             'requires' => $this->normalizeRequires($source['routeRequires'] ?? []),
-            'domain'   => $this->checkedDomain(
-                $this->normalizeDomain($source['routeDomain'] ?? $source['routeSubdomain'] ?? ''),
-                $owner,
-            ),
+            'domain'   => '',
             'faces'    => $this->normalizeFaces($source['routeFaces'] ?? []),
-        ], $owner, 0);
+        ];
+
+        // The module-wide domain takes a list too, so the three levels that can
+        // name a host — module-wide, group, route — all behave the same way.
+        // One of them quietly refusing a list is the kind of inconsistency that
+        // is only ever discovered by it not working.
+        $flat = [];
+        foreach ($this->domainsFor($source, $scope, $owner, 'routeDomain', 'routeSubdomain') as $domain) {
+            $scope['domain'] = $domain;
+            $flat = [...$flat, ...$this->flattenInto($source, $scope, $owner, 0)];
+        }
+
+        return $flat;
     }
 
     /**
@@ -298,7 +307,7 @@ final class CompileRouteManifestStage implements BootStageContract
 
             $name = $this->stringOrEmpty($route['name'] ?? '', $owner, 'name');
 
-            $flat[] = [
+            $entry = [
                 'method'   => strtoupper(trim((string) $route['method'])),
                 'path'     => $path,
                 'handler'  => (string) $route['handler'],
@@ -313,14 +322,37 @@ final class CompileRouteManifestStage implements BootStageContract
                     $inherited['requires'],
                     $this->normalizeRequires($route['requires'] ?? []),
                 ),
-                'domain'   => isset($route['domain']) || isset($route['subdomain'])
-                    ? $this->checkedDomain(
-                        $this->normalizeDomain($route['domain'] ?? $route['subdomain']),
-                        "Route in {$owner}",
-                    )
-                    : $inherited['domain'],
+                'domain'   => $inherited['domain'],
                 'faces'    => $this->normalizeFaces($route['faces'] ?? []) ?: $inherited['faces'],
             ];
+
+            $domains = $this->domainsFor($route, $inherited, "Route in {$owner}");
+
+            // A NAMED route on several domains would claim one name several
+            // times. Names are a flat, application-wide namespace on purpose —
+            // UrlGenerator holds no request state, so it cannot pick a host —
+            // and the duplicate-name guard would otherwise report this later
+            // without explaining the cause.
+            if ($name !== '' && count($domains) > 1) {
+                throw new BootException(sprintf(
+                    'Route [%s] in %s names itself [%s] while declaring %d domains. '
+                    . 'Route names are one flat namespace, so one name cannot mean a '
+                    . 'different URL per host. Give each domain its own entry with a '
+                    . 'distinct name, or drop the name.',
+                    $path,
+                    $owner,
+                    $inherited['name'] . $name,
+                    count($domains),
+                ));
+            }
+
+            // One flat route per domain. A single string yields one, exactly as
+            // before; a list yields one copy per host, each with its own route
+            // key, which is what makes them independently overridable.
+            foreach ($domains as $domain) {
+                $entry['domain'] = $domain;
+                $flat[] = $entry;
+            }
         }
 
         foreach ($source['groups'] ?? [] as $group) {
@@ -328,27 +360,32 @@ final class CompileRouteManifestStage implements BootStageContract
                 throw new BootException("Invalid route group in {$owner} - a group must be an object.");
             }
 
-            $flat = [...$flat, ...$this->flattenInto($group, [
+            $context = "Route group in {$owner}";
+
+            $scope = [
                 'prefix'   => $inherited['prefix']
-                    . $this->normalizePrefix($group['prefix'] ?? '', "Route group in {$owner}"),
+                    . $this->normalizePrefix($group['prefix'] ?? '', $context),
                 'name'     => $inherited['name']
                     . $this->stringOrEmpty($group['name'] ?? '', $owner, 'group name'),
                 'filters'  => $this->mergeFilters(
                     $inherited['filters'],
-                    $this->normalizeFilters($group['filters'] ?? [], "Route group in {$owner}"),
+                    $this->normalizeFilters($group['filters'] ?? [], $context),
                 ),
                 'requires' => $this->mergeRequires(
                     $inherited['requires'],
                     $this->normalizeRequires($group['requires'] ?? []),
                 ),
-                'domain'   => isset($group['domain']) || isset($group['subdomain'])
-                    ? $this->checkedDomain(
-                        $this->normalizeDomain($group['domain'] ?? $group['subdomain']),
-                        "Route group in {$owner}",
-                    )
-                    : $inherited['domain'],
+                'domain'   => $inherited['domain'],
                 'faces'    => $this->normalizeFaces($group['faces'] ?? []) ?: $inherited['faces'],
-            ], $owner, $depth + 1)];
+            ];
+
+            // Expand the WHOLE subtree once per domain. Nested groups and routes
+            // inherit the one host they are being expanded for, so a list at any
+            // level composes with a list at any other.
+            foreach ($this->domainsFor($group, $inherited, $context) as $domain) {
+                $scope['domain'] = $domain;
+                $flat = [...$flat, ...$this->flattenInto($group, $scope, $owner, $depth + 1)];
+            }
         }
 
         return $flat;
@@ -382,12 +419,177 @@ final class CompileRouteManifestStage implements BootStageContract
             : $domain;
     }
 
-    /** Validate a normalised domain and return it, so it composes in an expression. */
-    private function checkedDomain(string $domain, string $context): string
+    /**
+     * The domains a route or group answers on — ONE OR MORE.
+     *
+     * `"domain"` and `"subdomain"` accept either a single string or a LIST, so
+     * one group can serve several hosts without being written out N times:
+     *
+     *   "domain": "shop.example.com"
+     *   "domain": ["shop.example.com", "shop.example.co.uk", "*.tenant.example.com"]
+     *   "subdomain": ["admin", "staff"]
+     *
+     * Each entry is grouped verbatim and validated independently, exactly as a
+     * single value is, and the caller emits one copy of the route per entry.
+     * Groups already expand at boot into flat routes, so this costs nothing at
+     * request time — it is the same expansion with a wider fan-out.
+     *
+     * A non-string, non-list value is a BOOT FAILURE. It used to fall through
+     * `is_string()` to '', which silently turned "these routes belong to these
+     * two hosts" into "these routes are global, on every host" — the widest
+     * possible outcome, arrived at by accident, with nothing logged.
+     *
+     * @return list<string> normalised domains, de-duplicated. `['']` means the
+     *                      shared (every-domain) table.
+     */
+    private function normalizeDomainList(mixed $domain, string $context): array
     {
-        $this->validateDomain($domain, $context);
+        if (is_string($domain)) {
+            return [$this->normalizeDomain($domain)];
+        }
 
-        return $domain;
+        if (!is_array($domain)) {
+            throw new BootException(sprintf(
+                '%s declares a domain of type [%s]. Use a string ("shop.example.com") '
+                . 'or a list of strings (["a.example.com", "b.example.com"]).',
+                $context,
+                get_debug_type($domain),
+            ));
+        }
+
+        if ($domain === []) {
+            throw new BootException(sprintf(
+                '%s declares an empty domain list. Remove the key to serve every '
+                . 'domain, or name at least one host.',
+                $context,
+            ));
+        }
+
+        $out = [];
+        foreach ($domain as $entry) {
+            if (!is_string($entry)) {
+                throw new BootException(sprintf(
+                    '%s has a non-string entry of type [%s] in its domain list.',
+                    $context,
+                    get_debug_type($entry),
+                ));
+            }
+
+            $normalized = $this->normalizeDomain($entry);
+            if ($normalized === '') {
+                throw new BootException(sprintf(
+                    '%s lists [%s] as a domain, which is not usable as one. A domain '
+                    . 'may not be blank or contain a space or an "%s".',
+                    $context,
+                    $entry,
+                    RouteIndex::DOMAIN_SEPARATOR,
+                ));
+            }
+
+            // A repeat would compile the same route twice under one key and trip
+            // the duplicate-route guard — reporting a conflict the author would
+            // have to work backwards to recognise as their own copy-paste.
+            if (!in_array($normalized, $out, true)) {
+                $out[] = $normalized;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The domains a route, group or module compiles under — always at least one.
+     *
+     * Declaring neither key inherits the enclosing scope, which is what makes an
+     * ungrouped route global and a nested group stay on its parent's host.
+     *
+     * The key names are parameters because the module-wide form spells them
+     * `routeDomain`/`routeSubdomain` while routes and groups use
+     * `domain`/`subdomain` — the same rule, read from different keys.
+     *
+     * @param  array<string, mixed> $source    the route, group or module object
+     * @param  array<string, mixed> $inherited the enclosing scope
+     * @return list<string>
+     */
+    private function domainsFor(
+        array $source,
+        array $inherited,
+        string $context,
+        string $domainKey = 'domain',
+        string $subdomainKey = 'subdomain',
+    ): array {
+        $hasDomain    = isset($source[$domainKey]);
+        $hasSubdomain = isset($source[$subdomainKey]);
+
+        if (!$hasDomain && !$hasSubdomain) {
+            return [(string) $inherited['domain']];
+        }
+
+        $parents = $hasDomain
+            ? $this->normalizeDomainList($source[$domainKey], $context)
+            : [];
+        $labels = $hasSubdomain
+            ? $this->normalizeDomainList($source[$subdomainKey], $context)
+            : [];
+
+        // A declared `domain` is BOTH a host in its own right AND the parent that
+        // `subdomain` attaches to.
+        //
+        //   { "domain": "hkm.local", "subdomain": ["api", "auth"] }
+        //     → hkm.local, api.hkm.local, auth.hkm.local
+        //
+        // Without this, those labels compiled BARE — and a bare label spans every
+        // domain by design, so the group also answered on api.somebody-else.com.
+        // Reading "api under hkm.local" and getting "api under anything" is not a
+        // difference anyone spots until it is exploited.
+        //
+        // A label with NO domain to attach to keeps the global meaning, because
+        // there is nothing for it to be relative to — that is what makes an
+        // `admin` panel appear on every brand.
+        if ($parents === []) {
+            foreach ($labels as $label) {
+                $this->validateDomain($label, $context);
+            }
+
+            return $labels;
+        }
+
+        foreach ($parents as $parent) {
+            $this->validateDomain($parent, $context);
+        }
+
+        // No labels to attach: the domains stand alone. Returning here also keeps
+        // the wildcard check below from firing on `{"domain": "*.example.com"}`,
+        // which composes nothing and is entirely valid on its own.
+        if ($labels === []) {
+            return $parents;
+        }
+
+        $domains = $parents;
+        foreach ($parents as $parent) {
+            if (str_starts_with($parent, '*.')) {
+                throw new BootException(sprintf(
+                    '%s attaches subdomain [%s] to wildcard domain [%s]. A wildcard '
+                    . 'already covers every label under it, so the two cannot compose. '
+                    . 'Drop the subdomain, or name the parent host literally.',
+                    $context,
+                    $labels[0],
+                    $parent,
+                ));
+            }
+
+            foreach ($labels as $label) {
+                // The composed host is DERIVED from a parent already validated
+                // above, and DomainResolver reaches this project by suffix match
+                // on that same parent — so it needs no registration of its own.
+                $composed = $label . '.' . $parent;
+                if (!in_array($composed, $domains, true)) {
+                    $domains[] = $composed;
+                }
+            }
+        }
+
+        return $domains;
     }
 
     /**
