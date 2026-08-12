@@ -40,6 +40,35 @@
   --chart-3: 197 37% 24%;
   --chart-4: 43 74% 66%;
   --chart-5: 27 87% 67%;
+
+  /*
+   * Admin sidebar. Consumed by @pageflow/admin's shell — a plugin cannot ship
+   * the CSS variables its own components depend on and still be overridable
+   * per project, so they live here. Restyle freely; keep the NAMES.
+   */
+  --sidebar-bg: 0 0% 100%;
+  --sidebar-fg: 0 0% 30%;
+  --sidebar-fg-muted: 0 0% 55%;
+  --sidebar-fg-active: 221.2 83.2% 53.3%;
+  --sidebar-border: 214.3 31.8% 91.4%;
+  --sidebar-hover: 210 40% 96%;
+  --sidebar-active: 221.2 83.2% 53.3%;
+  --sidebar-section: 0 0% 45%;
+  --sidebar-width: 260px;
+
+  /*
+   * Row metrics for the sidebar's overflow calculator. It decides how many nav
+   * rows fit WITHOUT measuring every one, so these must track the padding the
+   * shell actually renders. 0.3 hard-coded them in the TSX, where a padding
+   * change was a silent miscount; reading them from here means a project that
+   * restyles the sidebar can correct the arithmetic in the same place.
+   */
+  --nav-row-h: 36px;
+  --nav-row-h-compact: 32px;
+  --nav-section-label-h: 28px;
+  --nav-section-label-h-compact: 24px;
+  --nav-section-gap: 16px;
+  --nav-section-gap-compact: 12px;
 }
 
 .dark {
@@ -67,6 +96,15 @@
   --chart-3: 30 80% 55%;
   --chart-4: 280 65% 60%;
   --chart-5: 340 75% 55%;
+
+  --sidebar-bg: 222.2 84% 4.9%;
+  --sidebar-fg: 215 20.2% 65.1%;
+  --sidebar-fg-muted: 215 20.2% 45%;
+  --sidebar-fg-active: 217.2 91.2% 59.8%;
+  --sidebar-border: 217.2 32.6% 17.5%;
+  --sidebar-hover: 217.2 32.6% 14%;
+  --sidebar-active: 217.2 91.2% 59.8%;
+  --sidebar-section: 215 20.2% 45%;
 }
 
 /* Map the HSL tokens onto Tailwind's color/radius scales (v4 `@theme inline`). */
@@ -96,6 +134,15 @@
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
 
+  --color-sidebar-bg: hsl(var(--sidebar-bg));
+  --color-sidebar-fg: hsl(var(--sidebar-fg));
+  --color-sidebar-fg-muted: hsl(var(--sidebar-fg-muted));
+  --color-sidebar-fg-active: hsl(var(--sidebar-fg-active));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-hover: hsl(var(--sidebar-hover));
+  --color-sidebar-active: hsl(var(--sidebar-active));
+  --color-sidebar-section: hsl(var(--sidebar-section));
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -109,5 +156,18 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+  }
+
+  /* Sidebar rows animate colour only — never layout, which would fight the
+     overflow calculator's ResizeObserver. */
+  .sidebar-transition {
+    transition-property: color, background-color, border-color;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-transition {
+      transition: none;
+    }
   }
 }
