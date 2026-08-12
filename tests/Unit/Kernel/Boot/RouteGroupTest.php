@@ -579,4 +579,240 @@ final class RouteGroupTest extends TestCase
             $this->manifest('route-names.php'),
         );
     }
+
+    // ── A LIST of domains ───────────────────────────────────────────────────
+
+    public function test_a_group_may_name_several_domains_at_once(): void
+    {
+        $this->compile(['groups' => [[
+            'domain' => ['a.test', 'b.test'],
+            'routes' => [['method' => 'GET', 'path' => '/dash', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test', 'b.test']);
+
+        // One route per host, each with its own key — so either can later be
+        // overridden or disabled without touching the other.
+        self::assertArrayHasKey('GET@a.test /dash', $this->manifest());
+        self::assertArrayHasKey('GET@b.test /dash', $this->manifest());
+
+        self::assertNotNull($this->matchHost('/dash', 'a.test'));
+        self::assertNotNull($this->matchHost('/dash', 'b.test'));
+        self::assertNull($this->matchHost('/dash', 'c.test'));
+    }
+
+    public function test_a_route_may_name_several_domains_at_once(): void
+    {
+        $this->compile(domains: ['a.test', 'b.test'], projectRoutes: [
+            ['method' => 'GET', 'path' => '/p', 'handler' => 'A\\A@h', 'domain' => ['a.test', 'b.test']],
+        ]);
+
+        self::assertArrayHasKey('GET@a.test /p', $this->manifest());
+        self::assertArrayHasKey('GET@b.test /p', $this->manifest());
+    }
+
+    public function test_a_subdomain_list_answers_on_each_label(): void
+    {
+        $this->compile(['groups' => [[
+            'subdomain' => ['admin', 'staff'],
+            'routes'    => [['method' => 'GET', 'path' => '/ops', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test', 'b.test']);
+
+        self::assertNotNull($this->matchHost('/ops', 'admin.anything.test'));
+        self::assertNotNull($this->matchHost('/ops', 'staff.other.test'));
+        self::assertNull($this->matchHost('/ops', 'public.anything.test'));
+    }
+
+    public function test_a_nested_group_composes_with_an_outer_list(): void
+    {
+        $this->compile(['groups' => [[
+            'domain' => ['a.test', 'b.test'],
+            'groups' => [[
+                'prefix' => '/admin',
+                'routes' => [['method' => 'GET', 'path' => '/x', 'handler' => 'A\\A@h']],
+            ]],
+        ]]], domains: ['a.test', 'b.test']);
+
+        self::assertArrayHasKey('GET@a.test /admin/x', $this->manifest());
+        self::assertArrayHasKey('GET@b.test /admin/x', $this->manifest());
+    }
+
+    public function test_a_repeated_domain_does_not_compile_the_route_twice(): void
+    {
+        // Would otherwise trip the duplicate-route guard and report a conflict
+        // the author has to work backwards to recognise as their own copy-paste.
+        $this->compile(['groups' => [[
+            'domain' => ['a.test', 'A.TEST', ' a.test '],
+            'routes' => [['method' => 'GET', 'path' => '/dash', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test', 'b.test']);
+
+        self::assertCount(1, $this->manifest());
+    }
+
+    public function test_every_domain_in_a_list_is_validated(): void
+    {
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/does not serve/');
+
+        $this->compile(['groups' => [[
+            'domain' => ['a.test', 'not-registered.test'],
+            'routes' => [['method' => 'GET', 'path' => '/dash', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test', 'b.test']);
+    }
+
+    public function test_a_non_string_domain_fails_the_boot_instead_of_going_global(): void
+    {
+        // The regression this guards: a non-string used to fall through
+        // is_string() to '', which silently turned "these routes belong to this
+        // host" into "these routes answer on EVERY host" — the widest possible
+        // outcome, reached by accident, with nothing logged.
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/domain of type/');
+
+        $this->compile(['groups' => [[
+            'domain' => 42,
+            'routes' => [['method' => 'GET', 'path' => '/dash', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test', 'b.test']);
+    }
+
+    public function test_an_empty_domain_list_fails_the_boot(): void
+    {
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/empty domain list/');
+
+        $this->compile(['groups' => [[
+            'domain' => [],
+            'routes' => [['method' => 'GET', 'path' => '/dash', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test', 'b.test']);
+    }
+
+    public function test_a_named_route_may_not_span_several_domains(): void
+    {
+        // Names are one flat namespace; one name cannot mean a different URL
+        // per host, because UrlGenerator holds no request state.
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/one flat namespace/');
+
+        $this->compile(domains: ['a.test', 'b.test'], projectRoutes: [
+            ['method' => 'GET', 'path' => '/p', 'handler' => 'A\\A@h',
+             'name' => 'p', 'domain' => ['a.test', 'b.test']],
+        ]);
+    }
+
+    // ── domain AND subdomain together (subdomain is RELATIVE to domain) ────
+
+    public function test_a_subdomain_is_attached_to_the_declared_domain(): void
+    {
+        // A declared `domain` is BOTH a host in its own right AND the parent the
+        // subdomain attaches to. Before, the label compiled BARE — and a bare
+        // label spans every domain, so this also answered on admin.anyone-else.com.
+        $this->compile(['groups' => [[
+            'domain'    => 'brand.test',
+            'subdomain' => 'admin',
+            'routes'    => [['method' => 'GET', 'path' => '/ops', 'handler' => 'A\\A@h']],
+        ]]], domains: ['brand.test']);
+
+        self::assertSame(
+            ['GET@brand.test /ops', 'GET@admin.brand.test /ops'],
+            array_keys($this->manifest()),
+        );
+
+        self::assertNotNull($this->matchHost('/ops', 'brand.test'));
+        self::assertNotNull($this->matchHost('/ops', 'admin.brand.test'));
+        // The decisive one: NOT that label on somebody else's domain.
+        self::assertNull($this->matchHost('/ops', 'admin.anyone-else.com'));
+    }
+
+    public function test_every_label_attaches_to_every_domain(): void
+    {
+        $this->compile(['groups' => [[
+            'domain'    => ['a.test', 'b.test'],
+            'subdomain' => ['admin', 'staff'],
+            'routes'    => [['method' => 'GET', 'path' => '/ops', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test', 'b.test']);
+
+        foreach ([
+            'GET@a.test /ops', 'GET@b.test /ops',
+            'GET@admin.a.test /ops', 'GET@staff.a.test /ops',
+            'GET@admin.b.test /ops', 'GET@staff.b.test /ops',
+        ] as $key) {
+            self::assertArrayHasKey($key, $this->manifest());
+        }
+        self::assertCount(6, $this->manifest());
+    }
+
+    public function test_a_subdomain_with_no_domain_stays_global(): void
+    {
+        // Nothing to be relative to, so the documented bare-label meaning holds —
+        // this is what puts an `admin` panel on every brand.
+        $this->compile(['groups' => [[
+            'subdomain' => 'admin',
+            'routes'    => [['method' => 'GET', 'path' => '/ops', 'handler' => 'A\\A@h']],
+        ]]]);
+
+        self::assertArrayHasKey('GET@admin /ops', $this->manifest());
+        self::assertNotNull($this->matchHost('/ops', 'admin.anyone-else.com'));
+    }
+
+    public function test_a_composed_host_needs_no_registration_of_its_own(): void
+    {
+        // Only the PARENT is in proj.json domains[]. DomainResolver reaches this
+        // project by suffix match on that parent, so the composed host is
+        // reachable and validating it separately would just be busywork.
+        $this->compile(['groups' => [[
+            'domain'    => 'hkm.local',
+            'subdomain' => ['api', 'auth'],
+            'routes'    => [['method' => 'GET', 'path' => '/x', 'handler' => 'A\\A@h']],
+        ]]], domains: ['hkm.local']);
+
+        self::assertArrayHasKey('GET@api.hkm.local /x', $this->manifest());
+        self::assertArrayHasKey('GET@auth.hkm.local /x', $this->manifest());
+    }
+
+    public function test_a_subdomain_may_not_attach_to_a_wildcard(): void
+    {
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/cannot compose/');
+
+        $this->compile(['groups' => [[
+            'domain'    => '*.hkm.local',
+            'subdomain' => 'api',
+            'routes'    => [['method' => 'GET', 'path' => '/x', 'handler' => 'A\\A@h']],
+        ]]], domains: ['hkm.local']);
+    }
+
+    public function test_a_wildcard_domain_alone_still_compiles(): void
+    {
+        // Regression: the wildcard guard above must not fire when there is no
+        // subdomain to attach — `{"domain": "*.x"}` composes nothing and is valid.
+        $this->compile(['groups' => [[
+            'domain' => '*.hkm.local',
+            'routes' => [['method' => 'GET', 'path' => '/x', 'handler' => 'A\\A@h']],
+        ]]], domains: ['hkm.local']);
+
+        self::assertArrayHasKey('GET@*.hkm.local /x', $this->manifest());
+    }
+
+    public function test_a_route_may_attach_a_subdomain_to_its_domain(): void
+    {
+        $this->compile(domains: ['a.test'], projectRoutes: [
+            ['method' => 'GET', 'path' => '/p', 'handler' => 'A\\A@h',
+             'domain' => 'a.test', 'subdomain' => 'api'],
+        ]);
+
+        self::assertArrayHasKey('GET@a.test /p', $this->manifest());
+        self::assertArrayHasKey('GET@api.a.test /p', $this->manifest());
+    }
+
+    public function test_a_bad_subdomain_is_reported_even_when_domain_is_valid(): void
+    {
+        // The subdomain used to be skipped entirely when a domain was present,
+        // so a mistake in it could not be reported at all.
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/domain of type/');
+
+        $this->compile(['groups' => [[
+            'domain'    => 'a.test',
+            'subdomain' => 42,
+            'routes'    => [['method' => 'GET', 'path' => '/ops', 'handler' => 'A\\A@h']],
+        ]]], domains: ['a.test']);
+    }
 }
