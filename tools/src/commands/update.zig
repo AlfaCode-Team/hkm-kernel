@@ -83,25 +83,39 @@ const Resolved = struct {
     domains: []const []const u8,
 };
 
+fn printHelp() void {
+    prompt.intro("hkm update — refresh a project's kernel registry entry");
+    prompt.section("Usage");
+    prompt.item("hkm update <path|name>", "by PATH (folder with proj.json) or registered NAME");
+    prompt.blank();
+    prompt.section("Domain options");
+    prompt.muted("combine --add/--remove; --domains overrides both");
+    prompt.item("  --domains=a.com,b.com", "REPLACE the whole domain list");
+    prompt.item("  --add-domains=a.com,b.com", "ADD to the existing domains");
+    prompt.item("  --remove-domains=a.com", "REMOVE from the existing domains");
+    prompt.muted("no domain flag re-syncs domains from the project's proj.json");
+    prompt.blank();
+    prompt.section("Examples");
+    prompt.note("hkm update ./my-shop");
+    prompt.note("hkm update shop --add-domains=www.shop.com");
+    prompt.note("hkm update shop --remove-domains=shop.local");
+    prompt.note("hkm update shop --domains=shop.com,www.shop.com");
+    prompt.outro("Pass a project path or name to begin");
+    prompt.item("  --help, -h", "show this help");
+}
+
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
+    // An explicit --help succeeds (exit 0); falling into the null branch below
+    // means the arguments were wrong, which is a usage error (exit 2).
+    for (args[@min(2, args.len)..]) |a| {
+        if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
+            printHelp();
+            return 0;
+        }
+    }
+
     const opts = (try parse(allocator, args)) orelse {
-        prompt.intro("hkm update — refresh a project's kernel registry entry");
-        prompt.section("Usage");
-        prompt.item("hkm update <path|name>", "by PATH (folder with proj.json) or registered NAME");
-        prompt.blank();
-        prompt.section("Domain options");
-        prompt.muted("combine --add/--remove; --domains overrides both");
-        prompt.item("  --domains=a.com,b.com", "REPLACE the whole domain list");
-        prompt.item("  --add-domains=a.com,b.com", "ADD to the existing domains");
-        prompt.item("  --remove-domains=a.com", "REMOVE from the existing domains");
-        prompt.muted("no domain flag re-syncs domains from the project's proj.json");
-        prompt.blank();
-        prompt.section("Examples");
-        prompt.note("hkm update ./my-shop");
-        prompt.note("hkm update shop --add-domains=www.shop.com");
-        prompt.note("hkm update shop --remove-domains=shop.local");
-        prompt.note("hkm update shop --domains=shop.com,www.shop.com");
-        prompt.outro("Pass a project path or name to begin");
+        printHelp();
         return 2;
     };
 

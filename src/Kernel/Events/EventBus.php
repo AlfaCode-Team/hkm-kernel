@@ -4,9 +4,8 @@ declare(strict_types=1);
 namespace AlfacodeTeam\PhpServicePlatform\Kernel\Events;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Events\Contracts\{EventListenerContract, IntegrationEventContract};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
 use Psr\Container\ContainerInterface;
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
 
 // ─── EventBus ────────────────────────────────────────────────────────────────
 
@@ -19,8 +18,14 @@ use Psr\Log\NullLogger;
  * Listener instances are resolved from the supplied PSR-11 container. Listeners
  * must be stateless integration handlers (they receive primitive-only events).
  *
- * Subscriber failures are isolated and logged via PSR-3 — one failing listener
- * never prevents the others from receiving the event.
+ * Subscriber failures are isolated and logged through the kernel's LoggerPort —
+ * one failing listener never prevents the others from receiving the event.
+ *
+ * The logger is OPTIONAL (null = no logging). It is deliberately not defaulted to
+ * a null-object: a swallowed listener exception that is also silently unlogged is
+ * indistinguishable from an event that was never dispatched, and that is exactly
+ * the failure this codebase already had when the only LoggerInterface binding
+ * pointed at a NullLogger.
  *
  * IMPORTANT: dispatch ONLY after a successful transaction commit.
  */
@@ -31,7 +36,7 @@ final class EventBus
 
     public function __construct(
         private readonly ContainerInterface $container,
-        private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly ?LoggerPort $logger = null,
     ) {}
 
     /**
@@ -55,7 +60,7 @@ final class EventBus
                 $listener->handle($event);
             } catch (\Throwable $e) {
                 // Isolate subscriber failures — never mask the original dispatch.
-                $this->logger->error('EventBus listener failed', [
+                $this->logger?->error('EventBus listener failed', [
                     'listener' => $listenerClass,
                     'event'    => $event->name(),
                     'version'  => $event->version(),

@@ -13,11 +13,14 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Contracts\SecurityLayerContr
  * Runs BEFORE any module loads into memory.
  * Denied requests never touch module code — zero module cost.
  *
- * Layer order matters: cheapest first.
- *   1. FirewallLayer       (IP blocklist — nanoseconds)
- *   2. RateLimiterLayer    (cache counter — microseconds)
- *   3. CsrfTokenLayer      (timing-safe string compare — microseconds)
- *   4. [Auth module layer] (token verify — milliseconds, optional)
+ * Layer order matters: cheapest first. A typical stack:
+ *   1. CsrfTokenLayer      (timing-safe string compare — microseconds)
+ *   2. [Auth module layer] (token verify — milliseconds, optional)
+ *
+ * The kernel ships exactly ONE layer: CsrfTokenLayer. IP filtering and rate
+ * limiting are deliberately NOT kernel layers — they are opt-in route filters
+ * from plugins/SecurityFilters ('throttle', 'shield'), so a route pays for them
+ * only when it declares them. Do not reintroduce them here.
  */
 final class SecurityGateway
 {

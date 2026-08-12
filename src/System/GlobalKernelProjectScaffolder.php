@@ -725,12 +725,17 @@ declare(strict_types=1);
 
 namespace App\Infrastructure;
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\AbstractLock;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\Lock;
 
 final class InMemoryCache implements CachePort
 {
     /** @var array<string, mixed> */
     private array $items = [];
+
+    /** @var array<string, array{owner: string, expires: int}> */
+    private array $locks = [];
 
     public function get(string $key): mixed
     {
@@ -786,7 +791,67 @@ final class InMemoryCache implements CachePort
     public function flush(): bool
     {
         $this->items = [];
+        $this->locks = [];
         return true;
+    }
+
+    /**
+     * WARNING: process-local. Under PHP-FPM each request is a separate process,
+     * so two concurrent requests BOTH acquire this lock and both enter the
+     * critical section. Fine for tests and single-process CLI; for real
+     * single-flight/idempotency use a Redis-backed CachePort.
+     */
+    public function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return $this->makeLock($name, $seconds, $owner ?? bin2hex(random_bytes(16)));
+    }
+
+    public function restoreLock(string $name, string $owner): Lock
+    {
+        return $this->makeLock($name, 0, $owner);
+    }
+
+    private function makeLock(string $name, int $seconds, string $owner): Lock
+    {
+        return new class($this->locks, $name, $seconds, $owner) extends AbstractLock {
+            /** @param array<string, array{owner: string, expires: int}> $table */
+            public function __construct(
+                private array &$table,
+                string $name,
+                int $seconds,
+                string $owner,
+            ) {
+                parent::__construct($name, $seconds, $owner);
+            }
+
+            public function acquire(): bool
+            {
+                $held = $this->table[$this->name] ?? null;
+                if ($held !== null && ($held['expires'] === 0 || $held['expires'] >= time())) {
+                    return false;
+                }
+                $this->table[$this->name] = [
+                    'owner'   => $this->owner,
+                    'expires' => $this->seconds > 0 ? time() + $this->seconds : 0,
+                ];
+                return true;
+            }
+
+            public function release(): bool
+            {
+                $held = $this->table[$this->name] ?? null;
+                if ($held === null || !hash_equals($this->owner, $held['owner'])) {
+                    return false;
+                }
+                unset($this->table[$this->name]);
+                return true;
+            }
+
+            public function forceRelease(): void
+            {
+                unset($this->table[$this->name]);
+            }
+        };
     }
 }
 PHP;

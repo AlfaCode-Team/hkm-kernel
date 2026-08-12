@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Project\Infrastructure;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\Lock;
 
 /**
  * InMemoryCache — project-supplied CachePort adapter (PROJECT LAYER).
@@ -21,6 +22,14 @@ final class InMemoryCache implements CachePort
 {
     /** @var array<string, array{value: mixed, expires: int|null}> */
     private array $store = [];
+
+    /**
+     * Lock table, shared with every {@see ProcessLocalLock} this cache hands out.
+     * Public because the lock reads/writes it directly; not part of CachePort.
+     *
+     * @var array<string, array{owner: string, expires: int}>
+     */
+    public array $locks = [];
 
     public function get(string $key): mixed
     {
@@ -93,6 +102,22 @@ final class InMemoryCache implements CachePort
     public function flush(): bool
     {
         $this->store = [];
+        $this->locks = [];
         return true;
+    }
+
+    /**
+     * ⚠️ Process-local only — see {@see ProcessLocalLock}. Under PHP-FPM two
+     * concurrent requests will BOTH acquire this lock. Use FileCache (FileLock)
+     * or the RedisCache plugin for anything that must hold across processes.
+     */
+    public function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return new ProcessLocalLock($this, $name, $seconds, $owner);
+    }
+
+    public function restoreLock(string $name, string $owner): Lock
+    {
+        return new ProcessLocalLock($this, $name, 0, $owner);
     }
 }
