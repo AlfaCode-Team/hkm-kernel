@@ -46,6 +46,7 @@ test {
     _ = @import("lib/memory.zig");
     _ = @import("lib/plugin_assets.zig");
     _ = @import("lib/plugin_bootstrap.zig");
+    _ = @import("lib/plugin_env.zig");
     _ = @import("lib/plugin_deps.zig");
     _ = @import("lib/plugin_domains.zig");
     _ = @import("lib/plugin_git.zig");
