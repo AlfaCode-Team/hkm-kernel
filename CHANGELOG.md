@@ -6,6 +6,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-12
+
+### Added
+- **Domain lists.** `domain` / `subdomain` now take either a string or a LIST,
+  at all three levels — module-wide (`routeDomain` / `routeSubdomain`), group,
+  and route. A project serving several hosts can pin a group to "these three and
+  not that one" instead of duplicating the group per host. The domain is still
+  part of the route KEY, and a route grouped under a host the project does not
+  serve is still rejected at boot.
+- **Plugin env seeding.** Enabling a plugin writes the environment it declares
+  in `module.json` `config[]` straight into `.env`, in three shapes: a documented
+  default is written ACTIVE, a required key with no default is written active but
+  EMPTY (so the boot failure points at a line you can see), and an optional key
+  with no default is written COMMENTED. Previously that list was discoverable
+  only from a boot stack trace, one variable per attempt.
+- **A user-local install that needs no root.** Linux releases now ship a portable
+  tarball alongside the `.deb`; `tools/install.sh` unpacks kernel and launcher
+  entirely inside `$HOME` and writes nothing outside it. Published with the
+  release assets, so `curl … | sh` works without a checkout. The `.deb` remains
+  for multi-user machines and CI images.
+- **Scaffold support for `@pageflow/admin`** (Pageflow v1.1.0): a three-state
+  theme provider (`{ theme, resolvedTheme, setTheme, toggle }` with a "system"
+  default that keeps following the OS), the sidebar CSS variables the shell
+  consumes, and a globbed `ui/admin/nav.ts` navigation registry. Both scaffold
+  surfaces now wrap their tree in `AppErrorBoundary`.
+
+### Changed
+- `hkm doctor` reports which install is actually in use, and whether a stale
+  `HKM_KERNEL_HOME` pin in `~/.config/hkm/config.env` is overriding it — the
+  failure that otherwise presents as "my changes do nothing".
+
 ## [1.2.0] - 2026-08-12
 
 ### Added
