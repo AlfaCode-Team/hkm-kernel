@@ -16,11 +16,11 @@ declare(strict_types=1);
  * bootstrap/app.php, which loads .env and installs the error net), then drives
  * the kernel's WorkerLoop. The loop repeatedly:
  *
- *   1. calls $puller() to fetch the next job (returns null when the queue is empty),
- *   2. rebuilds it into a JobPayload,
- *   3. resolves the job handler inside its OWNING module's scope (full DI), and
- *   4. runs handle(); on success it acknowledges, on a thrown error it retries
- *      per the job's retry strategy, calling failed() after the last attempt.
+ *   1. pops the next JobPayload off the bound QueuePort (null = queue empty),
+ *   2. resolves the job handler inside its OWNING module's scope (full DI),
+ *   3. runs handle(), then ACKs it, and
+ *   4. on a thrown error releases it for retry with backoff — or, once attempts
+ *      are exhausted, calls failed() and dead-letters it.
  *
  * How jobs get ENQUEUED: application code pushes them via QueuePort::push(...)
  * (e.g. the SEO module enqueues 'seo.indexnow'). This process is the consumer.
@@ -45,9 +45,7 @@ require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
 psp_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Kernel;
-use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\JobPayload;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\QueuePort;
-use Project\Infrastructure\FileQueue;
 
 // 2. Build the application — same Kernel object the web and CLI entries use.
 /** @var Kernel $kernel */
@@ -57,41 +55,19 @@ $kernel = require __DIR__ . '/../bootstrap/app.php';
 $queue         = (string) (getenv('WORKER_QUEUE') ?: 'default');
 $maxIterations = (int) (getenv('WORKER_MAX_ITERATIONS') ?: 0);
 
-// 4. Resolve the active QueuePort. This is whatever bootstrap/app.php bound —
-//    FileQueue by default, or the Redis-backed adapter when RedisCache is active.
-//    (Swapping the backend needs no change here: only the FileQueue->pop() shape
-//    below is backend-specific; a Redis adapter would BLPOP instead.)
-$queueAdapter = $kernel->container()->make(QueuePort::class);
-
-// 5. The $puller: the loop calls this to fetch the next job. Returning null means
-//    "nothing to do right now" and the loop idles/backs off. Here we pop one raw
-//    record off the file queue and rehydrate it into a typed JobPayload.
-$puller = static function () use ($queue, $queueAdapter): ?JobPayload {
-    if (!$queueAdapter instanceof FileQueue) {
-        return null;   // unknown backend — stay idle rather than guess its API
-    }
-
-    $record = $queueAdapter->pop($queue);
-    if ($record === null) {
-        return null;   // queue empty
-    }
-
-    return new JobPayload(
-        jobId:       (string) $record['jobId'],
-        jobClass:    (string) $record['jobClass'],
-        data:        (array) $record['data'],
-        queue:       (string) $record['queue'],
-        attempts:    (int) $record['attempts'],
-        maxAttempts: (int) $record['maxAttempts'],
-        enqueuedAt:  new \DateTimeImmutable((string) $record['enqueuedAt']),
-        signature:   '',
-    );
-};
-
-// 6. The kernel's worker loop — materialises the Worker pipeline on first call.
+// 4. The kernel's worker loop — materialises the Worker pipeline on first call.
+//
+//    There is no $puller to write. The loop resolves the bound QueuePort itself
+//    and owns the whole lifecycle: pop → handle → ack on success, release with
+//    backoff on a retryable failure, fail (dead-letter) once attempts run out.
+//
+//    Swapping the backend — FileQueue, Redis, anything else — needs no change
+//    here. (This file used to carry a hand-written puller that type-checked the
+//    adapter and returned null for anything it did not recognise, so switching
+//    to Redis made the worker silently process nothing at all.)
 $loop = $kernel->workerLoop();
 
-// 7. Graceful shutdown. With pcntl available, trap SIGTERM/SIGINT and ask the
+// 5. Graceful shutdown. With pcntl available, trap SIGTERM/SIGINT and ask the
 //    loop to stop AFTER the in-flight job completes (no partial processing).
 if (function_exists('pcntl_signal')) {
     pcntl_async_signals(true);
@@ -106,7 +82,9 @@ if (function_exists('pcntl_signal')) {
 echo "[{{PROJECT_NAME}}] Worker loop started  queue={$queue}"
     . ($maxIterations > 0 ? "  maxIterations={$maxIterations}" : '  (forever)') . "\n";
 
-// 8. Run until stopped (signal) or until maxIterations jobs have been processed.
-$loop->run($puller, $maxIterations);
+// 6. Run until stopped (signal) or until maxIterations jobs have been processed.
+// Port mode: no puller. Drains $queue until stop() or the iteration cap.
+$loop->run(maxIterations: $maxIterations, queue: $queue);
 
-echo "[{{PROJECT_NAME}}] Worker finished. Remaining in '{$queue}': " . $queueAdapter->size($queue) . "\n";
+echo "[{{PROJECT_NAME}}] Worker finished. Remaining in '{$queue}': "
+    . $kernel->container()->make(QueuePort::class)->size($queue) . "\n";

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\ManifestReader;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Config\Repository;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 use Project\Support\Collection;
 
@@ -86,6 +88,35 @@ if (!function_exists('env')) {
 }
 
 
+
+if (!function_exists('config')) {
+    /**
+     * Read compiled configuration with a dotted path.
+     *
+     *     config('mail.from.address', 'noreply@example.test')
+     *     config('validation')                 // the whole group
+     *
+     * Reads config-manifest.php, compiled at boot from every plugin's and the
+     * project's `config/*.php` (project deep-merged over plugin). The manifest is
+     * loaded once per process and served from OPcache thereafter.
+     *
+     * READ-ONLY BY DESIGN. There is no config('key', value) setter: configuration
+     * is decided at boot, and a mutable global would be shared across coroutines
+     * under OpenSwoole. Prefer injecting Kernel\Config\Repository where you can —
+     * this helper exists for bootstrap files and templates that have no container.
+     *
+     * @param string|null $key Dotted path; null returns the Repository itself.
+     */
+    function config(?string $key = null, mixed $default = null): mixed
+    {
+        /** @var Repository|null $repository */
+        static $repository = null;
+
+        $repository ??= new Repository(ManifestReader::readCompiled('config-manifest.php'));
+
+        return $key === null ? $repository : $repository->get($key, $default);
+    }
+}
 
 if (!function_exists('collect')) {
     /**

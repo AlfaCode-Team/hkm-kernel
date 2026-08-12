@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Project\Infrastructure;
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\JobPayload;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\QueuePort;
 
 /**
@@ -18,7 +19,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\QueuePort;
  * Not for high throughput: writes take an exclusive lock and pop rewrites the
  * file. It is a correct, simple default — not a broker.
  *
- * QueuePort has no pop(); the project's worker puller calls {@see pop()} on this
+ * Implements the full QueuePort lifecycle (push/pop/ack/release/fail) on this
  * concrete adapter and rebuilds a JobPayload from the record.
  */
 final class FileQueue implements QueuePort
@@ -68,12 +69,83 @@ final class FileQueue implements QueuePort
     }
 
     /**
+     * Reserve the next due job, or null when the queue is empty.
+     *
+     * Implements the QueuePort read side. Removes the record from the file under
+     * an exclusive lock, so two workers cannot take the same job.
+     */
+    public function pop(string $queue = 'default'): ?JobPayload
+    {
+        $record = $this->popRecord($queue);
+
+        return $record === null ? null : $this->hydrate($record, $queue);
+    }
+
+    /**
+     * The job completed — nothing to do, popRecord() already removed the line.
+     * Explicit so the four-verb lifecycle reads the same across adapters.
+     */
+    public function ack(JobPayload $payload): void
+    {
+    }
+
+    /** Re-append with an incremented attempt count, available again after $delay. */
+    public function release(JobPayload $payload, int $delay = 0): void
+    {
+        $this->append($payload->queue(), [
+            'jobId'       => $payload->jobId(),
+            'jobClass'    => $payload->jobClass(),
+            'data'        => $payload->data(),
+            'queue'       => $payload->queue(),
+            'attempts'    => $payload->attempts() + 1,
+            'maxAttempts' => $payload->maxAttempts(),
+            'enqueuedAt'  => $payload->enqueuedAt()->format(\DateTimeInterface::ATOM),
+            'availableAt' => time() + max(0, $delay),
+        ]);
+    }
+
+    /**
+     * Write to a sibling dead-letter file rather than dropping the job. A
+     * permanently-failing job that simply vanishes is the hardest kind of bug
+     * to notice.
+     */
+    public function fail(JobPayload $payload, ?\Throwable $reason = null): void
+    {
+        $this->append($payload->queue() . '.failed', [
+            'jobId'       => $payload->jobId(),
+            'jobClass'    => $payload->jobClass(),
+            'data'        => $payload->data(),
+            'queue'       => $payload->queue(),
+            'attempts'    => $payload->attempts(),
+            'maxAttempts' => $payload->maxAttempts(),
+            'enqueuedAt'  => $payload->enqueuedAt()->format(\DateTimeInterface::ATOM),
+            'failedAt'    => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+            'error'       => $reason?->getMessage(),
+        ]);
+    }
+
+    /** @param array<string, mixed> $record */
+    private function hydrate(array $record, string $queue): JobPayload
+    {
+        return new JobPayload(
+            jobId:       (string) ($record['jobId'] ?? ''),
+            jobClass:    (string) ($record['jobClass'] ?? ''),
+            data:        (array) ($record['data'] ?? []),
+            queue:       (string) ($record['queue'] ?? $queue),
+            attempts:    (int) ($record['attempts'] ?? 0),
+            maxAttempts: (int) ($record['maxAttempts'] ?? $this->defaultMaxAttempts),
+            enqueuedAt:  new \DateTimeImmutable((string) ($record['enqueuedAt'] ?? 'now')),
+            signature:   (string) ($record['signature'] ?? ''),
+        );
+    }
+
+    /**
      * Pop the next due record (FIFO), or null when the queue is empty. Rewrites
      * the file without the popped line under an exclusive lock.
      *
      * @return array<string, mixed>|null
      */
-    public function pop(string $queue = 'default'): ?array
+    private function popRecord(string $queue = 'default'): ?array
     {
         $file = $this->file($queue);
 

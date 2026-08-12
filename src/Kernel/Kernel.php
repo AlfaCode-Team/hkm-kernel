@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace AlfacodeTeam\PhpServicePlatform\Kernel;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, BootPipeline, ManifestReader};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Config\Repository as ConfigRepository;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Container\CoreContainer;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Contracts\ModuleContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Error\ErrorPipeline;
@@ -12,6 +13,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\KernelException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\{WorkerLoop, WorkerPipeline};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\SecurityLayerContract};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
@@ -21,7 +23,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
  *   return Kernel::configure()
  *       ->withBasePath(dirname(__DIR__))
  *       ->withPorts([DatabasePort::class => new MySQLAdapter(config('db'))])
- *       ->withSecurity([new FirewallLayer(...), new CsrfTokenLayer(...)])
+ *       ->withSecurity([new CsrfTokenLayer(...)])   // + your Auth module's layer
  *       ->withErrorPipeline(ErrorPipeline::notifiers([...])->fallback(new FileNotifier(...)))
  *       ->withModules([AuthModule::class, InvoiceModule::class])
  *       ->build();
@@ -58,6 +60,9 @@ final class Kernel
     /** Long-lived kernel services, constructed during materialize(). */
     private EventBus       $eventBus;
     private WorkerPipeline $workerPipe;
+
+    /** Compiled configuration — lazily read after build(), before materialize(). */
+    private ?ConfigRepository $config = null;
 
     private bool $built = false;
     private bool $materialized = false;
@@ -337,7 +342,14 @@ final class Kernel
         $this->mode = $mode;
 
         $errorPipeline    = $this->errorPipeline ?? ErrorPipeline::default();
-        $this->eventBus   = new EventBus($this->core);
+
+        // Wire the app logger into the EventBus when the project bound one via
+        // withPorts(). Without it a listener exception is swallowed AND unlogged,
+        // which is indistinguishable from the event never being dispatched.
+        $this->eventBus   = new EventBus(
+            $this->core,
+            $this->core->has(LoggerPort::class) ? $this->core->get(LoggerPort::class) : null,
+        );
         $this->workerPipe = new WorkerPipeline();
 
         $this->http = new HttpPipeline(
@@ -348,6 +360,10 @@ final class Kernel
         );
         $this->cli        = new CliPipeline($this->core, $errorPipeline);
         $this->workerLoop = new WorkerLoop($this->core, $errorPipeline, $this->workerPipe);
+
+        // Configuration compiled by CompileConfigManifestStage during build().
+        // Bound BEFORE module boot() so a Provider can read config while wiring.
+        $this->core->instance(ConfigRepository::class, $this->config());
 
         // Expose kernel services to modules via the core container.
         $this->core->instance(EventBus::class, $this->eventBus);
@@ -404,6 +420,23 @@ final class Kernel
         // that reach for the container directly without driving an entry point.
         $this->materialize(RuntimeMode::Cli);
         return $this->core;
+    }
+
+    /**
+     * The compiled configuration, read from config-manifest.php.
+     *
+     * Available after build() — it does NOT materialize, so bootstrap code and
+     * tooling can read configuration without standing up the pipelines. The same
+     * instance is bound into the core container during materialize(), so modules
+     * resolve it by type-hinting Config\Repository.
+     */
+    public function config(): ConfigRepository
+    {
+        $this->ensureBuilt();
+
+        return $this->config ??= new ConfigRepository(
+            ManifestReader::readCompiled('config-manifest.php'),
+        );
     }
 
     /** The surface this kernel materialized for, or null if no entry point ran yet. */

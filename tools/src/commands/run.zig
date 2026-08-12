@@ -41,6 +41,12 @@ const Options = struct {
     pick: bool = false,
     /// Pass-through arguments for the cli / worker surfaces.
     extra: []const []const u8 = &.{},
+    /// --help/-h was passed explicitly.
+    ///
+    /// Distinct from parse() returning null, which means the arguments were
+    /// WRONG. Both used to collapse into "print help, exit 2", so asking for
+    /// help was reported to the shell as a usage error.
+    help: bool = false,
 };
 
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
@@ -51,9 +57,16 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     }
 
     var opts = (try parse(allocator, args)) orelse {
+        // parse() returned null: the arguments were invalid.
         printHelp();
         return 2;
     };
+
+    // An explicit --help is a successful request, not a usage error.
+    if (opts.help) {
+        printHelp();
+        return 0;
+    }
 
     // `--pick`: choose the project interactively from the registry, then — when
     // no surface flag was given — choose what to run (serve/swoole/cli/worker).
@@ -342,7 +355,8 @@ fn parse(allocator: std.mem.Allocator, args: []const []const u8) !?Options {
             continue;
         }
         if (std.mem.eql(u8, a, "-h") or std.mem.eql(u8, a, "--help")) {
-            return null;
+            opts.help = true;
+            continue;
         }
         if (std.mem.eql(u8, a, "--pick") or std.mem.eql(u8, a, "-i") or std.mem.eql(u8, a, "--select")) {
             opts.pick = true;

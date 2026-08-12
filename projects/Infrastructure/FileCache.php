@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Project\Infrastructure;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\Lock;
 
 /**
  * FileCache — a dependency-free, CROSS-PROCESS CachePort adapter.
@@ -223,6 +224,26 @@ final class FileCache implements CachePort
         $found = glob($this->directory() . '/*.cache');
 
         return $found === false ? [] : $found;
+    }
+
+    /**
+     * Cross-process lock, consistent with this store's cross-process guarantee.
+     * Locks live in a sibling `locks/` directory so flush()/deletePattern(),
+     * which glob `*.cache`, never sweep a held lock away.
+     */
+    public function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return new FileLock($this->lockDirectory(), $name, $seconds, $owner);
+    }
+
+    public function restoreLock(string $name, string $owner): Lock
+    {
+        return new FileLock($this->lockDirectory(), $name, 0, $owner);
+    }
+
+    private function lockDirectory(): string
+    {
+        return rtrim($this->dir, '/') . '/locks';
     }
 
     private function directory(): string
