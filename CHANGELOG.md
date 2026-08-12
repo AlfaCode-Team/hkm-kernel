@@ -6,7 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.0] - 2026-08-12
+## [1.3.1] - 2026-08-12
+
+Supersedes 1.3.0, which was tagged from a commit that never reached `master`
+(the branch had advanced remotely between the build and the push). Tags are
+immutable in this repository, so 1.3.0 was left in place rather than moved —
+it builds, but it predates the `php-io-cli` pin below. **Use 1.3.1.**
 
 ### Added
 - **Domain lists.** `domain` / `subdomain` now take either a string or a LIST,
