@@ -1,7 +1,16 @@
 import "./styles/index.css";
 import { createRoot } from "react-dom/client";
-import { createPageflowApp } from "@pageflow/react";
+import { createPageflowApp, AppErrorBoundary } from "@pageflow/react";
 import { ThemeProvider } from "@providers/theme";
+
+// ── Admin navigation ────────────────────────────────────────────────────────
+// Each plugin that contributes to the sidebar ships `ui/admin/nav.ts`, which
+// calls registerModule()/registerFeature() at import time. Globbing them here —
+// rather than the registry importing a hard-coded list — is what keeps
+// @pageflow/admin free of every business domain's name. The project's own
+// nav files load LAST, so a project can unregister or re-order plugin modules.
+import.meta.glob("/plugins/*/admin/nav.ts", { eager: true });
+import.meta.glob("./nav/*.ts", { eager: true });
 
 // ── Pageflow bootstrap ──────────────────────────────────────────────────────
 // The server (Plugins\Pageflow\Http\PageflowResponder) renders a page object
@@ -52,10 +61,15 @@ createPageflowApp({
   page: initialPage,
   resolve: resolveComponent,
   setup({ el, App, props }: { el: HTMLElement; App: any; props: any }) {
+    // The boundary is OUTSIDE the app: a throw in any page (including the
+    // "Page not found" resolveComponent raises) would otherwise unmount
+    // everything and leave a blank document.
     createRoot(el).render(
-      <ThemeProvider>
-        <App {...props} />
-      </ThemeProvider>,
+      <AppErrorBoundary>
+        <ThemeProvider>
+          <App {...props} />
+        </ThemeProvider>
+      </AppErrorBoundary>,
     );
   },
   progress: { delay: 0, color: "#6366f1" },
