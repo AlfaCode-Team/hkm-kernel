@@ -3,8 +3,18 @@
 # bundle.sh — build the `hkm` launcher for every OS and assemble installable
 # bundles under dist/. Run from the repo root or from tools/.
 #
-#   ./tools/bundle.sh            # build all: linux .deb tree, macos, windows zip
+#   ./tools/bundle.sh            # build all: linux tarball + .deb, macos, windows
 #   ./tools/bundle.sh linux      # only one target
+#
+# Linux produces TWO artifacts, and the tarball is the primary one:
+#
+#   hkm-kernel-<v>-linux-x86_64.tar.gz   user-local / portable. No root. Extract
+#                                        anywhere, or install into ~/.local with
+#                                        tools/install.sh.
+#   hkm-kernel_<v>_amd64.deb             system-wide. Needs root; use it for
+#                                        multi-user machines, servers and CI
+#                                        images where apt managing the PHP
+#                                        dependency chain is the point.
 #
 # What a bundle contains:
 #   • the native `hkm` + `hkm-config` launcher (Zig, statically linked)
@@ -100,19 +110,52 @@ build_zig() { # $1 = zig target triple, $2 = out dir
 
 rm -rf "$DIST"; mkdir -p "$DIST"
 
-# ─── Linux: .deb (amd64) ────────────────────────────────────────────────────
+# ─── Linux: portable tarball (amd64) — the DEFAULT install path ─────────────
+# Layout is chosen so the launcher self-locates with no env var and no config:
+# resolveHome() probes "<parent-of-exe-dir>/lib/hkm-kernel" (tools/src/lib/
+# kernel.zig), so bin/ + lib/ side by side works BOTH when the tree is extracted
+# somewhere and run in place, and when install.sh copies it into ~/.local —
+# because the relative layout is identical in both cases.
+#
+#   hkm-kernel-<v>-linux-x86_64/
+#   ├── bin/hkm, bin/hkm-config
+#   ├── lib/hkm-kernel/        (kernel source; vendor/ built by install.sh)
+#   └── install.sh             user-local installer, no root
 if [[ "$want" == all || "$want" == linux ]]; then
   build_zig x86_64-linux-gnu "$DIST/_zig/linux"
+  TB="hkm-kernel-${VERSION}-linux-x86_64"; T="$DIST/$TB"
+  mkdir -p "$T/bin"
+  stage_kernel "$T/lib/$KERNEL_DIRNAME"
+  cp "$DIST/_zig/linux/bin/hkm"        "$T/bin/hkm"
+  cp "$DIST/_zig/linux/bin/hkm-config" "$T/bin/hkm-config"
+  chmod +x "$T/bin/hkm" "$T/bin/hkm-config"
+  cp "$TOOLS/install.sh" "$T/install.sh"
+  chmod +x "$T/install.sh"
+  ( cd "$DIST" && tar -czf "${TB}.tar.gz" "$TB" && rm -rf "$TB" )
+  say "wrote $DIST/${TB}.tar.gz  (user-local, no root)"
+fi
+
+# ─── Linux: .deb (amd64) — system-wide, needs root ──────────────────────────
+if [[ "$want" == all || "$want" == linux ]]; then
   PKG="hkm-kernel_${VERSION}_amd64"; P="$DIST/$PKG"
   mkdir -p "$P/DEBIAN" "$P/usr/bin"
   stage_kernel "$P/opt/$KERNEL_DIRNAME"
   cp "$DIST/_zig/linux/bin/hkm"        "$P/usr/bin/hkm"
   cp "$DIST/_zig/linux/bin/hkm-config" "$P/usr/bin/hkm-config"
   chmod +x "$P/usr/bin/hkm" "$P/usr/bin/hkm-config"
-  # composer is a hard dependency now: the package ships SOURCE, not vendor/, and
-  # resolves dependencies on the target in postinst. Network access is required
-  # at install time. In MODULES=git mode, git is also required to fetch modules.
-  DEPS="php8.4-cli, php8.4-mbstring, php8.4-curl, php8.4-xml, php8.4-zip, composer, ca-certificates"
+  # PHP is RECOMMENDED, not required — same principle as the user-local install:
+  # putting the package on disk must not be gated on a runtime an administrator
+  # may install differently (ondrej PPA, Sury, a hand-built PHP, a container base
+  # image). apt installs Recommends by default, so the common case is unchanged;
+  # what changes is that a machine whose repos have no `php8.4-*` can still
+  # install hkm and be TOLD what is missing by `hkm doctor`, instead of dpkg
+  # refusing and leaving the operator with nothing to run.
+  #
+  # ca-certificates stays a hard dependency: postinst fetches over TLS, and
+  # without it that fails in a way no diagnostic can explain.
+  DEPS="ca-certificates"
+  RECS="php8.4-cli, php8.4-mbstring, php8.4-curl, php8.4-xml, php8.4-zip, composer"
+  RECS="$RECS, php8.4-mysql | php8.4-pgsql | php8.4-sqlite3, php8.4-redis, php8.4-intl"
   [ "$MODULES" = git ] && DEPS="$DEPS, git"
   cat > "$P/DEBIAN/control" <<EOF
 Package: hkm-kernel
@@ -120,13 +163,20 @@ Version: ${VERSION}
 Architecture: amd64
 Maintainer: AlfacodeTeam <dev@hkm.local>
 Depends: ${DEPS}
-Recommends: php8.4-mysql | php8.4-pgsql | php8.4-sqlite3, php8.4-redis, php8.4-intl
+Recommends: ${RECS}
 Description: PhpServicePlatform (HKM) kernel and native launcher
  Installs the kernel PHP source (src, plugins, projects, modules) under
  /opt/hkm-kernel and a native hkm launcher in /usr/bin. PHP dependencies are
  resolved with composer at install time (vendor/ is not bundled), so the
  runtime matches this machine's PHP. Needs network access during install.
- Run 'hkm doctor' afterwards to verify PHP and required extensions.
+ .
+ PHP and composer are Recommends rather than Depends, so this package installs
+ even where they are provided by another repository or built by hand. Run
+ 'hkm doctor' afterwards: it lists every requirement the kernel has and the
+ command to fix each one that is missing.
+ .
+ For a single user, prefer the user-local tarball install (no root):
+ hkm-kernel-<version>-linux-x86_64.tar.gz + install.sh.
 EOF
   # conffiles: the project registry + platform map are USER DATA. Marking them as
   # dpkg conffiles makes upgrades PRESERVE the user's versions instead of
@@ -141,14 +191,20 @@ EOF
 #!/bin/sh
 set -e
 KERNEL=/opt/${KERNEL_DIRNAME}
-echo "hkm-kernel: resolving PHP dependencies with composer…"
-if [ -x "\$KERNEL/install.sh" ]; then
+# Best effort, never fatal. PHP is a Recommends, so it may legitimately be
+# absent here; failing the package install would leave the operator with no
+# hkm binary and therefore no way to run the diagnostic that explains why.
+if ! command -v php >/dev/null 2>&1; then
+  echo "hkm-kernel: no php on PATH yet — skipping dependency resolution."
+  echo "hkm-kernel: run 'hkm doctor' to see what is required."
+elif [ -x "\$KERNEL/install.sh" ]; then
+  echo "hkm-kernel: resolving PHP dependencies with composer…"
   ( cd "\$KERNEL" && ./install.sh ) || {
-    echo "WARNING: composer install failed. Fix connectivity/PHP, then run:";
+    echo "WARNING: dependency resolution did not complete. After fixing it:";
     echo "  sudo sh -c 'cd \$KERNEL && ./install.sh'";
   }
 fi
-echo "hkm-kernel installed. Verify your environment with:  hkm doctor"
+echo "hkm-kernel installed. See what it still needs with:  hkm doctor"
 exit 0
 EOF
   chmod +x "$P/DEBIAN/postinst"
