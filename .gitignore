@@ -17,13 +17,14 @@ tools/zig-out/
 # ...but publish the curated, reader-facing guides (docs/ai-context stays ignored):
 !/docs/guides/
 
+/tmp/
 
 # ── COMPOSER ──────────────────────────────────────────────────
 /vendor/
 #(Uncomment if you want to ignore lock file for the library)
 composer.lock 
 *.bak
-
+/var/
 
 # ── TESTING & COVERAGE ────────────────────────────────────────
 /.phpunit.cache/
@@ -84,3 +85,5 @@ ehthumbs.db
 *.swo
 *~
 **/.zig-cache
+
+/userdata/

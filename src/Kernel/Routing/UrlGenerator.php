@@ -45,11 +45,28 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\ManifestReader;
  */
 final class UrlGenerator
 {
+    /**
+     * Matches one placeholder together with the separator in front of it, so an
+     * omitted optional parameter takes its '/' with it.
+     */
+    private const PLACEHOLDER_WITH_SEPARATOR = '#(/?)\{([^}:?]+)(?::([^}?]+))?(\?)?\}#';
+
     /** @var array<string, string> route name => path template */
     private array $byName = [];
 
     /** @var array<string, string> route name => HTTP method */
     private array $methodByName = [];
+
+    /**
+     * route name => the domain group it belongs to ('' when ungrouped).
+     *
+     * Used only for ABSOLUTE urls: a project serving two brands has two routes
+     * called `vote.home` and `africa.home`, and generating both against a single
+     * APP_URL would send half its links to the wrong site.
+     *
+     * @var array<string, string>
+     */
+    private array $domainByName = [];
 
     /**
      * @param array<string, array<string, mixed>> $manifest compiled route manifest
@@ -61,25 +78,45 @@ final class UrlGenerator
         private readonly string $base = '',
         private readonly string $secret = '',
     ) {
-        foreach ($manifest as $key => $entry) {
-            $name = $entry['name'] ?? null;
-            if (!is_string($name) || $name === '') {
-                continue;
-            }
-            [$method, $path]           = explode(' ', $key, 2);
-            $this->byName[$name]       = $path;
-            $this->methodByName[$name] = $method;
+        foreach (RouteIndex::names($manifest) as $name => $route) {
+            $this->byName[$name]       = $route['path'];
+            $this->methodByName[$name] = $route['method'];
+            $this->domainByName[$name] = $route['domain'] ?? '';
         }
     }
 
-    /** Build from the compiled manifest on disk. */
+    /**
+     * Build from the compiled manifests on disk.
+     *
+     * Prefers `route-names.php` — a name => {path, method} index the boot compiler
+     * writes. Reading it instead of the full route table matters most where this
+     * class is actually used: a CLI command or queue worker that mints one
+     * password-reset link should not hold the application's entire routing
+     * surface in memory to do it. Falls back to the flat manifest when the index
+     * is absent (a deploy whose cache predates it).
+     */
     public static function fromManifest(string $base = '', string $secret = ''): self
     {
-        return new self(
-            ManifestReader::readCompiled('route-manifest.php'),
-            $base,
-            $secret !== '' ? $secret : (string) (\function_exists('env') ? (env('APP_KEY') ?: '') : ''),
-        );
+        $secret = $secret !== ''
+            ? $secret
+            : (string) (\function_exists('env') ? (env('APP_KEY') ?: '') : '');
+
+        /** @var array<string, array{path: string, method: string}> $names */
+        $names = ManifestReader::readCompiled('route-names.php');
+
+        if ($names !== []) {
+            $generator = new self([], $base, $secret);
+
+            foreach ($names as $name => $route) {
+                $generator->byName[$name]       = $route['path'] ?? '';
+                $generator->methodByName[$name] = $route['method'] ?? 'GET';
+                $generator->domainByName[$name] = $route['domain'] ?? '';
+            }
+
+            return $generator;
+        }
+
+        return new self(ManifestReader::readCompiled('route-manifest.php'), $base, $secret);
     }
 
     public function has(string $name): bool
@@ -99,7 +136,8 @@ final class UrlGenerator
      * Parameters not consumed by a path placeholder become the query string, so
      * `route('search', ['q' => 'x'])` on `/search` yields `/search?q=x`.
      *
-     * @param array<string, string|int|float|bool> $parameters
+     * @param array<string, string|int|float|bool|null> $parameters  a null or ''
+     *        value counts as OMITTED, which is what an optional `{page?}` wants
      *
      * @throws \InvalidArgumentException on an unknown name, a missing required
      *         parameter, or a value that violates the placeholder's declared type
@@ -121,7 +159,13 @@ final class UrlGenerator
             $path .= '?' . http_build_query($remaining);
         }
 
-        return $absolute ? $this->absolute($path) : $path;
+        return $absolute ? $this->absolute($path, $this->domainByName[$name] ?? '') : $path;
+    }
+
+    /** The domain group a named route belongs to, or '' when it is ungrouped. */
+    public function domainFor(string $name): string
+    {
+        return $this->domainByName[$name] ?? '';
     }
 
     /**
@@ -149,7 +193,8 @@ final class UrlGenerator
      * timestamp) which is covered by the same signature, so the deadline cannot be
      * extended by editing the URL.
      *
-     * @param array<string, string|int|float|bool> $parameters
+     * @param array<string, string|int|float|bool|null> $parameters  a null or ''
+     *        value counts as OMITTED, which is what an optional `{page?}` wants
      * @param int|null $expiresIn seconds from now; null = no expiry
      *
      * @throws \RuntimeException when no signing secret is configured — failing
@@ -170,8 +215,10 @@ final class UrlGenerator
 
         $url = $this->route($name, $parameters);
 
+        // The signature covers the path and query only, never the host, so
+        // choosing a per-domain base cannot invalidate it.
         return $absolute
-            ? $this->absolute($this->appendSignature($url))
+            ? $this->absolute($this->appendSignature($url), $this->domainByName[$name] ?? '')
             : $this->appendSignature($url);
     }
 
@@ -181,6 +228,11 @@ final class UrlGenerator
      * Accepts a path with query string, e.g. `/verify/7?expires=…&signature=…`.
      * Pass the path only — a host is not covered by the signature, so including
      * one would make verification fail behind a proxy that rewrites it.
+     *
+     * The query is compared BYTE FOR BYTE with the `signature` pair removed, not
+     * parsed and re-serialised. `parse_str()` rewrites '.', ' ' and '[' inside
+     * parameter NAMES, so a legitimately signed URL carrying such a parameter
+     * could never validate — the check failed closed, but it failed.
      */
     public function hasValidSignature(string $url): bool
     {
@@ -190,20 +242,36 @@ final class UrlGenerator
 
         [$path, $query] = array_pad(explode('?', $url, 2), 2, '');
 
-        parse_str($query, $params);
+        $signature = null;
+        $expires   = null;
+        $signed    = [];
 
-        $signature = $params['signature'] ?? null;
-        unset($params['signature']);
+        foreach ($query === '' ? [] : explode('&', $query) as $pair) {
+            [$key, $value] = array_pad(explode('=', $pair, 2), 2, '');
 
-        if (!is_string($signature) || $signature === '') {
+            // Only the FIRST signature pair is lifted out; a second one injected
+            // by an attacker stays in the signed material and breaks the match.
+            if ($key === 'signature' && $signature === null) {
+                $signature = urldecode($value);
+                continue;
+            }
+
+            if ($key === 'expires') {
+                $expires = urldecode($value);
+            }
+
+            $signed[] = $pair;
+        }
+
+        if ($signature === null || $signature === '') {
             return false;
         }
 
-        if (isset($params['expires']) && (int) $params['expires'] < time()) {
+        if ($expires !== null && (int) $expires < time()) {
             return false;
         }
 
-        $expected = $this->sign($path . ($params === [] ? '' : '?' . http_build_query($params)));
+        $expected = $this->sign($path . ($signed === [] ? '' : '?' . implode('&', $signed)));
 
         // hash_equals — a timing-safe comparison. Never ===.
         return hash_equals($expected, $signature);
@@ -212,51 +280,94 @@ final class UrlGenerator
     // ── internals ────────────────────────────────────────────────────────────
 
     /**
-     * Replace `{name}` / `{name:type}` with values, validating each against its
-     * declared type. Unconsumed parameters are returned via $remaining.
+     * Replace `{name}` / `{name:type}` / `{name?}` with values, validating each
+     * against its declared type. Unconsumed parameters are returned via $remaining.
      *
-     * @param array<string, string|int|float|bool> $parameters
-     * @param array<string, string|int|float|bool> $remaining
+     * A repeated placeholder (`/a/{id}/b/{id}`) is supported: consumption is
+     * tracked in a set rather than by removing the value, which previously made
+     * the second occurrence report a missing parameter.
+     *
+     * @param array<string, string|int|float|bool|null> $parameters  a null or ''
+     *        value counts as OMITTED, which is what an optional `{page?}` wants
+     * @param array<string, string|int|float|bool|null> $remaining
      */
     private function substitute(string $name, string $template, array $parameters, array &$remaining): string
     {
-        $remaining = $parameters;
+        $consumed = [];
 
         $path = preg_replace_callback(
-            RouteParameter::PLACEHOLDER,
-            function (array $m) use ($name, &$remaining): string {
-                $param = $m[1];
-                $type  = $m[2] ?? '';
+            self::PLACEHOLDER_WITH_SEPARATOR,
+            function (array $m) use ($name, $parameters, &$consumed): string {
+                $separator = $m[1];
+                $param     = $m[2];
+                $type      = ($m[3] ?? '') !== '' ? $m[3] : '';
+                $optional  = ($m[4] ?? '') === '?';
 
-                if (!array_key_exists($param, $remaining)) {
+                $present = array_key_exists($param, $parameters)
+                    && $parameters[$param] !== null
+                    && $parameters[$param] !== '';
+
+                if (!$present) {
+                    if ($optional) {
+                        // Takes its separator with it: /posts/{page?} → /posts
+                        $consumed[$param] = true;
+
+                        return '';
+                    }
+
                     throw new \InvalidArgumentException(
                         "Route [{$name}] needs a value for {{$param}}."
                     );
                 }
 
-                $value = (string) $remaining[$param];
-                unset($remaining[$param]);
+                $value              = (string) $parameters[$param];
+                $consumed[$param]   = true;
 
                 // Generating a URL the matcher cannot match is always a bug.
                 $pattern = RouteParameter::pattern($type);
-                if (preg_match('#^' . $pattern . '$#', $value) !== 1) {
+                if (preg_match('#^' . $pattern . '$#D', $value) !== 1) {
                     throw new \InvalidArgumentException(
                         "Value [{$value}] for {{$param}} on route [{$name}] does not satisfy type"
                         . ($type === '' ? ' (a single path segment)' : " [{$type}]") . '.'
                     );
                 }
 
-                return rawurlencode($value);
+                return $separator . rawurlencode($value);
             },
             $template,
         );
 
+        $remaining = array_diff_key($parameters, $consumed);
+
         return (string) $path;
     }
 
-    private function absolute(string $path): string
+    /**
+     * Prefix a path with the right origin.
+     *
+     * A route grouped under a concrete HOST is absolute against THAT host, so a
+     * two-brand project links each brand to itself instead of sending every link
+     * to whatever single APP_URL happens to be configured. The scheme is taken
+     * from the configured base (https when there is none).
+     *
+     * A wildcard (`*.example.com`) or a bare subdomain (`api`) names no single
+     * host — there is nothing to build an origin from — so those fall back to the
+     * configured base, exactly as an ungrouped route does.
+     */
+    private function absolute(string $path, string $domain = ''): string
     {
-        return rtrim($this->base, '/') . $path;
+        return rtrim($this->originFor($domain), '/') . $path;
+    }
+
+    private function originFor(string $domain): string
+    {
+        if ($domain === '' || str_starts_with($domain, '*.') || !str_contains($domain, '.')) {
+            return $this->base;
+        }
+
+        $scheme = $this->base !== '' ? parse_url($this->base, PHP_URL_SCHEME) : null;
+
+        return (is_string($scheme) && $scheme !== '' ? $scheme : 'https') . '://' . $domain;
     }
 
     private function appendSignature(string $url): string

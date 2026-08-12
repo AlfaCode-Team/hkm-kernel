@@ -82,19 +82,16 @@ use Plugins\Database\Infrastructure\Pool\PoolConfiguration;
 
 // Plugins — module providers (registered into the kernel below).
 use Plugins\Crypto\Provider as CryptoProvider;
-use Plugins\I18n\Provider as I18nProvider;
+use Plugins\Logger\Provider as LoggerProvider;
 use Plugins\Database\Provider as DatabaseProvider;
 use Plugins\Commands\Provider as CommandsProvider;
 use Plugins\Storage\Provider as StorageProvider;
-use Plugins\HttpClient\Provider as HttpClientProvider;
+use Plugins\Validation\Provider as ValidationProvider;
 use Plugins\Session\Provider as SessionProvider;
 use Plugins\Cookie\Provider as CookieProvider;
 use Plugins\RedisCache\Provider as RedisCacheProvider;
-use Plugins\SiteSEO\Application\Listeners\EnqueueIndexNowListener;
-use Plugins\SiteSEO\Provider as SiteSeoModule;
 use Plugins\View\Provider as ViewModule;
 use Plugins\SecurityFilters\Provider as SecurityFiltersModule;
-use Plugins\Edge\Provider as EdgeProvider;
 
 
 // Flat layout: this directory's grandparent is the project root.
@@ -190,12 +187,16 @@ $ports = [
         // when REDIS_HOST is set. Lets `php app/worker/run.php` drain real jobs.
     QueuePort::class => static fn(): FileQueue => new FileQueue($projectRoot . '/var/queue'),
 
-        // The SEO module subscribes EnqueueIndexNowListener to seo.url_published, but
-        // the EventBus resolves listeners from the CoreContainer — so bind it here
-        // with the QueuePort. (The factory receives the container.)
-    EnqueueIndexNowListener::class => static fn($c) => new EnqueueIndexNowListener(
-        $c->make(QueuePort::class),
-    ),
+    // ── When you enable the User + Tenancy plugins ───────────────────────────
+    // The User plugin subscribes ProvisionTenantProfileListener to user.registered
+    // to write the per-tenant user_profiles row. The EventBus resolves listeners
+    // from the CoreContainer, so bind it here WITH Tenancy's connection resolver
+    // (same pattern as the SEO listener above). Left unbound it safely no-ops.
+    //
+    //   \Plugins\User\Infrastructure\Listeners\ProvisionTenantProfileListener::class
+    //       => static fn($c) => new \Plugins\User\Infrastructure\Listeners\ProvisionTenantProfileListener(
+    //           $c->make(\Plugins\Tenancy\API\Contracts\TenantConnectionResolverContract::class),
+    //       ),
 ];
 
 if (filter_var($env('DB_POOL_ENABLED', 'false'), FILTER_VALIDATE_BOOL)) {
@@ -234,6 +235,21 @@ return Kernel::configure()
     // the synthetic '__project__' scope — no module register() runs for them.
     // Keep these controllers thin; real domain logic lives in plugins.
     ->withRoutes(EntryHelpers::projectRoutes($projectRoot))
+    // Route GROUPS from proj.json: a prefix / filters / requires / name
+    // prefix / SITE stated once for every route inside the group, and
+    // expanded into flat routes at boot. `site` is part of the route key,
+    // so one project can answer `GET /` differently per group of hosts.
+    ->withRouteGroups(EntryHelpers::projectRouteGroups($projectRoot))
+    // The hosts this project serves. A route grouped under a domain that is
+    // not in proj.json "domains" fails the boot — nothing could ever reach it.
+    ->withProjectDomains(EntryHelpers::projectDomains($projectRoot))
+
+    // Project ROUTE POLICY declared in proj.json ("routePolicy": {"disable": []}).
+    // A plugin OWNS its routes, but the project is the final authority: it can
+    // veto specific plugin routes ("METHOD /path") or a whole plugin's routes (a
+    // module domain) without forking the plugin. Applied to plugin routes before
+    // project routes compile — an unmatched spec fails the boot.
+    ->withRoutePolicy(EntryHelpers::projectRoutePolicy($projectRoot))
 
     // Security layers run BEFORE any module loads — a denied request costs zero
     // module work. CsrfTokenLayer here is a stateless, HMAC-signed token
@@ -255,21 +271,30 @@ return Kernel::configure()
     // in. Use for capabilities only SOME routes need (views, outbound HTTP,
     // storage). A route opts in via its "requires" in proj.json / module.json.
     ->withModules([
-        // Crypto (solves: crypto) — provides the concrete AesEncrypter and
+        // Logger (solves: logging.application) — supplies the LoggerPort adapter.
+        // Channel/level come from config/logger.php (LOG_CHANNEL, LOG_LEVEL,
+        // LOG_FILE). Keep this registered: components that log (Database,
+        // Tenancy, EventBus, command auditing) degrade to silence without it,
+        // and silent logging is indistinguishable from nothing having happened.
+        LoggerProvider::class,
+
+        // Crypto (solves: crypto.services) — provides the concrete AesEncrypter and
         // PasswordHasher classes behind the Encryption/Hashing port factories,
         // plus crypto helpers other modules consume.
         CryptoProvider::class,
 
-        // I18n (solves: i18n) — translation/localisation: message catalogues,
-        // locale negotiation, and the translator used by modules and views.
-        I18nProvider::class,
+        // Validation (solves: validation.rules) — the shared request-validation
+        // engine. Its boot() loads config/validation.php and registers the
+        // CommonRules + FinancialRules packs. DTOs extend Plugins\Validation\
+        // AbstractDto; built-in rules work without this, the packs need it.
+        ValidationProvider::class,
 
-        // Database (solves: database.query) — the multi-driver database stack:
+        // Database (solves: database.management) — the multi-driver database stack:
         // the DatabasePort adapter, the pooled adapter that borrows from the
         // ConnectionPool, and connection/schema management.
         DatabaseProvider::class,
 
-        // Commands (solves: commands) — registers this project's console
+        // Commands (solves: system.commands) — registers this project's console
         // commands into the CLI pipeline (run via `php app/cli/run.php`).
         CommandsProvider::class,
 
@@ -279,25 +304,37 @@ return Kernel::configure()
         // "requires": ["storage.local"].
         StorageProvider::class,
 
-        // HttpClient (solves: http.client) — the HttpClientPort for OUTBOUND
-        // HTTP (calling third-party APIs from gateways). Required by SiteSEO.
-        HttpClientProvider::class,
-
         // View (solves: view.rendering) — server-side PHP templating: layouts,
         // sections, the project-first view cascade and `namespace::view`
         // resolution. Routes opt in via "requires": ["view.rendering"].
         ViewModule::class,
 
-        // SiteSEO (solves: seo.management) — SEO toolkit: sitemaps, Open Graph,
-        // JSON-LD, robots, IndexNow. Exposes SeoServiceContract + the /api/seo/*
-        // routes. Needs http.client (above) for its network actions.
-        SiteSeoModule::class,
+        // Edge (solves: edge.routing) — generates this host's web-server front
+        // config from the project's domains: an nginx SNI stream splitter when
+        // nginx+Apache both run, else a plain nginx/Apache vhost (docroot
+        // app/public, PHP-FPM or Swoole) with the run-env injected. Local
+        // (.local/.test) domains go to /etc/hosts instead (dev only).
+        // CLI: `hkm cli -p <project> edge:status | edge:apply | edge:hosts`.
+        \Plugins\Edge\Provider::class,
 
-        // Edge (solves: edge.routing) — generates the host's web-server front
-        // config (nginx SNI stream splitter / nginx-only / Apache vhost) from the
-        // platform's registered domains. CLI-first: `hkm edge:status`,
-        // `hkm edge:apply`. Routes opt in via "requires": ["edge.routing"].
-        EdgeProvider::class,
+        // ── Not installed — add when you need them ───────────────────────
+        // Each is one command; it fetches the plugin, its dependencies, and
+        // wires them into this list for you.
+        //
+        //   hkm plugins install i18n        // i18n.translation  — __(), locales
+        //   hkm plugins install http-client // http.client       — outbound HTTP
+        //   hkm plugins install siteseo     // seo.management    — sitemaps, JSON-LD
+        //                                   //   (also needs http-client, and a
+        //                                   //   QueuePort-bound EnqueueIndexNowListener
+        //                                   //   in withPorts() for index-on-publish)
+
+        // Identity stack (enable together in an app that needs accounts):
+        //   \Plugins\User\Provider::class,      // user.management (identity + settings)
+        //   \Plugins\Feedback\Provider::class,  // feedback.management (/ajx/feedback)
+        //   \Plugins\Auth\Provider::class,      // auth.identity (login/tokens)
+        //   \Plugins\Tenancy\Provider::class,   // tenancy.routing (multi-tenant)
+        // The User plugin queues a verification email on signup ONLY when a
+        // MailPort is bound in withPorts() above (else it is skipped).
     ])
 
     // ESSENTIAL modules: registered into EVERY request container regardless of
@@ -325,6 +362,22 @@ return Kernel::configure()
         // that declare "filters": ["hmac"], so this is safe to enable app-wide.
         SecurityFiltersModule::class,
     ])
+
+    // PROJECT-DECLARED essentials from proj.json ("essentials": [ ... ]) — each
+    // entry is a module DOMAIN (a plugin's solves value). This is the project's
+    // lever for which plugins are global WITHOUT editing this file: e.g. a
+    // multi-tenant project declares "tenancy.routing" here, a single-tenant one
+    // simply doesn't. The named module must be in withModules() above; the
+    // kernel resolves the domain at build() and an unknown domain FAILS the
+    // boot (never a silent no-op). Keep this list SHORT — every essential (and
+    // its requires[] graph) registers on every request.
+    //
+    // Session-cookie login: Auth's SessionAuthStage resolves the logged-in user
+    // on a route ONLY when auth.identity + user.management are in that request's
+    // graph (the stage self-guards otherwise). An app where users stay signed in
+    // across ALL pages therefore declares BOTH here; a JWT/PAT-only API needs
+    // neither (token layers run before any module loads).
+    ->withEssentialModules(EntryHelpers::projectEssentials($projectRoot))
 
     // Compile-only. Returns the Kernel to the entry point, which materializes it
     // on the first http()/cli() call.

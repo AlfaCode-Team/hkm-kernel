@@ -142,6 +142,83 @@ pub fn resolveVersion(
     return null;
 }
 
+/// A ref a plugin can be installed at.
+pub const Ref = struct {
+    name: []const u8,
+    kind: enum { tag, branch },
+    /// Null for a branch — a branch has no version, which is exactly why one
+    /// cannot be pinned in the shared version-keyed store.
+    version: ?semver.Version = null,
+
+    pub fn isBranch(self: Ref) bool {
+        return self.kind == .branch;
+    }
+};
+
+/// Every branch head on the remote.
+pub fn listBranches(allocator: std.mem.Allocator, io: Io, env: *EnvMap, url: []const u8) GitError![]const []const u8 {
+    const listing = capture(allocator, io, env, &.{ "git", "ls-remote", "--heads", "--refs", url }) orelse
+        return GitError.RemoteUnreachable;
+
+    var out: std.ArrayList([]const u8) = .empty;
+    var lines = std.mem.splitScalar(u8, listing, '\n');
+    while (lines.next()) |line| {
+        const marker = "refs/heads/";
+        const idx = std.mem.indexOf(u8, line, marker) orelse continue;
+        const name = std.mem.trim(u8, line[idx + marker.len ..], " \t\r");
+        if (name.len == 0) continue;
+        out.append(allocator, allocator.dupe(u8, name) catch continue) catch continue;
+    }
+    return out.items;
+}
+
+/// Resolve what the user asked for into a concrete ref on the remote.
+///
+/// `want` may be a semver constraint ("^1.2"), an exact tag ("v1.2.0"), or a
+/// branch ("main", "develop"). They are tried in that order, and the order is
+/// the point: a bare "1.0" is a CONSTRAINT, not a branch named 1.0, and
+/// resolving it as a branch would quietly install something else entirely.
+///
+/// Empty `want` means the newest release tag — never a branch. Falling back to
+/// a branch when a plugin has no releases would install an unpinnable moving
+/// target from a bare `hkm plugins install <name>`.
+pub fn resolveRef(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    url: []const u8,
+    want: []const u8,
+) GitError!?Ref {
+    const w = std.mem.trim(u8, want, " \t\r\n");
+    const tags = try listTags(allocator, io, env, url);
+
+    if (w.len == 0) {
+        if (tags.len == 0) return null;
+        return .{ .name = tags[0].name, .kind = .tag, .version = tags[0].version };
+    }
+
+    // Exact tag first: an exact name is unambiguous, and checking it before the
+    // constraint means a tag whose name is not semver-shaped still installs.
+    for (tags) |t| {
+        if (std.mem.eql(u8, t.name, w)) return .{ .name = t.name, .kind = .tag, .version = t.version };
+    }
+
+    // Then as a semver constraint.
+    for (tags) |t| {
+        const ok = semver.satisfies(t.version, w) catch break; // not a constraint — try a branch
+        if (ok) return .{ .name = t.name, .kind = .tag, .version = t.version };
+    }
+
+    // Finally a branch. Only reached when it is neither a known tag nor a
+    // constraint any tag satisfies.
+    const branches = listBranches(allocator, io, env, url) catch &[_][]const u8{};
+    for (branches) |b| {
+        if (std.mem.eql(u8, b, w)) return .{ .name = b, .kind = .branch };
+    }
+
+    return null;
+}
+
 /// Clone `url` into `dest` at `ref`.
 ///
 /// Shallow (`--depth 1`) and single-branch: a plugin is consumed, not developed,

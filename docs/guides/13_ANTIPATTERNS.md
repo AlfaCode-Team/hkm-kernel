@@ -208,6 +208,78 @@ $router->post('/api/invoices', [InvoiceController::class, 'create']);
 }
 ```
 
+Need something computed? A project may pass PHP arrays through
+`Kernel::withRoutes()` / `withRouteGroups()` from `bootstrap/app.php`. That is the
+sanctioned escape hatch — there is still no route DSL, and no route file that
+executes at request time.
+
+---
+
+## ANTI-PATTERN 6b — Repeating Yourself Across Routes
+
+**Wrong — the prefix, the filter and the name stem copy-pasted onto every line:**
+```json
+{ "method": "GET",    "path": "/admin/users",      "handler": "…@index",   "filters": ["auth"], "name": "admin.users.index" },
+{ "method": "POST",   "path": "/admin/users",      "handler": "…@store",   "filters": ["auth"], "name": "admin.users.store" },
+{ "method": "DELETE", "path": "/admin/users/{id}", "handler": "…@destroy", "filters": ["auth"], "name": "admin.users.destroy" }
+```
+
+**Correct — a group states it once, and is expanded at BOOT into the same flat routes:**
+```json
+"groups": [
+  { "prefix": "/admin/users", "filters": ["auth"], "name": "admin.users.",
+    "routes": [
+      { "method": "GET",    "path": "",      "handler": "…@index",   "name": "index"   },
+      { "method": "POST",   "path": "",      "handler": "…@store",   "name": "store"   },
+      { "method": "DELETE", "path": "/{id}", "handler": "…@destroy", "name": "destroy" }
+    ] }
+]
+```
+
+Grouping costs nothing at request time — the manifest, the matcher and every
+stage only ever see flat routes.
+
+---
+
+## ANTI-PATTERN 6c — `{param:any}` for a File Path
+
+**Wrong — `any` is a bare catch-all with no traversal guard:**
+```json
+{ "method": "GET", "path": "/download/{file:any}", "handler": "…@download" }
+```
+`/download/../../etc/passwd` matches, and the controller gets `../../etc/passwd`.
+
+**Correct — `path` is the same catch-all with `..` and control characters refused:**
+```json
+{ "method": "GET", "path": "/download/{file:path}", "handler": "…@download" }
+```
+
+`any` is kept byte-for-byte only so existing routes do not regress. Any route that
+reaches a filesystem or a `StoragePort` should use `path`.
+
+Note the router already decodes captured values and **re-validates them against
+their type**, so `%2F` cannot smuggle a `/` past `{file}` — but `any` permits a
+literal `..` by definition, which is what `path` closes.
+
+---
+
+## ANTI-PATTERN 6d — Hard-coding a Path in a Link
+
+**Wrong — silently 404s the moment a project moves the page:**
+```php
+return Response::redirect('/register');
+```
+
+**Correct — a name survives an override or a move:**
+```php
+return Response::redirect(route('auth.register'));
+```
+
+The whole platform is built on projects overriding and disabling plugin routes.
+A project override INHERITS the plugin route's name, so the link keeps working.
+An unknown name or a value violating its type throws at the CALL SITE, turning a
+mystery 404 into an error where the link was written.
+
 ---
 
 ## ANTI-PATTERN 7 — Skipping a Job by Throwing
@@ -405,7 +477,12 @@ class Provider implements ModuleContract
 | Put authorization in a Controller | Move it to the Service |
 | Dispatch an event inside a `try` block | Move dispatch after the `try/catch` |
 | Use `static` properties for caching | Use `CachePort` |
-| Define routes in PHP | Define them in `module.json` |
+| Define routes in PHP | Define them in `module.json` / `proj.json` |
+| Copy a prefix or filter onto every route | State it once in a `groups[]` entry |
+| Use `{file:any}` for a download path | Use `{file:path}` — `any` has no traversal guard |
+| Hard-code `/register` in a link | `route('auth.register')` — names survive overrides |
+| Add a route for a host not in `proj.json` `domains` | Register the host, or use `subdomain` / a wildcard |
+| Ship to PHP-FPM without `BOOT_CACHE=1` | Every request recompiles every manifest (~2 ms) |
 | Use `float` for money | Use `Money::of()` with integer cents |
 | Throw in a job to skip processing | Return `JobResult::skipped($reason)` |
 | Use `===` for token comparison | Use `hash_equals()` |

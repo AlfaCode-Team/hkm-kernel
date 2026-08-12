@@ -135,11 +135,36 @@ plugin resources by default (deterministic, compiled at boot).
 {
   "name": "shop",
   "views": "resources",                                  // project view root (priority 0)
+
+  // Hosts this project serves. DomainResolver matches an incoming Host against
+  // these, AND the route compiler validates every route "domain" against them.
+  "domains": ["shop.local", "app.shop.local"],
+
   "routes": [
-    { "method": "GET", "path": "/",     "handler": "Shop\\Http\\HomeController@index" },
+    { "method": "GET", "path": "/",     "handler": "Shop\\Http\\HomeController@index", "name": "home" },
     { "method": "GET", "path": "/ping", "handler": "Shop\\Http\\HomeController@ping"  }
+  ],
+
+  // Groups: a prefix / filters / requires / name-prefix / domain stated ONCE for
+  // every route inside. Expanded at boot into flat routes; may nest.
+  "groups": [
+    { "prefix": "/admin", "filters": ["auth"], "name": "admin.",
+      "domain": "app.shop.local",
+      "routes": [
+        { "method": "GET", "path": "/stats", "handler": "Shop\\Http\\AdminController@stats",
+          "name": "stats", "requires": ["view.rendering"] }
+      ] }
   ]
 }
+```
+
+Wired by the project bootstrap:
+
+```php
+->withRoutes(EntryHelpers::projectRoutes($projectRoot))
+->withRouteGroups(EntryHelpers::projectRouteGroups($projectRoot))
+->withProjectDomains(EntryHelpers::projectDomains($projectRoot))
+->withRoutePolicy(EntryHelpers::projectRoutePolicy($projectRoot))
 ```
 
 - Routes: `EntryHelpers::projectRoutes($projectPath)` reads `proj.json`
@@ -187,6 +212,64 @@ route without making it essential, declare a route-level `requires[]`:
 Project routes also pass `filters[]` through to the compiler; plugin routes MAY
 carry `requires[]` too (they normally get deps via their module's `solves` graph).
 
+> **Worked examples:** [30_ROUTING_COOKBOOK.md](30_ROUTING_COOKBOOK.md) recipes 6-10
+> cover multi-brand domains, an `api.` subdomain, override + disable, per-route
+> `requires` and face restriction — each compiled, with its real output.
+
+### Domain grouping — one project, several hosts
+
+`DomainType` only distinguishes admin / api / project / public, so two brands
+served by one project are indistinguishable by face. A route **domain group** is
+part of the compiled route KEY, so the same path can answer differently per host:
+
+```jsonc
+{
+  "domains": ["hkmvote.local", "africavoting.local", "organizer.africavoting.local"],
+
+  "groups": [
+    { "domain": "hkmvote.local",      "name": "vote.",
+      "routes": [ { "method": "GET", "path": "/", "handler": "…\\VoteHome@index",   "name": "home" } ] },
+    { "domain": "africavoting.local", "name": "africa.",
+      "routes": [ { "method": "GET", "path": "/", "handler": "…\\AfricaHome@index", "name": "home" } ] },
+
+    { "domain": "organizer.africavoting.local", "prefix": "/dashboard", "filters": ["auth"],
+      "routes": [ { "method": "GET", "path": "", "handler": "…\\Organizer@index" } ] },
+
+    { "domain": "*.africavoting.local",         // every tenant subdomain
+      "routes": [ { "method": "GET", "path": "/", "handler": "…\\TenantHome@index" } ] }
+  ],
+
+  "routes": [                                    // UNGROUPED = global, all four hosts
+    { "method": "GET", "path": "/health", "handler": "…\\HealthController@show" }
+  ]
+}
+```
+
+Compiled keys: `GET /health`, `GET@hkmvote.local /`, `GET@africavoting.local /`,
+`GET@organizer.africavoting.local /dashboard`, `GET@*.africavoting.local /`.
+
+- **Ungrouped routes are GLOBAL** — every domain reaches them.
+- A bare **`"subdomain": "api"`** answers on that label of EVERY domain
+  (`api.example.com` and `api.example2.com`), and is never validated against
+  `domains` because it belongs to no single host.
+- A declared **host** MUST appear in `proj.json` `"domains"` or the boot fails —
+  a route grouped under a host the project does not serve could never be reached.
+  A wildcard passes when its parent is registered, or when any registered host
+  falls under it, which makes it the right tool for tenant hosts that live in the
+  database rather than in `proj.json`.
+- **Route names stay one flat namespace.** Two domains cannot both claim `home`;
+  use a group `name` prefix (`vote.` / `africa.`). Per-domain names would force
+  `UrlGenerator` to know which host it is generating for, and it holds no request
+  state so CLI and workers can build links.
+- The host comes from `DomainContext->host` — already VALIDATED against
+  `projects.json` — via the `route_host` request attribute the entry points set.
+  Never from the raw `Host` header, which the client controls.
+
+⚠ **Tenancy:** the domain is read at the ENTRY POINT, before routing.
+`TenantContextStage` runs at `after.load`, *after* the route is resolved, so a
+tenant row cannot select a route table. Use a wildcard group for "all tenant
+hosts share these routes"; per-tenant *layout* differences are a view concern.
+
 ### Route policy — DISABLE plugin routes (the third verb)
 
 A plugin OWNS and declares its routes, but the deploying project is the FINAL
@@ -198,8 +281,9 @@ plugin. Declared in `proj.json` and wired by the bootstrap via
 // proj.json
 "routePolicy": {
   "disable": [
-    "GET /register",   // one plugin route (method + path)
-    "oauth.server"     // a module DOMAIN — every route that module solves()
+    "GET /register",              // one plugin route (method + path)
+    "GET@organizer /dashboard",   // one route inside a domain group
+    "oauth.server"                // a module DOMAIN — every route it solves()
   ]
 }
 ```
@@ -258,8 +342,15 @@ Semantics:
 ## Rules For Future Project Work
 
 - Keep business logic out of `app/`, `bootstrap/`, and project bootstrap files
-- Project routes go in `proj.json` routes[] (or `Kernel::withRoutes()`), never in PHP
+- Project routes go in `proj.json` routes[] / groups[] (or `Kernel::withRoutes()` /
+  `withRouteGroups()`), never in PHP
 - Unwanted plugin routes go in `proj.json` routePolicy.disable[] — never fork a plugin to hide an endpoint
+- Every host the project answers on goes in `proj.json` domains[]; a route grouped
+  under an unregistered host FAILS the boot
+- Repeated prefix/filters/requires/name across routes belongs in a `groups[]` entry,
+  not copy-pasted onto each route
+- Set `BOOT_CACHE=1` in production and clear `var/cache/manifests` on deploy —
+  `Kernel::build()` otherwise recompiles every manifest on EVERY PHP-FPM request
 - Put only port/adapters/security/module lists in bootstrap wiring
 - Add new projects under `projects/{name}/bootstrap/app.php`
 - Ensure module classes listed in `withModules()` have valid `module.json`
