@@ -219,7 +219,7 @@ Add to your **project's** `composer.json` (not the library's):
     "php-io-cli": {
       "commands": [
         "App\\Commands\\MigrateCommand",
-        "Plugins\\Task\\Infrastructure\\Commands\\TaskListCommand"
+        "Plugins\\Invoice\\Infrastructure\\Commands\\InvoiceListCommand"
       ]
     }
   }
