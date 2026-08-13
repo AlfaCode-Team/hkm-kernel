@@ -87,7 +87,7 @@ $builder = require __DIR__ . '/../../../app/bootstrap/base.php';
 
 return $builder
     ->withModules([
-        TaskModule::class,
+        InvoiceModule::class,
     ])
     ->build();
 ```

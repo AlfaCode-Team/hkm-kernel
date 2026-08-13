@@ -1,8 +1,25 @@
 # HKM Kernel — Plugins Layer
 
-> The `plugins/` folder is the home for **locally developed business modules** that belong to
-> this specific application but are not published as standalone packages.
-> Every module here follows identical GDA rules — only the folder and namespace differ.
+> **A plugin is a standalone package in its own git repository.** Since 1.1.0 the kernel
+> depends on zero plugins and ships none: `plugins/` in the kernel repo is empty. In a
+> PROJECT, `plugins/` holds the plugins that project has installed.
+> Every plugin follows identical GDA rules — only the folder and namespace differ.
+
+**Repo:** `github.com/AlfaCode-Team/hkm-plugin-<slug>` · **Package:**
+`alfacode-team/hkm-plugin-<slug>` · **Namespace:** `Plugins\{Name}\` · **Test doubles:**
+`AlfaCode-Team/hkm-test-support`
+
+Slug = lower-cased folder name, except `DevTools→dev-tools`, `HttpClient→http-client`,
+`RedisCache→redis-cache`, `SecurityFilters→security-filters`, `SocialAuth→social-auth`,
+and the unhyphenated `SiteSEO→siteseo`, `ViteManifest→vitemanifest`, `OAuth2→oauth2`.
+
+**Managed with `hkm plugins`** — `install`, `enable` (auto-installs), `disable`,
+`uninstall`, `versions`, `outdated`, `update`, `lock`, `verify`, `store`, `domains`,
+`create`. Installs resolve to a TAG, never a branch; `plugins.lock.json` records remote,
+tag, commit and kernel version (commit it, never hand-edit). A global plugin store keyed
+`<Name>/<version>-<origin-hash>` shares one download across projects. `module.json`
+`"kernel": "^1.2"` gates install. A dependency is a DOMAIN, not a repo name — 13 of 28
+domains do not match their repo name, so use `hkm plugins domains` rather than guessing.
 
 ---
 
@@ -86,12 +103,12 @@ Add the `Provider` class to the appropriate project bootstrap:
 
 ```php
 // projects/admin/bootstrap/app.php
-use Plugins\Task\Provider as TaskModule;
+use Plugins\Invoice\Provider as InvoiceModule;
 use Plugins\MyOtherModule\Provider as MyOtherModule;
 
 return $builder
     ->withModules([
-        TaskModule::class,
+        InvoiceModule::class,
         MyOtherModule::class,
     ])
     ->build();
@@ -101,9 +118,20 @@ return $builder
 
 ## Registered Plugins
 
-| Plugin | Namespace | Solves | Routes |
-|---|---|---|---|
-| Task | `Plugins\Task\` | `task.management` | `GET/POST /api/tasks`, `GET/POST/DELETE /api/tasks/{id}` |
+| Plugin | Namespace | Solves |
+|---|---|---|
+| SiteSEO | `Plugins\SiteSEO\` | `seo.management` |
+| I18n | `Plugins\I18n\` | `i18n.translation` |
+| Logger | `Plugins\Logger\` | `logging.application` |
+| Crypto | `Plugins\Crypto\` | `crypto.services` |
+| Database | `Plugins\Database\` | `database.management` |
+| Authorization | `Plugins\Authorization\` | `authorization.policy` |
+| Audit | `Plugins\Audit\` | `audit.trail` |
+| Settings | `Plugins\Settings\` | `tenant.settings` |
+| SocialAuth | `Plugins\SocialAuth\` | `auth.social` |
+| Commands | `Plugins\Commands\` | `system.commands` |
+| Edge | `Plugins\Edge\` | `edge.routing` |
+| DevTools | `Plugins\DevTools\` | `dev.tooling` |
 
 Infrastructure plugins (port adapters / pipeline stages, no routes) — see
 [20_FIRST_PARTY_PLUGINS.md](20_FIRST_PARTY_PLUGINS.md) for the full list and the
@@ -129,7 +157,7 @@ project's `proj.json` `views` into `view-manifest.php`, which the View plugin's
 renderer consumes.
 
 ```jsonc
-// plugins/Task/module.json
+// {Invoice plugin}/module.json
 "views": "resources/views"                                   // namespace defaults to "task"
 "views": { "path": "resources/views", "namespace": "task",
            "priority": 100, "global": true }                 // explicit form
@@ -161,7 +189,9 @@ The resource-resolution model (project-over-plugin, deterministic at boot) is de
 ✓ module.json handlers use fully-qualified Plugins\... class strings
 ✓ Provider registered in projects/{project}/bootstrap/app.php
 ✗ Do NOT place plugin files under projects/ — that folder is for wiring only
-✗ Do NOT add plugins as Composer path repositories — Plugins\ PSR-4 covers autoloading
+✗ Do NOT author plugin source in the KERNEL repo's plugins/ — it ships no plugins
+✗ Do NOT add a hkm-plugin-* require to the kernel's composer.json
+✗ Do NOT hand-edit plugins.lock.json, or guess a plugin's repo from its solves domain
 ✗ All GDA five-layer access rules apply exactly as for any other module
 ```
 

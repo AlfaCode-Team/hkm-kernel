@@ -7,7 +7,7 @@
 
 ## What HKM Kernel Is
 
-HKM Kernel is a PHP 8.2+ framework built on the **Gated Demand Architecture (GDA)** pattern.
+HKM Kernel is a PHP 8.4+ framework built on the **Gated Demand Architecture (GDA)** pattern.
 
 | Principle | Meaning |
 |---|---|
