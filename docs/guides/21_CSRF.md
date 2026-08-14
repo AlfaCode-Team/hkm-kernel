@@ -165,7 +165,7 @@ Two consequences:
    - **Add the binding cookie to `encrypt_exempt`** (`COOKIE_ENCRYPT_EXEMPT` env or
      the base list in `plugins/Cookie/config/cookie.php`). It is then stored AND
      read as plaintext, so its raw value is byte-stable — the cleanest option for
-     pinning to the session cookie. See [First-party plugins → Cookie](20_FIRST_PARTY_PLUGINS.md).
+     pinning to the session cookie. See the [Cookie plugin](https://github.com/AlfaCode-Team/hkm-plugin-cookie).
    - Queue a dedicated binding cookie with `raw: true` and read it back with
      `$request->cookie(...)` (NOT `$this->cookie(...)`, which tries to decrypt).
    - Bind to a cookie that is not re-written every response (so its value never
