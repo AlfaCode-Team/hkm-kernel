@@ -29,7 +29,13 @@ domains do not match their repo name, so use `hkm plugins domains` rather than g
 |---|---|
 | `modules/` | First-party framework packages (`bind-it`, `php-io-cli`, etc.) loaded as Composer path repositories. These are git submodules and may be published to Packagist. |
 | `projects/` | Project-layer wiring only — bootstrap files, domain resolution, `platform.json`, `projects.json`. No business logic lives here. |
-| `plugins/` | Local business modules unique to this application. Full GDA structure. Autoloaded via `Plugins\\` PSR-4 prefix. Never git submodules. |
+| `plugins/` | Business modules. Full GDA structure, autoloaded via the `Plugins\\` PSR-4 prefix. In a PROJECT this holds the plugins that project installed (each from its own repo) plus any project-authored ones. In the KERNEL repo it is empty and stays empty. |
+
+The placement rule, stated once: **the framework holds only code that is for the
+framework; `modules/` holds what the framework needs to run; `plugins/` holds
+what extends projects.** Every business capability is a plugin, never the kernel.
+Port *interfaces* live in `src/Kernel/Ports/` because the kernel defines the
+contract; port *implementations* are always plugins.
 
 ---
 
@@ -92,7 +98,7 @@ A route entry may also carry `filters[]` (auth, throttle, …) and an optional
 `requires[]` of extra module domains. A plugin route normally gets its deps via
 its own `solves` graph, so `requires[]` is rarely needed here — it is the primary
 mechanism for PROJECT routes (whose `__project__` scope has no graph); see
-[11_PROJECT.md](11_PROJECT.md) "Per-route `requires`". Either way, every
+the [project-layer docs](https://github.com/AlfaCode-Team/hkm-project-layer/blob/main/docs/PROJECT.md) "Per-route `requires`". Either way, every
 `requires[]` domain is validated at BOOT — an unknown domain fails the build.
 
 ---
@@ -116,36 +122,23 @@ return $builder
 
 ---
 
-## Registered Plugins
+## Which Plugins Exist
 
-| Plugin | Namespace | Solves |
-|---|---|---|
-| SiteSEO | `Plugins\SiteSEO\` | `seo.management` |
-| I18n | `Plugins\I18n\` | `i18n.translation` |
-| Logger | `Plugins\Logger\` | `logging.application` |
-| Crypto | `Plugins\Crypto\` | `crypto.services` |
-| Database | `Plugins\Database\` | `database.management` |
-| Authorization | `Plugins\Authorization\` | `authorization.policy` |
-| Audit | `Plugins\Audit\` | `audit.trail` |
-| Settings | `Plugins\Settings\` | `tenant.settings` |
-| SocialAuth | `Plugins\SocialAuth\` | `auth.social` |
-| Commands | `Plugins\Commands\` | `system.commands` |
-| Edge | `Plugins\Edge\` | `edge.routing` |
-| DevTools | `Plugins\DevTools\` | `dev.tooling` |
+`hkm plugins domains` lists every installed plugin with the `solves` domain
+it claims — live and authoritative. This repository keeps no static catalogue;
+one would go stale, and it already had.
 
-Infrastructure plugins (port adapters / pipeline stages, no routes) — see
-[20_FIRST_PARTY_PLUGINS.md](20_FIRST_PARTY_PLUGINS.md) for the full list and the
-module-activation notes (on-demand vs essential):
+**A plugin documents itself, in its own repository.** Each one ships a
+`README.md` (what it is, how to install it) and a `CLAUDE.md` (its contract,
+its `config[]`, and the rules specific to it); some also ship a `docs/` deep
+dive. `module.json` is the authoritative source for `requires[]`, `exposes[]`,
+`emits[]` and `config[]` — read it there rather than from any summary.
 
-| Plugin | Solves | Provides | Activation |
-|---|---|---|---|
-| Storage | `storage.local` | `StoragePort` (local + S3) | on-demand |
-| HttpClient | `http.client` | `HttpClientPort` (cURL) | on-demand |
-| Session | `session.management` | `SessionPort` (file/array/cookie drivers) | essential |
-| Cookie | `http.cookies` | `CookieJar` + flush stage | essential |
-| RedisCache | `cache.redis` | `CachePort` + `QueuePort` | essential |
-| SecurityFilters | `http.security_filters` | global hooks: CORS, SecureHeaders. Route-filter aliases: `auth`, `throttle`, `hmac`, `shield` | hooked + filters |
-| Tenancy | `tenancy.routing` | `TenantRegistryContract` + `TenantConnectionResolverContract` + `MembershipServiceContract` + `InvitationServiceContract` (database-per-tenant routing + selection/invitation flows; STRICT: every request must resolve a tenant or 404 — no unscoped passthrough; refresh tokens in `Plugins\Auth`; `requires: ["database.management"]` — route-level `requires[]` carry auth/user/audit for its own endpoints) | essential (declare `"essentials": ["tenancy.routing"]` in proj.json) |
+```
+✗ Documenting a plugin's behaviour, API, env vars or wiring in this repository —
+  the copy in the kernel is the one that goes stale
+✗ Inferring a plugin's requires[] from a table anywhere — open its module.json
+```
 
 ---
 
@@ -199,9 +192,22 @@ The resource-resolution model (project-over-plugin, deterministic at boot) is de
 
 ## Adding a New Plugin (Checklist)
 
-1. `mkdir -p plugins/{Name}/{API/Contracts,API/Dto,API/IntegrationEvents,Application/Services,Domain/Entities,Domain/ValueObjects,Domain/Events,Infrastructure/Http,Infrastructure/Persistence}`
-2. Write `plugins/{Name}/module.json` — set `"type": "module"`, `"solves"`, routes with `Plugins\\{Name}\\...` handlers
-3. Implement all layers under `namespace Plugins\{Name}\...`
-4. Write `plugins/{Name}/Provider.php` — `namespace Plugins\{Name};` implements `ModuleContract`
-5. Add `Plugins\{Name}\Provider::class` to the relevant `projects/*/bootstrap/app.php`
-6. Run `composer dump-autoload` if the new namespace isn't picked up automatically
+1. `hkm plugins create {name}` scaffolds `plugins/{Name}/` from `templates/plugin/`.
+   By hand: `mkdir -p plugins/{Name}/{API/Contracts,API/Dto,API/IntegrationEvents,Application/Services,Domain/Entities,Domain/ValueObjects,Domain/Events,Infrastructure/Http,Infrastructure/Persistence}`
+2. Write `plugins/{Name}/module.json` — `"type": "module"`, a `"solves"` domain no
+   other module claims, routes with `Plugins\\{Name}\\...` handlers, and **every
+   env var the plugin reads** in `config[]` (with a `default` wherever one exists —
+   that is the value `hkm plugins enable` seeds into the project `.env`).
+3. Implement all layers under `namespace Plugins\{Name}\...`, obeying the five
+   access rules.
+4. Write `plugins/{Name}/Provider.php` — `namespace Plugins\{Name};` implements
+   `ModuleContract`; `solves()`/`requires()`/`exposes()` must mirror `module.json`.
+5. Add `Plugins\{Name}\Provider::class` to the relevant
+   `projects/*/bootstrap/app.php` `withModules([...])`.
+6. Run `composer dump-autoload` if the new namespace isn't picked up automatically.
+7. Test it with the **Ground** plugin (`PluginGround::for(Provider::class)`) — a
+   real kernel boot in a temp workspace, not a hand-rolled bootstrap. Gate CI on
+   `hkm plugin:check`.
+8. If it is going to its own repository, give it a `README.md` (install +
+   capability) and a `CLAUDE.md` (its contract, `config[]` and plugin-specific
+   rules). Those two files are where the plugin is documented — not in the kernel.

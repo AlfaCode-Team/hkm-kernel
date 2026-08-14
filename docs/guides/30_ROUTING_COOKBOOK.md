@@ -5,7 +5,7 @@ below is what it actually produced. Copy, adjust the handler, done.
 
 Recipes live in `module.json` (a plugin) or `proj.json` (a project) — the shape is
 identical. See [02_MODULE.md](02_MODULE.md) for the complete key reference and
-[11_PROJECT.md](11_PROJECT.md) for project-side wiring.
+the [project-layer docs](https://github.com/AlfaCode-Team/hkm-project-layer/blob/main/docs/PROJECT.md) for project-side wiring.
 
 ---
 

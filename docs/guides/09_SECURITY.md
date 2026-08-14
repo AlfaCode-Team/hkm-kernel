@@ -157,47 +157,44 @@ new CsrfTokenLayer(
 );
 ```
 
-### Auth plugin layers — `JwtAuthLayer` / `PersonalAccessTokenLayer`
+### Token verification is a plugin's job
 
-```php
-// Provided by Plugins\Auth (the kernel ships NO JWT code). You add them to
-// withSecurity([...]) alongside CsrfTokenLayer.
-//   JwtAuthLayer                — verifies a Bearer JWT (iss/aud/exp, jti deny-list),
-//                                 builds Identity from claims (incl. the `tnt` tenant claim).
-//   PersonalAccessTokenLayer    — verifies long-lived personal access tokens.
-// Session-based auth is a separate after.load stage (SessionAuthStage), not a gateway layer.
-// All signature/token comparisons are timing-safe (hash_equals()).
-```
+**The kernel ships no JWT, API-key or session token validator, deliberately.** It
+defines `SecurityLayerContract` and runs whatever layers a project passes to
+`withSecurity([...])`; an auth plugin supplies the verifiers. Which layers exist,
+what claims they read and how they are configured is that plugin's documentation,
+not the kernel's.
 
-### Tenant context on the Identity (`tnt` claim — multi-tenant control plane)
+What the kernel guarantees regardless of the plugin: a layer **never throws** (it
+returns a verdict), a missing credential means **anonymous rather than denied**
+(public routes keep working), and a denial costs **zero module loading**.
 
-`Identity.tenantId` carries the authenticated tenant for database-per-tenant
-routing. `Plugins\Auth\Security\JwtAuthLayer` reads it from the signed **`tnt`**
-claim (legacy `tenant` accepted for BC) and defaults it to **`''` (empty)**:
+### Tenant context on the Identity (`tenantId`)
 
-```php
-$tenant = (string) ($claims['tnt'] ?? $claims['tenant'] ?? '');
-$identity = new Identity(userId: $claims['sub'], tenantId: $tenant, /* … */);
-```
+`Identity.tenantId` is the only multi-tenancy the KERNEL knows about: an
+immutable string it carries and hands to whatever runs next. The kernel does not
+resolve tenants, own a registry, or know what a tenant database is — an auth
+plugin populates the field, and a tenancy plugin acts on it.
 
-- **Empty tenant claim ≠ central access.** `AuthService::issueJwt()` mints NO
-  tenant at login — but `TenantContextStage` routes STRICTLY: with no tenant
-  claim, the remembered cookie hint and then the Host identifier must still
-  resolve one, or the request 404s (no unscoped passthrough). Login/picker/public
-  pages therefore live on a host that is itself assigned to a tenant;
-  control-plane reads pin the central connection explicitly.
-- **Non-empty tenant** is routed to its isolated database by
-  `Plugins\Tenancy`'s `TenantContextStage` (hooked `after.load`), which rebinds
-  `DatabasePort` in the request container. Mint a tenant-scoped token ONLY after
-  the user selects a tenant and membership is verified against the central
-  `user_tenants` table; re-check membership each request so a revoked seat loses
-  access before the token expires.
-- **Control-plane plugins pin to central.** `Plugins\User` (the global `users`
-  identity table) and `Plugins\Auth` (`personal_access_tokens`) resolve the
-  `DatabaseConnectionManagerContract` **default** connection, NOT the per-request
-  (tenant-rebound) `DatabasePort` — so identity I/O never lands in a tenant DB.
-  Because the `tnt` claim is signed it cannot be forged, but it is still a hint,
-  not authority: authorization keys on `(userId, tenantId, role/permission)`.
+Three rules bind every consumer of that field, and they are kernel-level
+guarantees rather than any one plugin's behaviour:
+
+- **The tenant id is a HINT, not authority.** Whatever set it — a signed claim, a
+  cookie, a host label — authorization still keys on
+  `(userId, tenantId, role/permission)`, re-checked against the store that owns
+  memberships. A signature proves the value survived transit unmodified; it does
+  not prove the seat still exists.
+- **Empty is not "central access".** An absent tenant means *unresolved*, not
+  *privileged*. Any component that treats a missing tenant as permission to read
+  a shared/central store must say so explicitly and pin that connection itself.
+- **A per-request rebind goes in the request-scoped container.** A plugin that
+  rebinds `DatabasePort` for a tenant binds it into the `ModuleContainer`
+  (discarded on `reset()`), never `CoreContainer` and never a static. Under
+  OpenSwoole a leaked binding means one tenant's request served from another
+  tenant's database.
+
+How a tenant is identified, routed, provisioned and revoked belongs to the
+Tenancy, Auth and User plugins, and is documented in their repositories.
 
 ---
 
@@ -247,7 +244,7 @@ $kernel->withSecurity([
 ```
 
 Rate limiting and IP filtering are not added here — a route opts into them with the
-SecurityFilters `throttle` / `shield` filters (see `20_FIRST_PARTY_PLUGINS.md`).
+SecurityFilters `throttle` / `shield` route filters (see the [SecurityFilters plugin](https://github.com/AlfaCode-Team/hkm-plugin-security-filters)).
 
 ---
 
