@@ -100,6 +100,12 @@ hkm version          # shows every install and which one your PATH runs
   system path no longer prefixes `sudo` unconditionally, which broke on the
   containers and CI images where a system install is most useful and `sudo` is
   frequently absent.
+- **A failed `.deb` install could still report success.** The fallback path
+  treated `apt-get -f install` exiting 0 as evidence the package had landed, but
+  it exits 0 whenever it finds nothing to repair — so a `dpkg -i` that failed for
+  any non-dependency reason (a truncated download, a corrupt `.deb`) was reported
+  as "updated" with the previous kernel still installed. The dependency repair is
+  now followed by a second `dpkg -i`, and that result alone is the verdict.
 
 ## [1.3.1] - 2026-08-12
 
