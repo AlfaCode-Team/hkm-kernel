@@ -109,7 +109,7 @@ if (!function_exists('psp_require_kernel_autoload')) {
         // (3) The installed kernel, via HKM_KERNEL_HOME.
         //
         // This is how `hkm` installs itself — a system install under
-        // /opt/hkm-kernel, or a user install under ~/.local/share/hkm/kernel —
+        // /opt/hkm-kernel, or a user install under ~/.local/lib/hkm-kernel —
         // and without it that kernel is invisible to PHP. `hkm run` papered
         // over the gap by exporting PSP_GLOBAL_AUTOLOAD for its child, so the
         // dev server worked and NOTHING else did: the same project served by
@@ -127,18 +127,24 @@ if (!function_exists('psp_require_kernel_autoload')) {
             $candidates[] = rtrim($composerHome, '/\\') . '/vendor/autoload.php';
         }
 
-        // (5)+(6) Default global Composer homes on Linux/macOS, plus the
-        // standard `hkm upgrade --user` install path — the one place a kernel
-        // lands when the operator has no root and never exported anything.
+        // (5)+(6) Default global Composer homes on Linux/macOS, plus the user
+        // install path — the one place a kernel lands when the operator has no
+        // root and never exported anything.
+        //
+        // The user path is tried BEFORE the system one below. A machine can
+        // hold both, and the user install is the one that user chose to manage
+        // (`hkm upgrade` targets it without root); falling to /opt first would
+        // run a kernel they may not even have write access to.
         $home = getenv('HOME');
         if (is_string($home) && $home !== '') {
             $home = rtrim($home, '/\\');
             $candidates[] = $home . '/.config/composer/vendor/autoload.php'; // current default
             $candidates[] = $home . '/.composer/vendor/autoload.php';        // legacy default
-            $candidates[] = $home . '/.local/share/hkm/kernel/vendor/autoload.php';
+            $candidates[] = $home . '/.local/lib/hkm-kernel/vendor/autoload.php';   // install.sh / hkm upgrade --user
+            $candidates[] = $home . '/.local/share/hkm/kernel/vendor/autoload.php'; // pre-1.4 --user target
         }
 
-        // (7) The system install path used by the .deb / install.sh.
+        // (7) The system install path used by the .deb.
         $candidates[] = '/opt/hkm-kernel/vendor/autoload.php';
 
         // Try each candidate; the first one that makes the kernel class

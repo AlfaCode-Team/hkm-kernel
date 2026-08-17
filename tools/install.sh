@@ -83,13 +83,44 @@ if [ "$DO_UNINSTALL" -eq 1 ]; then
   exit 0
 fi
 
-# ── a system install would shadow this one ──────────────────────────────────
+# ── what is already on this machine ─────────────────────────────────────────
+# Installing over an existing install is the ordinary case, not an error — but
+# the two are independent, upgrade separately, and PATH silently decides which
+# launcher a bare `hkm` runs. Reporting both up front is what turns "I installed
+# it and the version did not change" into something the reader can see coming.
+kernel_version() { # $1 = kernel root → prints the stamped version, or nothing
+  [ -f "$1/composer.json" ] || return 0
+  sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1/composer.json" | head -1
+}
+
+SYS_ROOT=/opt/hkm-kernel
+SYS_VER="$(kernel_version "$SYS_ROOT")"
+OLD_VER="$(kernel_version "$DEST")"
+
+if [ -d "$SYS_ROOT" ] || [ -d "$DEST" ]; then
+  say "Existing installs on this machine:"
+  [ -d "$SYS_ROOT" ] && printf '    system  %-28s %s\n' "$SYS_ROOT" "${SYS_VER:-unstamped}"
+  [ -d "$DEST" ]     && printf '    user    %-28s %s\n' "$DEST"     "${OLD_VER:-unstamped}"
+fi
+
 # /usr/bin usually precedes ~/.local/bin on PATH, so a leftover .deb install
 # silently wins and the user debugs the wrong copy.
-if [ -x /usr/bin/hkm ] && [ "$PREFIX" = "$HOME/.local" ]; then
+if [ -x /usr/bin/hkm ] && [ "$BINDIR" = "$HOME/.local/bin" ]; then
   warn "A system-wide hkm exists at /usr/bin/hkm (installed from the .deb)."
-  warn "It will take priority on PATH over this user install."
-  warn "Remove it first with:  sudo apt remove hkm-kernel"
+  warn "It comes FIRST on PATH, so a bare 'hkm' will still run that one."
+  warn "Either remove it (sudo apt remove hkm-kernel), or put $BINDIR ahead of"
+  warn "/usr/bin in your PATH. 'hkm version' shows both installs at any time."
+fi
+
+# The pre-1.4 'hkm upgrade --user' target. It is NOT self-locatable, so it could
+# only ever be reached through a config pin — and that pin is read by every
+# launcher on the machine, which is how a user install came to redirect the
+# system launcher's kernel. Nothing writes there now; say it is being left.
+LEGACY_USER="${XDG_DATA_HOME:-$HOME/.local/share}/hkm/kernel"
+if [ -f "$LEGACY_USER/composer.json" ] && [ "$LEGACY_USER" != "$DEST" ]; then
+  warn "An older user kernel remains at $LEGACY_USER"
+  warn "It is superseded by this install and is no longer updated."
+  warn "Delete it once 'hkm version' shows the new one active."
 fi
 
 # ── acquire the tarball ─────────────────────────────────────────────────────
@@ -190,22 +221,38 @@ cp "$SRC/bin/hkm-config" "$BINDIR/hkm-config"
 chmod +x "$BINDIR/hkm" "$BINDIR/hkm-config"
 ok "Installed to $DEST"
 
-# ── repoint a stale kernel pin ──────────────────────────────────────────────
-# This is not cosmetic. The launcher loads ~/.config/hkm/config.env into its
-# environment BEFORE resolving (main.zig), and resolveHome() checks
-# HKM_KERNEL_HOME FIRST — ahead of self-location. So a pin left over from an
-# earlier install at a different path silently wins, and `hkm` keeps running the
-# OLD kernel while this one sits unused. Repoint it, or self-location never gets
-# a look in.
+# ── drop a kernel pin this install makes redundant ──────────────────────────
+# The launcher loads ~/.config/hkm/config.env into its environment before
+# resolving. That file is shared by EVERY hkm on the machine, so a pin written
+# for one install redirected the other one too — a .deb launcher reporting 1.3.1
+# while running a kernel out of the user's home.
+#
+# The bin/ + lib/ layout above is self-locating (the launcher probes
+# "<parent-of-its-own-dir>/lib/hkm-kernel"), so this install needs no pin at
+# all. Removing one is therefore strictly better than repointing it: a repointed
+# pin still applies machine-wide, while no pin lets each launcher find its own
+# kernel. A pin aimed somewhere ELSE is an operator's deliberate choice about a
+# custom layout and is only reported.
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}/hkm/config.env"
 if [ -f "$CFG" ]; then
   PINNED="$(sed -n 's/^[[:space:]]*HKM_KERNEL_HOME[[:space:]]*=[[:space:]]*//p' "$CFG" | tail -1)"
-  if [ -n "$PINNED" ] && [ "$PINNED" != "$DEST" ]; then
-    warn "config.env pins HKM_KERNEL_HOME=$PINNED"
-    warn "That would override this install. Repointing it to $DEST"
-    "$BINDIR/hkm-config" set-kernel-home "$DEST" >/dev/null 2>&1 \
-      || die "could not repoint HKM_KERNEL_HOME — edit $CFG by hand, then re-run"
-    ok "Repointed HKM_KERNEL_HOME"
+  if [ -n "$PINNED" ]; then
+    if [ "$PINNED" = "$DEST" ]; then
+      "$BINDIR/hkm-config" unset HKM_KERNEL_HOME >/dev/null 2>&1 \
+        && ok "Removed the redundant HKM_KERNEL_HOME pin (the launcher self-locates)"
+    elif [ "$PINNED" = "$LEGACY_USER" ]; then
+      # The pre-1.4 '--user' target. Not a custom layout an operator chose — a
+      # location this very install supersedes, and the one a machine that hit
+      # the cross-scope hijack is pinned to. Leaving it would keep a superseded
+      # kernel as the fallback for every launcher here, so remove it: the user
+      # kernel it named has just been replaced by the one at $DEST.
+      "$BINDIR/hkm-config" unset HKM_KERNEL_HOME >/dev/null 2>&1 \
+        && ok "Removed the HKM_KERNEL_HOME pin to the superseded $PINNED"
+    else
+      warn "config.env pins HKM_KERNEL_HOME=$PINNED"
+      warn "This install does not need it, and it is shared with every other hkm"
+      warn "on this machine. Clear it with:  hkm-config unset HKM_KERNEL_HOME"
+    fi
   fi
 fi
 
@@ -247,13 +294,16 @@ case ":${PATH}:" in
     ;;
 esac
 
-# ── pin config + move the registry out of the kernel tree ───────────────────
-# `hkm-config check` is the canonical step: it pins HKM_KERNEL_HOME, then
-# creates ~/.local/share/hkm and MIGRATES projects.json + platform.json out of
-# the kernel tree into it (ensureUserdata in config.zig). After this, an upgrade
-# cannot touch the registry at all — it no longer lives in the replaced tree.
+# ── move the registry out of the kernel tree ────────────────────────────────
+# `hkm-config check` creates ~/.local/share/hkm and MIGRATES projects.json +
+# platform.json out of the kernel tree into it (ensureUserdata in config.zig).
+# After this, an upgrade cannot touch the registry at all — it no longer lives
+# in the replaced tree.
+#
+# It no longer pins HKM_KERNEL_HOME for a self-locating layout like this one;
+# see the pin section above for why a machine-wide pin was the wrong default.
 if [ -x "$BINDIR/hkm-config" ]; then
-  say "Pinning configuration…"
+  say "Checking configuration…"
   # It exits non-zero when vendor/ is absent, which is the expected state after
   # --no-composer — so only surface that as a problem when composer did run.
   if ! "$BINDIR/hkm-config" check >/dev/null 2>&1; then
@@ -274,6 +324,17 @@ fi
 
 printf '\n'
 ok "Installed for $(id -un) only; nothing was written outside your home."
+
+# State the version transition explicitly. "Installed" with no number is what
+# leaves someone unsure whether anything changed — especially when another
+# install on the machine is what their PATH actually resolves.
+NEW_VER="$(kernel_version "$DEST")"
+if [ -n "$OLD_VER" ] && [ -n "$NEW_VER" ] && [ "$OLD_VER" != "$NEW_VER" ]; then
+  printf '  Version: %s -> %s\n' "$OLD_VER" "$NEW_VER"
+elif [ -n "$NEW_VER" ]; then
+  printf '  Version: %s\n' "$NEW_VER"
+fi
+
 if [ "$DOCTOR_OK" -eq 0 ]; then
   printf '  Some requirements are not met yet — see "Must fix" above.\n'
   printf '  Installing PHP and its extensions needs an administrator; everything\n'
@@ -283,3 +344,6 @@ printf '  Kernel:  %s\n' "$DEST"
 printf '  Config:  %s/hkm/config.env\n' "${XDG_CONFIG_HOME:-$HOME/.config}"
 printf '  Data:    %s/hkm\n' "${XDG_DATA_HOME:-$HOME/.local/share}"
 printf '  Remove:  %s --uninstall\n' "$0"
+printf '\n'
+printf '  Every install on this machine, and which one your PATH runs:  hkm version\n'
+printf '  Update this one later (no root):                              hkm upgrade\n'

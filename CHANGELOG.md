@@ -6,6 +6,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-08-17
+
+Fixes a class of failure that made installing or upgrading on a machine with an
+existing install appear to do nothing. A machine can hold BOTH a system install
+(`.deb` → `/opt/hkm-kernel` + `/usr/bin`) and a user install (tarball →
+`~/.local`); the CLI did not model that, and every symptom below followed from
+the same gap.
+
+**If you are upgrading from 1.3.1 or earlier, the old launcher cannot install
+the user scope.** Install it from the release instead — the fixed `hkm upgrade`
+takes over from there:
+
+```sh
+curl -fsSL https://github.com/AlfaCode-Team/hkm-kernel/releases/latest/download/install.sh | sh
+hkm version          # shows every install and which one your PATH runs
+```
+
+### Added
+- **`hkm version` reports every install on the machine**, not just the launcher's
+  own compile-time stamp: the kernel version in each scope (read from that
+  kernel's `composer.json`), the launcher serving it and the version IT was built
+  as, and an arrow on the one this invocation resolves. It also names the states
+  that make a later "my upgrade did nothing" report inevitable — another `hkm`
+  earlier on `PATH`, a kernel with no `vendor/`, a stale config pin. `hkm
+  --version` is unchanged and still prints one line for scripts.
+- **`hkm upgrade --user` / `--system`** to force a scope. Without either, the
+  target is chosen from privilege — root → system, otherwise → user — so
+  `sudo hkm upgrade` and `hkm upgrade` are two predictable commands rather than
+  one command whose target depends on machine state.
+- **`hkm-config unset <KEY>`**, for clearing a stale `HKM_KERNEL_HOME`.
+- `hkm doctor` gained an **Installs** table: both scopes, their versions and
+  whether each has resolved dependencies.
+
+### Changed
+- **Kernel resolution ranks sources by how specific they are to the invocation**
+  (`tools/src/lib/kernel.zig`): an exported `HKM_CLI_PATH` / `HKM_KERNEL_HOME`,
+  then self-location relative to the launcher's own binary, then a
+  `config.env` pin, then `/opt/hkm-kernel`. The pin was previously checked
+  first. It still applies wherever self-location genuinely fails — a custom
+  prefix — but no longer overrides an install sitting next to the binary.
+  A launcher in a system bin directory (`/usr/bin`) claims `/opt/hkm-kernel` at
+  the self-location step, since no relative probe can reach it from there.
+- **`hkm upgrade --user` installs to `~/.local/lib/hkm-kernel`**, matching
+  `install.sh`, instead of `~/.local/share/hkm/kernel`. The old path sits outside
+  every self-location probe, so it could only ever be reached through a
+  machine-wide pin — which is what created the cross-scope hijack below. An
+  install left at the old location is detected and reported, not silently used.
+- **`install.sh` removes a redundant or superseded `HKM_KERNEL_HOME` pin**
+  rather than repointing it. A repointed pin is still read by every launcher on
+  the machine; no pin lets each one find its own kernel. A pin aimed at a genuine
+  custom layout is reported and left alone. It also lists the installs already
+  present with their versions, and prints `Version: old -> new` when it finishes.
+- **`hkm-config check` no longer pins `HKM_KERNEL_HOME` for a self-locating
+  layout** — writing one on behalf of whichever install ran it last is how the
+  shared pin came to exist. It removes one that has become redundant.
+- `hkm upgrade --local` obeys the same scope rule (non-root installs to the user
+  scope, creating it if absent) and installs the launcher into that scope's `bin`
+  directory rather than always `/usr/bin`.
+- The scaffolded `kernel-autoload.php` tries `~/.local/lib/hkm-kernel` before
+  `/opt/hkm-kernel`, so a project run under PHP-FPM or systemd resolves the
+  kernel its owner actually manages. The pre-1.4 user path is still tried.
+
+### Fixed
+- **One install silently ran the other's kernel.** `~/.config/hkm/config.env` is
+  read by every `hkm` on the machine, and `HKM_KERNEL_HOME` was checked before
+  self-location — so whichever installer wrote that pin last redirected the other
+  install too. A `.deb` launcher would report its own version while running a
+  kernel out of the user's home, and upgrading either scope could not move the
+  number on screen.
+- **`hkm upgrade` could not update a user install on Linux.** It only ever
+  fetched the `.deb` and shelled out to `sudo apt-get`, despite the user-local
+  tarball being the documented default since 1.3.1. Because `PATH` usually
+  resolves `~/.local/bin` before `/usr/bin`, the command reported success and the
+  very next invocation ran the old launcher unchanged. The user scope now
+  installs from the tarball via its own `install.sh`, with no `sudo` anywhere in
+  that path.
+- **Upgrade decisions used the wrong version.** `hkm upgrade` compared the
+  LAUNCHER's compile-time stamp against the latest release tag, then went on to
+  replace a KERNEL somewhere else — two numbers that differ exactly when the
+  launcher on `PATH` belongs to the other scope. Versions are now read from the
+  kernel being replaced, and the command names the other scope when it is also
+  behind instead of reporting an unqualified "you are on the latest version".
+- **A `--local` install could never report what it was.** It copied the
+  checkout's `composer.json`, which carries no `version` field by design, so
+  `hkm version` read "unstamped" forever and the next upgrade had nothing to
+  compare. The `git describe` version is now recorded as semver build metadata
+  (`1.3.1-2-g34abb2c` → `1.3.1+2.g34abb2c`), which Composer accepts and which
+  semver excludes from precedence — a change of spelling, not of meaning. A
+  release build still stamps the exact tag or nothing.
+- A `--system` upgrade run without root now says so once, up front, with the
+  command that works, instead of failing one permission error at a time. The
+  system path no longer prefixes `sudo` unconditionally, which broke on the
+  containers and CI images where a system install is most useful and `sudo` is
+  frequently absent.
+
 ## [1.3.1] - 2026-08-12
 
 Supersedes 1.3.0, which was tagged from a commit that never reached `master`

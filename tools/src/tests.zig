@@ -36,9 +36,12 @@ test {
     _ = @import("commands/ui.zig");
     _ = @import("commands/update.zig");
     _ = @import("commands/upgrade.zig");
+    _ = @import("commands/version.zig");
     _ = @import("config.zig");
     _ = @import("constants.zig");
     _ = @import("lib/banner.zig");
+    _ = @import("lib/composer_version.zig");
+    _ = @import("lib/install_scope.zig");
     _ = @import("lib/inspector/dashboard.zig");
     _ = @import("lib/inspector/meminspector.zig");
     _ = @import("lib/inspector/tracked.zig");

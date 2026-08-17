@@ -7,9 +7,22 @@
 //!   hkm-config set-kernel-home <p> # pin HKM_KERNEL_HOME
 //!   hkm-config set-autoload <p>    # pin HKM_GLOBAL_AUTOLOAD (vendor/autoload.php)
 //!   hkm-config set-dev-home <p>    # pin HKM_DEV_HOME (dev checkout used by --dev)
+//!   hkm-config unset <KEY>         # remove a key (e.g. a stale HKM_KERNEL_HOME)
 //!
 //! "check" resolves the kernel (env → relative to this binary → /opt/hkm-kernel)
-//! and, if the config file is missing or stale, writes HKM_KERNEL_HOME for you.
+//! and fills in what is missing.
+//!
+//! WHY IT NO LONGER PINS HKM_KERNEL_HOME UNCONDITIONALLY
+//! -----------------------------------------------------
+//! This file is read by EVERY hkm launcher on the machine, and a machine can
+//! hold two installs (the .deb's /opt and a user's ~/.local — see
+//! lib/install_scope.zig). Writing HKM_KERNEL_HOME here on behalf of whichever
+//! install ran `check` last therefore redirected the OTHER install's kernel
+//! too: /usr/bin/hkm reported version 1.3.1 while running a kernel out of the
+//! user's home. So the pin is now written only when it is actually needed —
+//! when the launcher cannot find its kernel by self-locating relative to its
+//! own binary. For the standard layouts (both installers produce one) it is
+//! left absent, and each launcher resolves its own install independently.
 
 const std = @import("std");
 const kernel = @import("lib/kernel.zig");
@@ -76,6 +89,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
         prompt.ok("HKM_DEV_HOME saved. Use `hkm <command> --dev` to target it.");
         return;
     }
+    if (std.mem.eql(u8, action, "unset") or std.mem.eql(u8, action, "clear")) {
+        if (args.len < 3) return usage();
+        const removed = userconfig.unset(allocator, io, &env, args[2]) catch |e| {
+            prompt.err(@errorName(e));
+            std.process.exit(1);
+        };
+        if (removed) {
+            prompt.ok(try std.fmt.allocPrint(allocator, "{s} removed.", .{args[2]}));
+            prompt.muted("verify what the launcher resolves now with: hkm version");
+        } else {
+            prompt.muted(try std.fmt.allocPrint(allocator, "{s} was not set — nothing to do.", .{args[2]}));
+        }
+        return;
+    }
     if (std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "configure")) {
         std.process.exit(try runCheck(allocator, io, &env));
     }
@@ -85,11 +112,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
 fn usage() void {
     prompt.section("hkm-config");
-    prompt.item("hkm-config", "check config; auto-configure if incomplete");
+    prompt.item("hkm-config", "check config; fill in what is missing");
     prompt.item("hkm-config print", "show the config file path + contents");
-    prompt.item("hkm-config set-kernel-home <p>", "pin the kernel root");
+    prompt.item("hkm-config set-kernel-home <p>", "pin the kernel root (only needed for a custom layout)");
     prompt.item("hkm-config set-autoload <p>", "pin vendor/autoload.php");
     prompt.item("hkm-config set-dev-home <p>", "pin the development kernel checkout used by --dev");
+    prompt.item("hkm-config unset <KEY>", "remove a key — e.g. a stale HKM_KERNEL_HOME");
 }
 
 fn runCheck(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !u8 {
@@ -104,13 +132,15 @@ fn runCheck(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !u8 {
     prompt.item("exists", if (util.fileExists(io, cfg)) "yes" else "no (will create)");
 
     // 1. Locate the kernel.
-    const home = (try kernel.resolveHome(allocator, io, env)) orelse {
+    const resolved = try kernel.resolveHomeDetailed(allocator, io, env);
+    const home = resolved.root orelse {
         prompt.blank();
         prompt.err("no kernel found.");
         prompt.item("fix", "install the hkm-kernel package, or: hkm-config set-kernel-home <path>");
         return 1;
     };
     prompt.item("kernel home", home);
+    prompt.item("resolved via", kernel.sourceLabel(resolved.source));
 
     // 2. Check kernel pieces.
     const autoload = try std.fs.path.join(allocator, &.{ home, "vendor", "autoload.php" });
@@ -120,10 +150,35 @@ fn runCheck(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !u8 {
     prompt.item("vendor/autoload.php", if (have_vendor) "present" else "MISSING");
     prompt.item("projects registry", if (have_registry) "present" else "absent (no projects registered yet)");
 
-    // 3. Ensure HKM_KERNEL_HOME is persisted and current.
+    // 3. Persist HKM_KERNEL_HOME only when the launcher genuinely needs it.
+    //
+    //    Self-location is per-install and cannot be affected by the other
+    //    scope; a pin in this file is shared by every launcher on the machine.
+    //    So a pin is written only when self-location failed — and an existing
+    //    one that has become redundant is REMOVED, because leaving it is what
+    //    let a user install silently redirect the system launcher's kernel.
     const saved = try userconfig.get(allocator, io, env, "HKM_KERNEL_HOME");
+    const self_locating = resolved.source == .self_located or resolved.source == .default;
     var wrote = false;
-    if (saved == null or !std.mem.eql(u8, saved.?, home)) {
+
+    if (self_locating) {
+        if (saved != null) {
+            if (std.mem.eql(u8, util.trimSlash(saved.?), util.trimSlash(home))) {
+                if (try userconfig.unset(allocator, io, env, "HKM_KERNEL_HOME")) {
+                    prompt.item("HKM_KERNEL_HOME", "removed — redundant, the launcher self-locates");
+                    wrote = true;
+                }
+            } else {
+                // Points elsewhere: an operator's deliberate choice, or a stale
+                // pin from another install. Not ours to delete silently, but it
+                // must not be mistaken for the kernel resolved above.
+                prompt.warn("config.env pins HKM_KERNEL_HOME at a different path.");
+                prompt.item("pinned", saved.?);
+                prompt.item("in use", home);
+                prompt.item("clear it", "hkm-config unset HKM_KERNEL_HOME");
+            }
+        }
+    } else if (saved == null or !std.mem.eql(u8, saved.?, home)) {
         try userconfig.set(allocator, io, env, "HKM_KERNEL_HOME", home);
         wrote = true;
     }
@@ -154,11 +209,12 @@ fn runCheck(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !u8 {
     }
 
     if (wrote) {
-        prompt.ok("configuration written — HKM_KERNEL_HOME + HKM_USERDATA_DIR pinned.");
+        prompt.ok("configuration written.");
     } else {
         prompt.ok("configuration is complete.");
     }
     prompt.muted("verify the runtime with: hkm doctor");
+    prompt.muted("see every install on this machine with: hkm version");
     return 0;
 }
 

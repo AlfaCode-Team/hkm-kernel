@@ -79,6 +79,81 @@ Note `/usr/bin` normally precedes `~/.local/bin` on `PATH`, so a leftover `.deb`
 install silently shadows a user install. `install.sh` warns when it sees one;
 remove it with `sudo apt remove hkm-kernel`.
 
+## Two installs on one machine
+
+A system install and a user install **coexist by design** and are updated
+separately. Everything below follows from that, and `hkm version` is the command
+that shows the whole picture at once:
+
+```
+$ hkm version
+  scope   kernel                        kernel version   launcher
+  system  /opt/hkm-kernel               1.3.1            /usr/bin/hkm (1.3.1)
+→ user    ~/.local/lib/hkm-kernel       1.4.0            ~/.local/bin/hkm (1.4.0)
+```
+
+Three versions are in play and they can all differ: the **launcher** binary's
+compile-time stamp, the **kernel** on disk (from its `composer.json`), and one
+of each per scope. `hkm --version` still prints just this launcher's, for
+scripts.
+
+### Which install does `hkm upgrade` touch?
+
+Privilege decides, so the two forms are two predictable commands rather than one
+command with a machine-dependent target:
+
+| Command | Target | Artifact |
+|---|---|---|
+| `hkm upgrade` | `~/.local` (this user) | the linux `.tar.gz` + its `install.sh` |
+| `sudo hkm upgrade` | `/opt` + `/usr/bin` | the `.deb`, via apt |
+| `hkm upgrade --user` / `--system` | forces either | as above |
+
+`hkm upgrade --check` reports the scope you asked about and names the *other*
+one when it is also behind — because "you are on the latest version" is
+misleading when the launcher your `PATH` resolves belongs to the scope that was
+not checked.
+
+Versions come from the **kernel being replaced**, never from `banner.version()`.
+Comparing the launcher's compile-time stamp to the latest tag answered "is this
+binary current" while the command went on to replace a kernel somewhere else.
+
+### Kernel resolution, and why a config pin no longer wins
+
+`~/.config/hkm/config.env` is read by **every** `hkm` on the machine. When
+`HKM_KERNEL_HOME` was checked first, whichever installer wrote it last silently
+redirected the other install:
+
+```
+$ /usr/bin/hkm --version   → 1.3.1                       # the .deb's launcher
+$ /usr/bin/hkm doctor
+  kernel root  ~/.local/share/hkm/kernel                 # …the USER's kernel
+  resolved via HKM_KERNEL_HOME override
+```
+
+Upgrading either scope then looked like a no-op. Resolution now ranks sources by
+how specific they are to *this* invocation (`src/lib/kernel.zig`):
+
+1. `HKM_CLI_PATH` / `HKM_KERNEL_HOME` **exported in the real environment**
+2. **self-location** relative to the launcher's own executable — per-install by
+   construction, so the other scope cannot affect it. A launcher in a system bin
+   dir (`/usr/bin`) claims `/opt/hkm-kernel` here, since no relative probe can
+   reach it from there
+3. `HKM_KERNEL_HOME` from `config.env` — now a **fallback**, for custom layouts
+   self-location genuinely cannot find
+4. `/opt/hkm-kernel`
+
+So a pin still works wherever it was actually needed; it no longer overrides an
+install sitting next to the binary. `hkm-config check` writes one only when
+self-location failed, and `hkm-config unset HKM_KERNEL_HOME` clears a stale one.
+
+### `hkm upgrade --local`
+
+Installs the current checkout over an installed kernel, obeying the same scope
+rule (non-root → your user install, which it creates if absent). It stamps the
+`git describe` version into the destination `composer.json`, so the result can
+report what it is — without that, a locally installed kernel read `unstamped`
+forever and had nothing to compare on the next upgrade.
+
 ## Layout
 
 ```

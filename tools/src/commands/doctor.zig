@@ -24,6 +24,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const run_cmd = @import("run.zig");
+const install_scope = @import("../lib/install_scope.zig");
 const kernel = @import("../lib/kernel.zig");
 const prompt = @import("../lib/prompt.zig");
 const userconfig = @import("../lib/userconfig.zig");
@@ -173,6 +174,46 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         }
     }
 
+    // ── Installs ────────────────────────────────────────────────────────────
+    //
+    // Listed before the kernel section because the two scopes are the context
+    // everything below it is read in. A machine can hold both, they upgrade
+    // separately, and PATH silently decides which launcher a bare `hkm` runs —
+    // so "which kernel am I even looking at" has to be answered first.
+    const home_early = try kernel.resolveHomeDetailed(allocator, io, env);
+    prompt.section("Installs");
+    var install_rows: std.ArrayList([]const []const u8) = .empty;
+    var any_install = false;
+    for ([_]install_scope.Scope{ .system, .user }) |sc| {
+        const inst = install_scope.detect(allocator, io, env, sc);
+        if (inst.present) any_install = true;
+
+        const active: []const u8 = blk: {
+            const root = home_early.root orelse break :blk " ";
+            break :blk if (std.mem.eql(u8, util.trimSlash(root), util.trimSlash(inst.root))) "→" else " ";
+        };
+
+        try install_rows.append(allocator, try allocator.dupe([]const u8, &.{
+            active,
+            sc.label(),
+            inst.root,
+            if (!inst.present) "not installed" else install_scope.versionLabel(inst.version),
+            if (!inst.present) "-" else if (inst.vendor) OK else "no vendor/",
+        }));
+
+        if (inst.legacy_root) |legacy| {
+            rep.hint(try std.fmt.allocPrint(
+                allocator,
+                "a stale user kernel remains at {s} — migrate with `hkm upgrade --user`, then delete it",
+                .{legacy},
+            ));
+        }
+    }
+    prompt.table(allocator, &.{ "", "scope", "kernel root", "version", "deps" }, install_rows.items);
+    if (!any_install) {
+        rep.hint("no kernel installed in either scope — `hkm upgrade --user` installs one without root");
+    }
+
     // ── Kernel ──────────────────────────────────────────────────────────────
     prompt.section("Kernel");
     const k = try kernel.resolve(allocator, io, env);
@@ -181,7 +222,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     prompt.item("cli present", if (k.exists) OK else "MISSING — reinstall or set HKM_KERNEL_HOME");
     if (!k.exists) rep.fail("kernel CLI missing — reinstall, or: hkm-config set-kernel-home <path>");
 
-    const home_opt = try kernel.resolveHome(allocator, io, env);
+    const home_opt = home_early.root;
     var vendor_ok = false;
     if (home_opt) |home| {
         prompt.item("kernel root", home);
@@ -234,15 +275,21 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         prompt.item("exists", if (util.fileExists(io, cfg)) "yes" else "no (defaults in use)");
     }
 
-    // A pin that points somewhere other than the resolved kernel is the quiet
-    // failure this check exists for: the launcher reads config.env BEFORE
-    // self-locating, so a stale pin keeps an OLD kernel in use after a reinstall.
+    // A config-file pin is shared by EVERY launcher on the machine, so one left
+    // behind by a user install used to redirect the system launcher's kernel
+    // too. Self-location now outranks it (lib/kernel.zig), which makes a
+    // leftover pin harmless but still worth removing: it is consulted whenever
+    // a launcher cannot self-locate, and that is a hard failure to read.
     if (try userconfig.get(allocator, io, env, "HKM_KERNEL_HOME")) |pin| {
-        const stale = if (home_opt) |h| !std.mem.eql(u8, util.trimSlash(pin), util.trimSlash(h)) else true;
         prompt.item("HKM_KERNEL_HOME", pin);
-        if (stale) {
-            prompt.warn("pinned kernel differs from the one in use — the pin wins.");
-            rep.hint("repoint it: hkm-config set-kernel-home <the kernel you want>");
+        const in_use = if (home_opt) |h| std.mem.eql(u8, util.trimSlash(pin), util.trimSlash(h)) else false;
+        if (home_early.source == .kernel_home_config) {
+            prompt.warn("this kernel comes from the config pin — the launcher could not self-locate one.");
+        } else if (!in_use) {
+            prompt.warn("the pin points at a different kernel than the one in use (self-location wins).");
+            rep.hint("remove the stale pin: hkm-config unset HKM_KERNEL_HOME");
+        } else {
+            rep.hint("the pin is redundant (self-location finds the same kernel): hkm-config unset HKM_KERNEL_HOME");
         }
     } else {
         prompt.item("HKM_KERNEL_HOME", "not pinned (self-locating)");
