@@ -10,6 +10,7 @@ const ui_cmd = @import("commands/ui.zig");
 const cli_cmd = @import("commands/cli.zig");
 const doctor_cmd = @import("commands/doctor.zig");
 const upgrade_cmd = @import("commands/upgrade.zig");
+const version_cmd = @import("commands/version.zig");
 const kernel = @import("lib/kernel.zig");
 const util = @import("lib/util.zig");
 const userconfig = @import("lib/userconfig.zig");
@@ -31,10 +32,10 @@ fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
     prompt.item("hkm module [create|delete]", "scaffold a first-party kernel package (modules/)");
     prompt.item("hkm ui [sync|list|link|clean]", "federate enabled plugins' UIs into the frontend");
     prompt.item("hkm update <path|name>", "refresh a project's kernel registry entry");
-    prompt.item("hkm upgrade [--check]", "check for / apply a kernel update");
-    prompt.item("hkm upgrade --local", "install THIS checkout over the installed kernel");
+    prompt.item("hkm upgrade [--check]", "update YOUR install; sudo hkm upgrade updates the system one");
+    prompt.item("hkm upgrade --local", "install THIS checkout over an installed kernel");
     prompt.item("hkm doctor", "diagnose the local environment");
-    prompt.item("hkm version", "show the HKM banner + version (also --version, -v)");
+    prompt.item("hkm version", "kernel version in each install scope (also --version, -v)");
     prompt.item("hkm help", "show this help");
     prompt.item("hkm <cmd> --dev", "use the development kernel (this monorepo) instead of the installed stable copy");
     prompt.item("hkm <cmd> --mem", "print the memory inspector dashboard when the command finishes (debug builds)");
@@ -253,8 +254,9 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         return 0;
     }
     if (std.mem.eql(u8, cmd, "version")) {
-        banner.print(allocator, io, &env_map);
-        return 0;
+        var scope = CmdScope.begin(mm, "version");
+        defer scope.end();
+        return try version_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "upgrade") or std.mem.eql(u8, cmd, "self-update")) {
         var scope = CmdScope.begin(mm, "upgrade");
