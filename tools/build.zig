@@ -59,9 +59,13 @@ pub fn build(b: *std.Build) void {
     // imports like `@import("../constants.zig")` resolve inside the module.
     // Running `zig test src/lib/memory.zig` directly makes src/lib the module
     // root and that import fails, which is misleading rather than useful.
+    // The stamper's logic lives in lib/composer_version.zig — it is shared with
+    // `hkm version` / `hkm upgrade`, which READ the field the stamper writes.
+    // Testing the library rather than the executable wrapper is what keeps the
+    // read and write halves verified against each other.
     const stamp_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/stamp.zig"),
+            .root_source_file = b.path("src/lib/composer_version.zig"),
             .target = target,
             .optimize = optimize,
         }),
@@ -69,7 +73,7 @@ pub fn build(b: *std.Build) void {
 
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/tests.zig"),
             .target = target,
             .optimize = optimize,
         }),
@@ -101,6 +105,11 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+
+    // Installed so it can be run and tested directly. Without this the only
+    // copies live in .zig-cache under content-hashed directories, and verifying
+    // its behaviour against real composer means guessing which one is current.
+    b.installArtifact(stamper);
 
     if (!std.mem.eql(u8, version, "0.0.0-dev")) {
         const stamp_run = b.addRunArtifact(stamper);

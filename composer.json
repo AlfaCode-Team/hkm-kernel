@@ -82,7 +82,8 @@
         "psr-4": {
             "AlfacodeTeam\\PhpServicePlatform\\": "src/",
             "AlfacodeTeam\\PhpServicePlatform\\System\\": "src/System/",
-            "Project\\": "projects/"
+            "Project\\": "projects/",
+            "Plugins\\": "plugins/"
         },
         "files": [
             "src/Kernel/Support/helpers.php"

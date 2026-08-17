@@ -1,0 +1,15 @@
+{
+  "name": "prefixed",
+  "version": "1.0.0",
+  "solves": "prefixed.demo",
+  "type": "module",
+  "requires": [],
+  "exposes": [],
+  "routePrefix": "/api/v1",
+  "routeFilters": ["auth", "throttle:60,1"],
+  "routes": [
+    { "method": "GET",  "path": "/things",      "handler": "Fix\\C@index", "name": "things.index" },
+    { "method": "POST", "path": "/things",      "handler": "Fix\\C@store", "filters": ["throttle:5,1"] },
+    { "method": "GET",  "path": "/things/{id:num}", "handler": "Fix\\C@show" }
+  ]
+}

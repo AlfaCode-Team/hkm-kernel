@@ -1,15 +1,57 @@
 //! Kernel location resolution shared by the launcher passthrough (main.zig) and
 //! `hkm doctor`. Given the environment, returns the path to the kernel's PHP CLI
 //! (`<kernel>/bin/hkm`) that the launcher invokes as `php <cli> …`.
+//!
+//! RESOLUTION ORDER, AND WHY A CONFIG PIN NO LONGER WINS
+//! ----------------------------------------------------
+//! A machine can hold two installs at once — the .deb's /opt/hkm-kernel and a
+//! user's ~/.local/lib/hkm-kernel (see lib/install_scope.zig). Both launchers
+//! read the SAME ~/.config/hkm/config.env, and HKM_KERNEL_HOME used to be
+//! checked before anything else. So whichever installer wrote that pin last
+//! silently redirected the other install too:
+//!
+//!     $ /usr/bin/hkm --version          → 1.3.1   (the .deb's launcher)
+//!     $ /usr/bin/hkm doctor
+//!       kernel root  /home/me/.local/share/hkm/kernel     ← the USER's kernel
+//!       resolved via HKM_KERNEL_HOME override
+//!
+//! Upgrading either scope then appeared to do nothing, because the version on
+//! screen came from a launcher whose kernel belonged to the other install. The
+//! order below fixes that by ranking the sources by how specific they are to
+//! THIS invocation:
+//!
+//!   1. HKM_CLI_PATH / HKM_KERNEL_HOME exported in the real environment —
+//!      this command's explicit instruction, always wins.
+//!   2. Self-location relative to this launcher's own executable, which is
+//!      per-install by construction and cannot be affected by the other one.
+//!      For a launcher in a system bin dir (/usr/bin) that includes claiming
+//!      /opt/hkm-kernel, since no relative probe can reach it from there.
+//!   3. HKM_KERNEL_HOME from config.env — now a FALLBACK, for installs at a
+//!      custom path that self-location genuinely cannot find.
+//!   4. /opt/hkm-kernel, the last-resort default.
+//!
+//! The behaviour change is narrow: a config pin still works whenever the
+//! launcher cannot self-locate a kernel, which is the case it was added for. It
+//! no longer overrides an install that is sitting right next to the binary.
 
 const std = @import("std");
+const install_scope = @import("install_scope.zig");
+const userconfig = @import("userconfig.zig");
 const util = @import("util.zig");
 
 const Io = std.Io;
 const EnvMap = std.process.Environ.Map;
 
 /// How the kernel CLI path was determined — surfaced by `hkm doctor`.
-pub const Source = enum { cli_path_env, kernel_home_env, self_located, default };
+pub const Source = enum {
+    cli_path_env,
+    /// HKM_KERNEL_HOME exported in the real environment.
+    kernel_home_env,
+    /// HKM_KERNEL_HOME from ~/.config/hkm/config.env (a fallback, not an override).
+    kernel_home_config,
+    self_located,
+    default,
+};
 
 pub const Resolved = struct {
     path: []const u8,
@@ -23,40 +65,51 @@ fn envGet(allocator: std.mem.Allocator, map: *EnvMap, key: []const u8) !?[]const
     return try allocator.dupe(u8, v);
 }
 
+/// HKM_KERNEL_HOME, split by where it came from.
+const Pin = struct {
+    value: []const u8,
+    /// From config.env rather than a real export — see the header.
+    from_config: bool,
+};
+
+fn kernelHomePin(allocator: std.mem.Allocator, env: *EnvMap) !?Pin {
+    const raw = (try envGet(allocator, env, "HKM_KERNEL_HOME")) orelse return null;
+    const v = util.trimSlash(std.mem.trim(u8, raw, " \t\r\n"));
+    if (v.len == 0) return null;
+    return .{ .value = v, .from_config = userconfig.isFileSourced(env, "HKM_KERNEL_HOME") };
+}
+
 /// Resolve the kernel PHP CLI path with full provenance (for diagnostics).
 pub fn resolve(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !Resolved {
-    // 1. Explicit overrides always win.
+    // 1. An explicit CLI path is the most specific instruction there is.
     if (try envGet(allocator, env, "HKM_CLI_PATH")) |v| {
         return .{ .path = v, .source = .cli_path_env, .exists = util.fileExists(io, v) };
     }
-    if (try envGet(allocator, env, "HKM_KERNEL_HOME")) |home| {
-        const p = try std.fs.path.join(allocator, &.{ home, "bin", "hkm" });
-        return .{ .path = p, .source = .kernel_home_env, .exists = util.fileExists(io, p) };
+
+    const pin = try kernelHomePin(allocator, env);
+
+    // 2. A REAL exported HKM_KERNEL_HOME outranks everything below it.
+    if (pin) |p| {
+        if (!p.from_config) {
+            const path = try std.fs.path.join(allocator, &.{ p.value, "bin", "hkm" });
+            return .{ .path = path, .source = .kernel_home_env, .exists = util.fileExists(io, path) };
+        }
     }
 
-    // 2. Self-locate the kernel RELATIVE to this launcher's own executable, so a
-    //    portable/zip/.app install needs no env var. Candidates cover every
-    //    bundle layout produced by tools/bundle.sh:
-    //      macOS .app:  <dir>/hkm  +  ../Resources/opt/hkm-kernel/bin/hkm
-    //      Windows zip: <dir>/hkm.exe + hkm-kernel/bin/hkm
-    //      portable:    <dir>/hkm  +  ../opt/hkm-kernel/bin/hkm
-    if (std.process.executableDirPathAlloc(io, allocator)) |dir| {
-        const rels = [_][]const []const u8{
-            &.{ dir, "..", "Resources", "opt", "hkm-kernel", "bin", "hkm" },
-            &.{ dir, "hkm-kernel", "bin", "hkm" },
-            &.{ dir, "..", "opt", "hkm-kernel", "bin", "hkm" },
-            &.{ dir, "..", "lib", "hkm-kernel", "bin", "hkm" },
-        };
-        for (rels) |parts| {
-            const cand = try std.fs.path.join(allocator, parts);
-            if (util.fileExists(io, cand)) {
-                return .{ .path = cand, .source = .self_located, .exists = true };
-            }
-        }
-    } else |_| {}
+    // 3. Self-locate relative to this launcher's own executable.
+    if (try selfLocateRoot(allocator, io)) |root| {
+        const path = try std.fs.path.join(allocator, &.{ root, "bin", "hkm" });
+        return .{ .path = path, .source = .self_located, .exists = util.fileExists(io, path) };
+    }
 
-    // 3. Default for a system package install (Linux .deb → /opt/hkm-kernel).
-    const def = try std.fs.path.join(allocator, &.{ "/opt", "hkm-kernel", "bin", "hkm" });
+    // 4. A config-file pin — the fallback for a custom install layout.
+    if (pin) |p| {
+        const path = try std.fs.path.join(allocator, &.{ p.value, "bin", "hkm" });
+        return .{ .path = path, .source = .kernel_home_config, .exists = util.fileExists(io, path) };
+    }
+
+    // 5. Default for a system package install (Linux .deb → /opt/hkm-kernel).
+    const def = try std.fs.path.join(allocator, &.{ install_scope.system_root, "bin", "hkm" });
     return .{ .path = def, .source = .default, .exists = util.fileExists(io, def) };
 }
 
@@ -79,34 +132,79 @@ fn isKernelRoot(io: Io, dir: []const u8) bool {
     return util.fileExists(io, marker);
 }
 
-/// Resolve the kernel ROOT directory (the folder holding composer.json, vendor/,
-/// projects/). Used by `run`, the registry, and `hkm-config`. Order:
-///   1. HKM_KERNEL_HOME
-///   2. self-located relative to THIS executable (installed .deb/.app/zip, or the
-///      dev monorepo when running repo/bin/hkm)
-///   3. /opt/hkm-kernel default
-/// Returns null when no kernel can be found.
-pub fn resolveHome(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !?[]const u8 {
-    if (env.get("HKM_KERNEL_HOME")) |h| {
-        if (h.len > 0) return util.trimSlash(h);
+/// The kernel root belonging to THIS launcher, found from its own location.
+///
+/// Candidates cover every layout tools/bundle.sh and tools/install.sh produce:
+///   macOS .app:  <dir>/hkm       + ../Resources/opt/hkm-kernel
+///   Windows zip: <dir>/hkm.exe   + hkm-kernel
+///   portable:    <dir>/hkm       + ../opt/hkm-kernel
+///   user install:<prefix>/bin/hkm + ../lib/hkm-kernel
+///   dev monorepo:repo/bin/hkm    + repo root
+///
+/// Plus one case that is NOT a relative probe: a launcher installed in a system
+/// bin directory belongs to the .deb, whose kernel is /opt/hkm-kernel by
+/// construction. There is no fixed relative path from /usr/bin to /opt, so
+/// without this branch the system launcher has no self-location at all and
+/// falls through to whatever pin a user-level installer happened to write —
+/// which is exactly the hijack described in the header.
+fn selfLocateRoot(allocator: std.mem.Allocator, io: Io) !?[]const u8 {
+    const dir = std.process.executableDirPathAlloc(io, allocator) catch return null;
+    const parent = std.fs.path.dirname(dir) orelse dir;
+
+    const rels = [_][]const []const u8{
+        &.{ parent, "Resources", "opt", "hkm-kernel" }, // macOS .app (MacOS→Contents)
+        &.{ dir, "hkm-kernel" }, // windows/portable zip
+        &.{ parent, "opt", "hkm-kernel" }, // portable
+        &.{ parent, "lib", "hkm-kernel" }, // install.sh (bin/ + lib/ pairing)
+        &.{parent}, // dev monorepo: repo/bin/hkm → repo root
+    };
+    for (rels) |parts| {
+        const cand = try std.fs.path.join(allocator, parts);
+        if (isKernelRoot(io, cand)) return cand;
     }
-    if (std.process.executableDirPathAlloc(io, allocator)) |dir| {
-        // parent = the dir ABOVE the executable's dir (normalized, no "..").
-        const parent = std.fs.path.dirname(dir) orelse dir;
-        const rels = [_][]const []const u8{
-            &.{ parent, "Resources", "opt", "hkm-kernel" }, // macOS .app (MacOS→Contents)
-            &.{ dir, "hkm-kernel" }, // windows/portable zip
-            &.{ parent, "opt", "hkm-kernel" }, // portable
-            &.{ parent, "lib", "hkm-kernel" },
-            &.{parent}, // dev monorepo: repo/bin/hkm → repo root
-        };
-        for (rels) |parts| {
-            const cand = try std.fs.path.join(allocator, parts);
-            if (isKernelRoot(io, cand)) return cand;
-        }
-    } else |_| {}
-    if (isKernelRoot(io, "/opt/hkm-kernel")) return "/opt/hkm-kernel";
+
+    if (install_scope.isSystemBinDir(dir) and isKernelRoot(io, install_scope.system_root)) {
+        return install_scope.system_root;
+    }
+
     return null;
+}
+
+/// Resolve the kernel ROOT directory (the folder holding composer.json, vendor/,
+/// projects/). Used by `run`, the registry, and `hkm-config`.
+///
+/// Same precedence as `resolve` — see the header. Returns null when no kernel
+/// can be found.
+pub fn resolveHome(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !?[]const u8 {
+    return (try resolveHomeDetailed(allocator, io, env)).root;
+}
+
+pub const ResolvedHome = struct {
+    root: ?[]const u8,
+    source: Source,
+};
+
+/// `resolveHome` with provenance, so a caller can act on HOW the kernel was
+/// found. `hkm-config check` uses it to avoid writing a pin for a kernel that
+/// self-location already reaches — writing one is what created the machine-wide
+/// pin that redirected the other install in the first place.
+pub fn resolveHomeDetailed(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !ResolvedHome {
+    const pin = try kernelHomePin(allocator, env);
+
+    if (pin) |p| {
+        if (!p.from_config) return .{ .root = p.value, .source = .kernel_home_env };
+    }
+
+    if (try selfLocateRoot(allocator, io)) |root| {
+        return .{ .root = root, .source = .self_located };
+    }
+
+    if (pin) |p| return .{ .root = p.value, .source = .kernel_home_config };
+
+    if (isKernelRoot(io, install_scope.system_root)) {
+        return .{ .root = install_scope.system_root, .source = .default };
+    }
+    return .{ .root = null, .source = .default };
 }
 
 /// Resolve the DEVELOPMENT kernel root by walking UP the directory tree from
@@ -132,8 +230,81 @@ pub fn resolveDevHome(allocator: std.mem.Allocator, io: Io) !?[]const u8 {
 pub fn sourceLabel(s: Source) []const u8 {
     return switch (s) {
         .cli_path_env => "HKM_CLI_PATH override",
-        .kernel_home_env => "HKM_KERNEL_HOME override",
+        .kernel_home_env => "HKM_KERNEL_HOME (exported)",
+        .kernel_home_config => "HKM_KERNEL_HOME (config.env fallback)",
         .self_located => "self-located (relative to launcher)",
         .default => "default (/opt/hkm-kernel)",
     };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test "an exported HKM_KERNEL_HOME still overrides everything" {
+    // The escape hatch has to keep working: a real export is this invocation's
+    // explicit instruction and must not be demoted along with the config file.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var env = EnvMap.init(a);
+    defer env.deinit();
+    try env.put("HKM_KERNEL_HOME", "/somewhere/custom");
+
+    const pin = (try kernelHomePin(a, &env)).?;
+    try std.testing.expectEqualStrings("/somewhere/custom", pin.value);
+    try std.testing.expect(!pin.from_config);
+}
+
+test "a config.env pin is marked as such so it can be demoted" {
+    // This is the regression guard for the reported bug: /usr/bin/hkm (v1.3.1)
+    // resolving its kernel to ~/.local/share/hkm/kernel because a user-level
+    // install had written that pin into the shared config file.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var env = EnvMap.init(a);
+    defer env.deinit();
+    try env.put("HKM_KERNEL_HOME", "/home/me/.local/share/hkm/kernel");
+    try env.put(userconfig.file_keys_marker, "HKM_KERNEL_HOME,HKM_USERDATA_DIR");
+
+    const pin = (try kernelHomePin(a, &env)).?;
+    try std.testing.expect(pin.from_config);
+}
+
+test "a pin's trailing slash is trimmed so comparisons hold" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var env = EnvMap.init(a);
+    defer env.deinit();
+    try env.put("HKM_KERNEL_HOME", "  /opt/hkm-kernel/  ");
+
+    try std.testing.expectEqualStrings("/opt/hkm-kernel", (try kernelHomePin(a, &env)).?.value);
+}
+
+test "an empty pin is treated as absent, not as the root directory" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var env = EnvMap.init(a);
+    defer env.deinit();
+    try env.put("HKM_KERNEL_HOME", "   ");
+
+    try std.testing.expect((try kernelHomePin(a, &env)) == null);
+}
+
+test "every source has a distinct human label" {
+    // doctor prints these; two sources sharing a label would make the one
+    // diagnostic that explains a hijack unable to distinguish its two causes.
+    const sources = [_]Source{ .cli_path_env, .kernel_home_env, .kernel_home_config, .self_located, .default };
+    for (sources, 0..) |a, i| {
+        for (sources[i + 1 ..]) |b| {
+            try std.testing.expect(!std.mem.eql(u8, sourceLabel(a), sourceLabel(b)));
+        }
+    }
 }

@@ -25,6 +25,8 @@ final class CompileServiceManifestStage implements BootStageContract
         private readonly array $moduleClasses,
         private readonly array $projectRoutes = [],
         private readonly ManifestReader $reader = new ManifestReader(),
+        /** Project route groups — routes may be declared ONLY inside these. */
+        private readonly array $projectGroups = [],
     ) {}
 
     public function run(): void
@@ -73,7 +75,7 @@ final class CompileServiceManifestStage implements BootStageContract
         // routes (Kernel::withRoutes). It has no module and no requires, so its
         // dependency graph is empty: the controller autowires from the request
         // container without running any module register().
-        if ($this->projectRoutes !== []) {
+        if ($this->projectRoutes !== [] || ($this->projectGroups['groups'] ?? []) !== []) {
             $services[CompileRouteManifestStage::PROJECT_SCOPE] = [
                 'name' => CompileRouteManifestStage::PROJECT_SCOPE,
                 'module' => null,

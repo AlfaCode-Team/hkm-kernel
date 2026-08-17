@@ -537,28 +537,26 @@ Domain      →  NOTHING EXTERNAL         (zero imports outside Domain/)
 
 ## Batteries included (plugins)
 
-Drop-in modules under `plugins/`, activated per project:
+The kernel ships **no** plugins and depends on none. Roughly thirty first-party
+plugins cover auth, users, tenancy, OAuth2, mail, storage, sessions, validation,
+i18n, templating and the SPA bridge — each its own package, owning exactly one
+domain.
 
-| Plugin | Domain | What you get |
-|---|---|---|
-| **Auth** | `auth.identity` | JWT / PAT / session issuance + verification, refresh-token rotation, guards |
-| **OAuth2** | `oauth.server` | Native OAuth 2.1 + OIDC server (auth code + PKCE, device code, JWKS, introspection) |
-| **User** | `user.management` | Central identity store, email verification, transactional outbox, audit log |
-| **Tenancy** | `tenancy.routing` | Multi-tenant DB routing, memberships, invitations, per-tenant isolation |
-| **Validation** | `validation.rules` | Request validation engine + `AbstractDto` (`rules()`), ~45 built-in rules |
-| **Mail** | `mail.delivery` | Native dependency-free mailer — SMTP/Sendmail/`mail()`, DKIM, attachments |
-| **Storage** | `storage.local` | `StoragePort` over local disk **or** S3 (Flysystem), signed temp URLs |
-| **Session / Cookie** | `session.management` / `http.cookies` | Encrypted sessions, flash, CSRF; queued encrypted cookies |
-| **HttpClient** | `http.client` | `HttpClientPort` (cURL) with idempotent-safe retries + coroutine backoff |
-| **View / ViteManifest / Pageflow** | frontend | PHP templating, Vite asset resolution, Inertia-style SPA bridge |
-| **SecurityFilters** | `http.security_filters` | CORS + secure headers; route-filter aliases `auth`, `throttle`, `hmac`, `shield` |
-| **I18n** | `i18n.translation` | File-based translator, pluralization, `Accept-Language` negotiation |
+```bash
+hkm plugins domains      # every plugin and the `solves` domain it claims
+hkm plugins enable auth  # install it, publish its assets, run its migrations
+```
 
-Each plugin ships its own `README.md` — e.g. [Auth](plugins/Auth/README.md),
-[Tenancy](plugins/Tenancy/README.md), [User](plugins/User/README.md),
-[OAuth2](plugins/OAuth2/README.md).
+Then add its `Provider` to the project bootstrap's `withModules([...])`.
+
+**Each plugin documents itself in its own repository** — `README.md` for what it
+is, `CLAUDE.md` for its contract and configuration, and `module.json` as the
+authoritative `requires[]` / `exposes[]` / `config[]`. This repository keeps no
+plugin catalogue: a static list here is the copy that goes stale, and it did.
+Repositories are at `github.com/AlfaCode-Team/hkm-plugin-<name>`.
 
 ---
+
 
 ## Development from source
 
@@ -608,7 +606,10 @@ Notes:
 - You can still cut a release manually at any time by pushing a `v*` tag.
 
 For deep dives, see the layer guides in [`docs/guides/`](docs/guides/) and the
-[CHANGELOG](CHANGELOG.md).
+[CHANGELOG](CHANGELOG.md). Those guides cover the kernel (`src/`) and the packages
+it runs on (`modules/`); the `Project\` layer is documented in
+[hkm-project-layer](https://github.com/AlfaCode-Team/hkm-project-layer), each
+plugin in its own repository, and the `hkm` CLI in [`tools/`](tools/README.md).
 
 ---
 

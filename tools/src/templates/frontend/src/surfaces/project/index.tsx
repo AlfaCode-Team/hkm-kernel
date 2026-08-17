@@ -1,6 +1,6 @@
 import "./styles/index.css";
 import { createRoot, hydrateRoot } from "react-dom/client";
-import { createPageflowApp } from "@pageflow/react";
+import { createPageflowApp, AppErrorBoundary } from "@pageflow/react";
 import { ThemeProvider } from "@providers/theme";
 
 // ── Project (public) surface bootstrap ───────────────────────────────────────
@@ -48,10 +48,18 @@ createPageflowApp({
   page: initialPage,
   resolve: resolveComponent,
   setup({ el, App, props }: { el: HTMLElement; App: any; props: any }) {
+    // The boundary is OUTSIDE the app: a throw in any page (including the
+    // "Page not found" resolveComponent raises) would otherwise unmount
+    // everything and leave a blank document — on the PUBLIC surface, to a
+    // visitor. It comes from @pageflow/react, not @pageflow/admin: it is
+    // dependency-free, and reaching for the admin entry would pull the whole
+    // shell into a marketing bundle.
     const tree = (
-      <ThemeProvider>
-        <App {...props} />
-      </ThemeProvider>
+      <AppErrorBoundary>
+        <ThemeProvider>
+          <App {...props} />
+        </ThemeProvider>
+      </AppErrorBoundary>
     );
     // Hydrate server-rendered HTML when present; otherwise mount fresh.
     if (el.hasChildNodes()) {

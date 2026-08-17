@@ -67,7 +67,7 @@
   <h1>The Kernel Guide</h1>
   <h2>How the Gated Demand Architecture kernel works, how to use it,<br>and why it differs from other frameworks<br>· Guide bilingue — English &amp; Français ·</h2>
   <div class="badges">
-    <span>PHP 8.2+</span><span>Gated Demand Architecture</span><span>Contributors</span><span>App Builders</span><span>Step-by-step</span><span>EN / FR</span>
+    <span>PHP 8.4+</span><span>Gated Demand Architecture</span><span>Contributors</span><span>App Builders</span><span>Step-by-step</span><span>EN / FR</span>
   </div>
   <div class="meta">
     Package: <strong>alfacode-team/php-service-platform</strong> &nbsp;·&nbsp; Namespace: AlfacodeTeam\PhpServicePlatform\Kernel\<br>
@@ -243,7 +243,7 @@ $request = Request::capture();
 $kernel->http()->handle($request)->send();</pre>
 
 <h2>4.4 TUTORIAL — Build a module from scratch (8 steps)</h2>
-<p>We rebuild the real <strong>Task</strong> plugin. It lives in <code>plugins/Task/</code> under the <code>Plugins\Task\</code> namespace and owns one domain: <code>task.management</code>.</p>
+<p>We build a worked example plugin, <strong>Task</strong>, under the <code>Plugins\Task\</code> namespace, owning one domain: <code>task.management</code>. <em>Note:</em> first-party plugins are not part of the kernel repository — each lives in its own repo (<code>AlfaCode-Team/hkm-plugin-&lt;slug&gt;</code>) and is installed into a project with <code>hkm plugins install</code>. Scaffold your own with <code>hkm plugins create Task</code>.</p>
 
 <h4>Step 1 — Declare the module in module.json (single source of truth)</h4>
 <div class="filename">plugins/Task/module.json</div>
@@ -524,9 +524,14 @@ $container->singleton(TransactionManager::class,
 </ol>
 
 <h2>5.6 Security gateway internals</h2>
-<pre>Request → FirewallLayer → RateLimiterLayer → CsrfTokenLayer → [Auth layer] → pipeline
-              ↓ deny(403)      ↓ deny(429)        ↓ deny(403)      ↓ deny(401)
-          ZERO module cost at every denial</pre>
+<pre>Request → CsrfTokenLayer → [Auth plugin: JwtAuthLayer] → [PersonalAccessTokenLayer] → pipeline
+               ↓ deny(403)            ↓ deny(401)                    ↓ deny(401)
+           ZERO module cost at every denial</pre>
+<p><strong>The kernel ships exactly one layer: <code>CsrfTokenLayer</code>.</strong> There is no kernel
+<code>FirewallLayer</code> and no kernel <code>RateLimiterLayer</code>. Token authentication comes from the
+<strong>Auth</strong> plugin; rate limiting (<code>throttle</code>) and IP filtering (<code>shield</code>) are
+<strong>SecurityFilters</strong> route filters, which run inside the pipeline once a route opts in — they need a
+<code>CachePort</code> and config, so they cannot be pre-module layers.</p>
 <p>A layer implements <code>check(Request): SecurityVerdict</code> and <strong>never throws</strong> — it returns <code>allow()</code> or <code>deny(code, reason)</code>. Layers are ordered cheapest-first so the cheapest rejection happens earliest. Authorization (role/permission checks) belongs in the <em>Service</em> layer, not the gateway. The kernel ships no JWT validator — token auth is provided by a project's Auth module as a layer hook registered in <code>boot()</code>.</p>
 
 <h1 class="sec">6. The Five Access Rules &amp; Exception Hierarchy</h1>
@@ -723,7 +728,7 @@ $kernel->container()    // → CoreContainer (matérialise en surface Cli)
 $kernel->requestTeardown() // après chaque requête sous OpenSwoole</pre>
 
 <h2>4.4 TUTORIEL — créer un module de zéro (8 étapes)</h2>
-<p>Nous reconstruisons le plugin réel <strong>Task</strong>, dans <code>plugins/Task/</code> sous l'espace de noms <code>Plugins\Task\</code>, possédant le domaine <code>task.management</code>.</p>
+<p>Nous construisons un plugin d'exemple, <strong>Task</strong>, sous l'espace de noms <code>Plugins\Task\</code>, possédant le domaine <code>task.management</code>. <em>Note :</em> les plugins de première partie ne font pas partie du dépôt du kernel — chacun possède son propre dépôt (<code>AlfaCode-Team/hkm-plugin-&lt;slug&gt;</code>) et s'installe dans un projet avec <code>hkm plugins install</code>. Créez le vôtre avec <code>hkm plugins create Task</code>.</p>
 
 <h4>Étape 1 — Déclarer dans module.json (source unique de vérité)</h4>
 <pre>{
@@ -926,9 +931,15 @@ $bus->assertDispatched(TaskCreatedIntegrationEvent::class, times: 1);</pre>
 </ol>
 
 <h2>5.6 Intérieur de la passerelle de sécurité</h2>
-<pre>Requête → FirewallLayer → RateLimiterLayer → CsrfTokenLayer → [couche Auth] → pipeline
-               ↓ deny(403)     ↓ deny(429)        ↓ deny(403)      ↓ deny(401)
-           COÛT MODULE NUL à chaque refus</pre>
+<pre>Requête → CsrfTokenLayer → [plugin Auth : JwtAuthLayer] → [PersonalAccessTokenLayer] → pipeline
+                ↓ deny(403)              ↓ deny(401)                     ↓ deny(401)
+            COÛT MODULE NUL à chaque refus</pre>
+<p><strong>Le kernel ne fournit qu'une seule couche : <code>CsrfTokenLayer</code>.</strong> Il n'existe pas de
+<code>FirewallLayer</code> ni de <code>RateLimiterLayer</code> dans le kernel. L'authentification par jeton provient
+du plugin <strong>Auth</strong> ; la limitation de débit (<code>throttle</code>) et le filtrage d'IP
+(<code>shield</code>) sont des filtres de route <strong>SecurityFilters</strong>, exécutés dans le pipeline lorsqu'une
+route les déclare — ils nécessitent un <code>CachePort</code> et de la configuration, donc ils ne peuvent pas être des
+couches pré-module.</p>
 <p>Une couche implémente <code>check(Request): SecurityVerdict</code> et <strong>ne lève jamais</strong>. L'autorisation (rôles/permissions) appartient à la couche <em>Service</em>. Le kernel ne fournit aucun validateur JWT — l'auth par jeton vient du module Auth du projet, sous forme de hook enregistré dans <code>boot()</code>.</p>
 
 <h1 class="sec">6. Les cinq règles d'accès et la hiérarchie d'exceptions</h1>
