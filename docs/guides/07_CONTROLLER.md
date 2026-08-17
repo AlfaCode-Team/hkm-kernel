@@ -253,53 +253,44 @@ public function upload(Request $request): Response
 
 ---
 
-## Base Controllers (project layer — `Project\Http\Controllers\`)
+## `RequestAware` — the kernel's only controller seam
 
-Two optional base classes live in `projects/Http/Controllers/` (namespace
-`Project\`). They are project-layer, NOT kernel, because view rendering and
-cookies are plugin concerns — the kernel stays renderer-agnostic.
+The kernel is renderer-agnostic and knows nothing about controller base classes.
+The single seam between the two is one interface:
 
-| Base | Use for | Coupling |
-|---|---|---|
-| `ApiController` | JSON endpoints | Pure kernel types (no plugin) |
-| `ViewController` | HTML/view endpoints | Injects `ViewRendererContract` (View plugin) |
+```php
+AlfacodeTeam\PhpServicePlatform\Kernel\Http\Contracts\RequestAware
+    public function setRequest(Request $request): static;
+```
 
-`ApiController` helpers: `ok()`, `created()`, `accepted()`, `noContent()`,
-`paginated()`, `okOrNotFound()`, `notFound()`, `forbidden()`, `unprocessable()`,
-`identity()`. `ViewController` helpers: `view()`, `viewNotFound()`, `redirect()`,
-`back()`.
-
-Both `use InteractsWithCookies` (trait wrapping every public `CookieJar` method:
-`cookie()`, `queueCookie()`, `rememberCookie()`, `forgetCookie()`,
-`hasQueuedCookie()`, `decryptCookie()`, `cookieJar()`).
-
-### RequestAware — actions take route params ONLY (no `$request`)
-
-Both bases implement the kernel contract
-`AlfacodeTeam\…\Kernel\Http\Contracts\RequestAware` (`setRequest(Request): static`).
-`ExecuteStage` detects it and:
+`ExecuteStage` checks `instanceof RequestAware` and, when true:
 
 - calls `setRequest($request)` with the container-bearing request BEFORE the action, then
-- invokes the action as `$method(...$routeParams)` — WITHOUT `$request`.
+- invokes the action as `$method(...$routeParams)` — **without** `$request`.
 
 Plain controllers (not `RequestAware`) keep the conventional
 `$method($request, ...$params)` signature — fully backward compatible.
 
 ```php
-use Project\Http\Controllers\ApiController;
-
-final class CartController extends ApiController        // RequestAware
+final class CartController implements RequestAware      // route params only
 {
-    public function show(string $id): Response          // route param only — no $request
+    public function show(string $id): Response
     {
-        $this->queueCookie('last_viewed', $id);         // request injected by the kernel
-        return $this->okOrNotFound($this->cart->find($id)?->toArray());
+        return Response::json($this->cart->find($id)?->toArray() ?? [], 200);
     }
 }
 ```
 
-The raw request is still available inside the action as `$this->request`; any
-cookie helper also accepts an explicit `?Request` override.
+```
+✗ Adding $request to a RequestAware action — it receives route params only
+✗ Coupling the kernel to a controller base class or a view renderer — this
+  interface is the whole contract
+```
+
+Optional base classes (`ApiController`, `ViewController`) and their concern
+traits are **project layer**, not kernel: view rendering and cookies are plugin
+concerns. They are documented in
+[hkm-project-layer](https://github.com/AlfaCode-Team/hkm-project-layer/blob/main/Http/Controllers/README.md).
 
 ---
 

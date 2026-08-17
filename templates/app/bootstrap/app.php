@@ -83,17 +83,13 @@ use Plugins\Database\Infrastructure\Pool\PoolConfiguration;
 // Plugins — module providers (registered into the kernel below).
 use Plugins\Crypto\Provider as CryptoProvider;
 use Plugins\Logger\Provider as LoggerProvider;
-use Plugins\I18n\Provider as I18nProvider;
 use Plugins\Database\Provider as DatabaseProvider;
 use Plugins\Commands\Provider as CommandsProvider;
 use Plugins\Storage\Provider as StorageProvider;
-use Plugins\HttpClient\Provider as HttpClientProvider;
 use Plugins\Validation\Provider as ValidationProvider;
 use Plugins\Session\Provider as SessionProvider;
 use Plugins\Cookie\Provider as CookieProvider;
 use Plugins\RedisCache\Provider as RedisCacheProvider;
-use Plugins\SiteSEO\Application\Listeners\EnqueueIndexNowListener;
-use Plugins\SiteSEO\Provider as SiteSeoModule;
 use Plugins\View\Provider as ViewModule;
 use Plugins\SecurityFilters\Provider as SecurityFiltersModule;
 
@@ -101,7 +97,7 @@ use Plugins\SecurityFilters\Provider as SecurityFiltersModule;
 // Flat layout: this directory's grandparent is the project root.
 $projectRoot = dirname(__DIR__, 2);
 
-// -----------------------------------------------------------------------------
+// ------------------------------ -----------------------------------------------
 // STEP 2 — DOMAIN RESOLUTION
 // Translate the request's Host header into a DomainContext (project face:
 // admin / api / project / public + any features). This stays in the project
@@ -174,10 +170,10 @@ if ($appKeys === [] && !in_array($appEnv, ['local', 'testing'], true)) {
 $ports = [
     CachePort::class => static fn(): InMemoryCache => new InMemoryCache(),
 
-    DatabasePort::class => static fn(): PdoDatabase => new PdoDatabase(
-        dsn: $env('DB_DSN', 'sqlite::memory:') ?? 'sqlite::memory:',
-        username: $env('DB_USERNAME'),
-        password: $env('DB_PASSWORD'),
+     DatabasePort::class => static fn(): MultiDriverDatabaseAdapter =>
+        new MultiDriverDatabaseAdapter((new DatabaseConfigurationFactory())->fromEnvironment()),
+    HashingPort::class => static fn(): PasswordHasher => new PasswordHasher(
+        cost: (int) ($env('HASH_BCRYPT_COST', '12') ?? '12'),
     ),
     HashingPort::class => static fn(): PasswordHasher => new PasswordHasher(
         cost: (int) ($env('HASH_BCRYPT_COST', '12') ?? '12'),
@@ -190,13 +186,6 @@ $ports = [
         // File-backed queue (cross-process, no Redis). RedisCache overrides this
         // when REDIS_HOST is set. Lets `php app/worker/run.php` drain real jobs.
     QueuePort::class => static fn(): FileQueue => new FileQueue($projectRoot . '/var/queue'),
-
-        // The SEO module subscribes EnqueueIndexNowListener to seo.url_published, but
-        // the EventBus resolves listeners from the CoreContainer — so bind it here
-        // with the QueuePort. (The factory receives the container.)
-    EnqueueIndexNowListener::class => static fn($c) => new EnqueueIndexNowListener(
-        $c->make(QueuePort::class),
-    ),
 
     // ── When you enable the User + Tenancy plugins ───────────────────────────
     // The User plugin subscribes ProvisionTenantProfileListener to user.registered
@@ -246,6 +235,14 @@ return Kernel::configure()
     // the synthetic '__project__' scope — no module register() runs for them.
     // Keep these controllers thin; real domain logic lives in plugins.
     ->withRoutes(EntryHelpers::projectRoutes($projectRoot))
+    // Route GROUPS from proj.json: a prefix / filters / requires / name
+    // prefix / SITE stated once for every route inside the group, and
+    // expanded into flat routes at boot. `site` is part of the route key,
+    // so one project can answer `GET /` differently per group of hosts.
+    ->withRouteGroups(EntryHelpers::projectRouteGroups($projectRoot))
+    // The hosts this project serves. A route grouped under a domain that is
+    // not in proj.json "domains" fails the boot — nothing could ever reach it.
+    ->withProjectDomains(EntryHelpers::projectDomains($projectRoot))
 
     // Project ROUTE POLICY declared in proj.json ("routePolicy": {"disable": []}).
     // A plugin OWNS its routes, but the project is the final authority: it can
@@ -286,10 +283,6 @@ return Kernel::configure()
         // plus crypto helpers other modules consume.
         CryptoProvider::class,
 
-        // I18n (solves: i18n.translation) — translation/localisation: message catalogues,
-        // locale negotiation, and the translator used by modules and views.
-        I18nProvider::class,
-
         // Validation (solves: validation.rules) — the shared request-validation
         // engine. Its boot() loads config/validation.php and registers the
         // CommonRules + FinancialRules packs. DTOs extend Plugins\Validation\
@@ -311,19 +304,10 @@ return Kernel::configure()
         // "requires": ["storage.local"].
         StorageProvider::class,
 
-        // HttpClient (solves: http.client) — the HttpClientPort for OUTBOUND
-        // HTTP (calling third-party APIs from gateways). Required by SiteSEO.
-        HttpClientProvider::class,
-
         // View (solves: view.rendering) — server-side PHP templating: layouts,
         // sections, the project-first view cascade and `namespace::view`
         // resolution. Routes opt in via "requires": ["view.rendering"].
         ViewModule::class,
-
-        // SiteSEO (solves: seo.management) — SEO toolkit: sitemaps, Open Graph,
-        // JSON-LD, robots, IndexNow. Exposes SeoServiceContract + the /api/seo/*
-        // routes. Needs http.client (above) for its network actions.
-        SiteSeoModule::class,
 
         // Edge (solves: edge.routing) — generates this host's web-server front
         // config from the project's domains: an nginx SNI stream splitter when
@@ -332,6 +316,17 @@ return Kernel::configure()
         // (.local/.test) domains go to /etc/hosts instead (dev only).
         // CLI: `hkm cli -p <project> edge:status | edge:apply | edge:hosts`.
         \Plugins\Edge\Provider::class,
+
+        // ── Not installed — add when you need them ───────────────────────
+        // Each is one command; it fetches the plugin, its dependencies, and
+        // wires them into this list for you.
+        //
+        //   hkm plugins install i18n        // i18n.translation  — __(), locales
+        //   hkm plugins install http-client // http.client       — outbound HTTP
+        //   hkm plugins install siteseo     // seo.management    — sitemaps, JSON-LD
+        //                                   //   (also needs http-client, and a
+        //                                   //   QueuePort-bound EnqueueIndexNowListener
+        //                                   //   in withPorts() for index-on-publish)
 
         // Identity stack (enable together in an app that needs accounts):
         //   \Plugins\User\Provider::class,      // user.management (identity + settings)

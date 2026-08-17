@@ -503,7 +503,14 @@ $kernel = require __DIR__ . '/../bootstrap/app.php';
 try {
     $request = Request::capture();
     if ($domain !== null) {
-        $request = $request->withAttribute('domain', $domain);
+        $request = $request
+            ->withAttribute('domain', $domain)
+            // The FACE (admin/api/project/public) and the HOST let a route declare
+            // where it exists. Both come from the host DomainResolver already
+            // VALIDATED against projects.json — never the raw Host header, which
+            // the client controls and could otherwise pick its own route table.
+            ->withAttribute('route_face', $domain->type->value)
+            ->withAttribute('route_host', $domain->host);
     }
     $kernel->http()->handle($request)->send();
 } catch (\Throwable $e) {

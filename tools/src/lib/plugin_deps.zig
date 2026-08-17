@@ -28,7 +28,7 @@ const Enabled = boot.Enabled;
 pub const Provider = struct {
     located: Located,
     solves: ?[]const u8 = null,
-    requires: []const []const u8 = &.{},
+    requires: []const sources.Requirement = &.{},
 
     pub fn name(self: Provider) []const u8 {
         return self.located.name;
@@ -56,10 +56,33 @@ pub fn catalogue(
             if (findByName(out.items, p) != null) continue; // first source wins (project shadows kernel)
 
             const meta = try sources.readModuleMeta(allocator, io, dir, p);
+
+            // Module-level and route-level requires are MERGED here.
+            //
+            // The kernel distinguishes them at runtime — a route-level domain
+            // is seeded into that one request's graph — but not at boot: a
+            // route naming a domain no registered module solves fails the whole
+            // build. So for installing and enabling they are one list. Reading
+            // only the module-level one is why a project with Tenancy booted
+            // straight into "Route [GET /tenants] requires unknown module
+            // domain [http.pageflow]": the walk fetched Tenancy's two declared
+            // dependencies and none of the four its routes need.
+            var reqs: std.ArrayList(sources.Requirement) = .empty;
+            if (meta) |m| {
+                for (m.requires) |r| try reqs.append(allocator, r);
+                for (m.route_requires) |r| {
+                    var seen = false;
+                    for (reqs.items) |e| {
+                        if (std.mem.eql(u8, e.domain, r.domain)) seen = true;
+                    }
+                    if (!seen) try reqs.append(allocator, r);
+                }
+            }
+
             try out.append(allocator, .{
                 .located = .{ .name = p, .source = src, .dir = dir },
                 .solves = if (meta) |m| m.solves else null,
-                .requires = if (meta) |m| m.requires else &.{},
+                .requires = reqs.items,
             });
         }
     }
@@ -106,7 +129,8 @@ fn visit(
     missing: *std.ArrayList([]const u8),
     rootFolder: []const u8,
 ) !void {
-    for (p.requires) |domain| {
+    for (p.requires) |req| {
+        const domain = req.domain;
         if (providerForDomain(cat, domain)) |dep| {
             // Don't list the plugin being enabled, and de-dupe.
             if (util.eqlIgnoreCase(dep.located.name, rootFolder)) continue;
@@ -144,8 +168,8 @@ pub fn enabledDependentsOf(
 /// Does `p` require `domain` directly or transitively (following providers)?
 fn dependsOnDomain(cat: []const Provider, p: Provider, domain: []const u8, skip: []const u8) bool {
     for (p.requires) |req| {
-        if (std.mem.eql(u8, req, domain)) return true;
-        const next = providerForDomain(cat, req) orelse continue;
+        if (std.mem.eql(u8, req.domain, domain)) return true;
+        const next = providerForDomain(cat, req.domain) orelse continue;
         if (util.eqlIgnoreCase(next.located.name, skip)) continue;
         if (dependsOnDomain(cat, next, domain, skip)) return true;
     }

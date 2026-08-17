@@ -152,25 +152,88 @@ pub fn listPluginDirs(allocator: std.mem.Allocator, io: Io, pluginsDir: []const 
     defer d.close(io);
     var it = d.iterate();
     while (try it.next(io)) |entry| {
-        if (entry.kind != .directory) continue;
         if (entry.name.len > 0 and entry.name[0] == '.') continue;
+
+        // A SYMLINK to a plugin counts. Projects reference a version in the
+        // shared store by linking it into their own plugins/, and a plain
+        // `kind != .directory` check reports that entry as `.sym_link` and
+        // skips it — making every store-linked plugin invisible to discovery,
+        // and to everything built on it (locate, the dependency catalogue,
+        // asset publishing, `plugins list`).
+        switch (entry.kind) {
+            .directory => {},
+            .sym_link => {
+                // Only follow links that actually resolve to a directory, so a
+                // dangling or file link is not mistaken for a plugin.
+                const target = std.fmt.allocPrint(allocator, "{s}/{s}", .{ util.trimSlash(pluginsDir), entry.name }) catch continue;
+                if (!util.dirExists(Dir.cwd(), io, target)) continue;
+            },
+            else => continue,
+        }
+
         try out.append(allocator, try allocator.dupe(u8, entry.name));
     }
 }
 
 // ── module.json ────────────────────────────────────────────────────────────────
 
+/// One entry of a module's `requires[]`.
+///
+/// A dependency is named by DOMAIN, never by repository — that is the framework
+/// being right: a module depends on a capability, not on who ships it. It does
+/// leave a plugin outside the platform's own catalogue with no way to say where
+/// its dependency comes from, so an entry may also be an object carrying that:
+///
+///   "requires": [
+///     "database.management",
+///     { "domain": "telemetry.exotic",
+///       "repo":   "https://github.com/acme/hkm-plugin-telemetry.git",
+///       "version": "^1.2" }
+///   ]
+///
+/// The string form stays exactly as it was — every existing module.json parses
+/// unchanged, and first-party plugins have no reason to write the long form.
+pub const Requirement = struct {
+    domain: []const u8,
+    /// Where to fetch the plugin providing `domain`, for domains this platform
+    /// has never heard of. Empty when the entry was a plain string.
+    repo: []const u8 = "",
+    /// A semver constraint ("^1.2"), an exact tag ("v1.2.0"), or a branch
+    /// ("main"). Empty means the newest release tag.
+    version: []const u8 = "",
+};
+
 pub const ModuleMeta = struct {
     name: ?[]const u8 = null,
     solves: ?[]const u8 = null,
     version: ?[]const u8 = null,
-    /// "requires" — the domains this module depends on (each a `solves` value of
-    /// another module, or a kernel port). Empty when absent.
-    requires: []const []const u8 = &.{},
+    /// "requires" — what this module depends on. Empty when absent.
+    requires: []const Requirement = &.{},
+    /// Domains named by INDIVIDUAL ROUTES (`routes[].requires[]`).
+    ///
+    /// Kept separate because they mean something different to the KERNEL — a
+    /// route-level entry is seeded into that one request's graph, not every
+    /// request's — but they are just as mandatory: CompileRouteManifestStage
+    /// fails the whole boot when a route names a domain no registered module
+    /// solves. A plugin whose routes require http.pageflow needs Pageflow
+    /// installed and enabled exactly as much as one that requires it up top.
+    route_requires: []const Requirement = &.{},
     /// "documentation" — preferred enable-time doc (string, or array joined).
     doc: ?[]const u8 = null,
     /// "description" — fallback doc text.
     description: ?[]const u8 = null,
+    /// "activation" — "essential" when the plugin only works if it is
+    /// registered into EVERY request.
+    ///
+    /// Most plugins are on-demand: the kernel loads them when a route needs
+    /// them, and that is strictly better. A few cannot be — a plugin whose
+    /// pipeline stage runs on every request needs its bindings present on every
+    /// request, and enabling it on-demand produces a project that installs
+    /// cleanly, boots cleanly, and throws at the first request instead
+    /// ("no TenantIdentifier is bound for this request"). Declaring it here
+    /// lets `hkm plugins enable` put it in the right list without the user
+    /// having to know.
+    activation: ?[]const u8 = null,
     /// "kernel" — semver constraint on the kernel this plugin supports
     /// (e.g. "^1.0"). Absent means "no opinion" and never blocks installation;
     /// see plugin_registry.checkKernel.
@@ -191,14 +254,140 @@ pub fn readModuleMeta(allocator: std.mem.Allocator, io: Io, pluginsDir: []const 
         .name = strField(parsed.object, "name"),
         .solves = strField(parsed.object, "solves"),
         .version = strField(parsed.object, "version"),
-        .requires = try strArrayField(allocator, parsed.object, "requires"),
+        .requires = try requiresField(allocator, parsed.object),
+        .route_requires = try routeRequiresField(allocator, parsed.object),
         .doc = try docField(allocator, parsed.object, "documentation"),
         .description = strField(parsed.object, "description"),
         .kernel = strField(parsed.object, "kernel"),
+        .activation = strField(parsed.object, "activation"),
     };
 }
 
-/// Read an array-of-strings field (e.g. "requires"). Returns an empty slice when
+/// Read "requires", accepting both the string and the object form.
+///
+/// An object without a usable "domain" is SKIPPED rather than defaulted: a
+/// requirement whose domain could not be read cannot be resolved, satisfied or
+/// reported, and inventing one would attach its repo to the wrong dependency.
+fn requiresField(allocator: std.mem.Allocator, obj: std.json.ObjectMap) ![]const Requirement {
+    const v = obj.get("requires") orelse return &.{};
+    if (v != .array) return &.{};
+
+    var out: std.ArrayList(Requirement) = .empty;
+    for (v.array.items) |item| {
+        // "tag" and "branch" are the same field to git — one ref to clone at.
+        // Named separately because a manifest saying "branch": "main" reads
+        // better than "version": "main".
+        const parsed = parseRequirement(item) orelse continue;
+        try out.append(allocator, parsed);
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+/// Collect every domain named by a route-level `requires[]`, de-duplicated.
+///
+/// Routes reach the manifest by three paths, and a dependency declared on ANY of
+/// them is equally mandatory — the boot fails when a route names a domain no
+/// registered module solves, wherever that route was written:
+///
+///   "routeRequires": [...]        a module-wide default applied to every route
+///   "routes":  [ { "requires" } ] a route declared at the top level
+///   "groups":  [ { "requires", "routes": [...], "groups": [...] } ]  nested
+///
+/// Missing the grouped ones would let `hkm plugins enable` resolve a plugin's
+/// dependencies, install them, and still produce a project that fails at boot.
+fn routeRequiresField(allocator: std.mem.Allocator, obj: std.json.ObjectMap) ![]const Requirement {
+    var out: std.ArrayList(Requirement) = .empty;
+    try collectRequires(allocator, obj, &out, 0);
+    return out.toOwnedSlice(allocator);
+}
+
+/// Matches CompileRouteManifestStage::MAX_GROUP_DEPTH — a self-referencing
+/// structure is rejected there, and must not spin here either.
+const max_group_depth: u8 = 16;
+
+/// Walk one route-declaration source: its module-wide `routeRequires`, each
+/// `routes[].requires[]`, and every nested group, recursively.
+fn collectRequires(
+    allocator: std.mem.Allocator,
+    obj: std.json.ObjectMap,
+    out: *std.ArrayList(Requirement),
+    depth: u8,
+) !void {
+    if (depth > max_group_depth) return;
+
+    // Module-wide / group-wide default.
+    if (obj.get("routeRequires")) |v| try appendRequirements(allocator, v, out);
+    if (obj.get("requires")) |v| {
+        // Only meaningful on a GROUP — a module's own top-level requires[] is
+        // read separately by requiresField(). Harmless either way: duplicates
+        // are dropped, and both lists name domains that must be installed.
+        if (depth > 0) try appendRequirements(allocator, v, out);
+    }
+
+    if (obj.get("routes")) |routes| {
+        if (routes == .array) {
+            for (routes.array.items) |route| {
+                if (route != .object) continue;
+                if (route.object.get("requires")) |reqs| {
+                    try appendRequirements(allocator, reqs, out);
+                }
+            }
+        }
+    }
+
+    if (obj.get("groups")) |groups| {
+        if (groups == .array) {
+            for (groups.array.items) |group| {
+                if (group != .object) continue;
+                try collectRequires(allocator, group.object, out, depth + 1);
+            }
+        }
+    }
+}
+
+/// Append every requirement in a `requires[]` value, skipping duplicates.
+fn appendRequirements(
+    allocator: std.mem.Allocator,
+    value: std.json.Value,
+    out: *std.ArrayList(Requirement),
+) !void {
+    if (value != .array) return;
+
+    for (value.array.items) |item| {
+        const parsed = parseRequirement(item) orelse continue;
+        var seen = false;
+        for (out.items) |e| {
+            if (std.mem.eql(u8, e.domain, parsed.domain)) seen = true;
+        }
+        if (!seen) try out.append(allocator, parsed);
+    }
+}
+
+/// One requires[] entry, in either the string or the object form.
+fn parseRequirement(item: std.json.Value) ?Requirement {
+    switch (item) {
+        .string => {
+            if (item.string.len == 0) return null;
+            return .{ .domain = item.string };
+        },
+        .object => {
+            const domain = strField(item.object, "domain") orelse return null;
+            if (domain.len == 0) return null;
+            return .{
+                .domain = domain,
+                .repo = strField(item.object, "repo") orelse
+                    strField(item.object, "remote") orelse
+                    strField(item.object, "url") orelse "",
+                .version = strField(item.object, "version") orelse
+                    strField(item.object, "tag") orelse
+                    strField(item.object, "branch") orelse "",
+            };
+        },
+        else => return null,
+    }
+}
+
+/// Read an array-of-strings field. Returns an empty slice when
 /// absent, not an array, or empty. Non-string elements are skipped.
 fn strArrayField(allocator: std.mem.Allocator, obj: std.json.ObjectMap, key: []const u8) ![]const []const u8 {
     const v = obj.get(key) orelse return &.{};
@@ -232,4 +421,101 @@ fn docField(allocator: std.mem.Allocator, obj: std.json.ObjectMap, key: []const 
         },
         else => return null,
     }
+}
+
+// ── tests ───────────────────────────────────────────────────────────────────
+
+/// Parse a module.json body and collect its route-level requires.
+fn testRouteRequires(allocator: std.mem.Allocator, json: []const u8) ![]const Requirement {
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, allocator, json, .{});
+    return routeRequiresField(allocator, parsed.object);
+}
+
+fn hasDomain(list: []const Requirement, domain: []const u8) bool {
+    for (list) |r| {
+        if (std.mem.eql(u8, r.domain, domain)) return true;
+    }
+    return false;
+}
+
+test "route requires are collected from top-level routes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const got = try testRouteRequires(arena.allocator(),
+        \\{ "routes": [ { "requires": ["view.rendering"] } ] }
+    );
+
+    try std.testing.expect(hasDomain(got, "view.rendering"));
+}
+
+test "route requires are collected from NESTED groups" {
+    // A plugin that moves its routes into groups[] declares the same mandatory
+    // dependencies — missing them would install cleanly and fail at boot.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const got = try testRouteRequires(arena.allocator(),
+        \\{
+        \\  "routeRequires": ["database.management"],
+        \\  "routes": [ { "requires": ["http.client"] } ],
+        \\  "groups": [
+        \\    { "requires": ["audit.trail"],
+        \\      "routes": [ { "requires": ["storage.local"] } ],
+        \\      "groups": [ { "routes": [ { "requires": ["view.rendering"] } ] } ] }
+        \\  ]
+        \\}
+    );
+
+    try std.testing.expect(hasDomain(got, "database.management")); // module-wide default
+    try std.testing.expect(hasDomain(got, "http.client"));         // top-level route
+    try std.testing.expect(hasDomain(got, "audit.trail"));         // the group itself
+    try std.testing.expect(hasDomain(got, "storage.local"));       // a route inside it
+    try std.testing.expect(hasDomain(got, "view.rendering"));      // a nested group
+}
+
+test "a module's own top-level requires is not double-counted here" {
+    // requiresField() already reads it; collecting it again would be harmless
+    // but muddies which list a domain came from.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const got = try testRouteRequires(arena.allocator(),
+        \\{ "requires": ["crypto.services"], "routes": [] }
+    );
+
+    try std.testing.expect(!hasDomain(got, "crypto.services"));
+}
+
+test "duplicate domains across groups are collected once" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const got = try testRouteRequires(arena.allocator(),
+        \\{
+        \\  "routes": [ { "requires": ["view.rendering"] } ],
+        \\  "groups": [ { "routes": [ { "requires": ["view.rendering"] } ] } ]
+        \\}
+    );
+
+    var count: usize = 0;
+    for (got) |r| {
+        if (std.mem.eql(u8, r.domain, "view.rendering")) count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), count);
+}
+
+test "a self-referencing group structure terminates" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // 40 levels — deeper than max_group_depth, which the compiler also rejects.
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    for (0..40) |_| try buf.appendSlice(std.testing.allocator, "{\"groups\":[");
+    try buf.appendSlice(std.testing.allocator, "{\"routes\":[{\"requires\":[\"deep.domain\"]}]}");
+    for (0..40) |_| try buf.appendSlice(std.testing.allocator, "]}");
+
+    const got = try testRouteRequires(arena.allocator(), buf.items);
+    _ = got; // reaching here at all is the assertion: it returned.
 }

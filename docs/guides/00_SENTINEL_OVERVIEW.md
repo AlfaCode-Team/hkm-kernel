@@ -7,7 +7,7 @@
 
 ## What HKM Kernel Is
 
-HKM Kernel is a PHP 8.2+ framework built on the **Gated Demand Architecture (GDA)** pattern.
+HKM Kernel is a PHP 8.4+ framework built on the **Gated Demand Architecture (GDA)** pattern.
 
 | Principle | Meaning |
 |---|---|
@@ -200,5 +200,4 @@ Always throw the exception type matching the layer. Never let a `\PDOException` 
 | `08_EVENTS.md` | Domain vs Integration events, EventBus, outbox |
 | `09_SECURITY.md` | SecurityGateway, layers, Identity, tokens |
 | `10_TESTING.md` | Test patterns, fakes, port doubles, strategies |
-| `11_PROJECT.md` | Bootstrap, port adapters, configuration wiring |
 | `12_WORKER.md` | Worker pipeline, jobs, retry, dead-letter queue |

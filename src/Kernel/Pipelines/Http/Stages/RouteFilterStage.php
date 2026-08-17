@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Stages;
 
+use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages\CompileRouteManifestStage;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Container\CoreContainer;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\{Request, Response};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Contracts\HttpStageContract;
@@ -28,6 +29,10 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\FilterRegistry;
  * (keyed by alias) so a stage can read its own configuration per route:
  *
  *   $args = $request->attribute('filter_args')['throttle'] ?? [];
+ *
+ * The spec parse is CONSTANT per route, so the boot compiler stores the result as
+ * `filter_specs` and this stage reads it; the inline parse below is only the
+ * fallback for a manifest compiled by an older kernel.
  */
 final class RouteFilterStage implements HttpStageContract
 {
@@ -38,10 +43,10 @@ final class RouteFilterStage implements HttpStageContract
 
     public function handle(Request $request, callable $next): Response
     {
-        $entry   = $request->attribute('route_entry');
-        $filters = is_array($entry) ? ($entry['filters'] ?? []) : [];
+        $entry = $request->attribute('route_entry');
+        $specs = $this->specs($entry);
 
-        if (!is_array($filters) || $filters === []) {
+        if ($specs === []) {
             return $next($request);
         }
 
@@ -50,12 +55,12 @@ final class RouteFilterStage implements HttpStageContract
         $aliases = [];
         $args    = [];
 
-        foreach ($filters as $spec) {
-            [$alias, $params] = $this->parse((string) $spec);
-            $stages[]  = $this->registry->resolve($alias, $this->core);
+        foreach ($specs as $spec) {
+            $alias    = $spec['alias'];
+            $stages[] = $this->registry->resolve($alias, $this->core);
             $aliases[] = $alias;
-            if ($params !== []) {
-                $args[$alias] = $params;
+            if ($spec['args'] !== []) {
+                $args[$alias] = $spec['args'];
             }
         }
 
@@ -78,24 +83,30 @@ final class RouteFilterStage implements HttpStageContract
     }
 
     /**
-     * "throttle:60,1" => ['throttle', ['60', '1']]
-     * "auth"          => ['auth', []]
-     *
-     * @return array{0: string, 1: list<string>}
+     * @param mixed $entry
+     * @return list<array{alias: string, args: list<string>}>
      */
-    private function parse(string $spec): array
+    private function specs(mixed $entry): array
     {
-        $spec = trim($spec);
-        if (!str_contains($spec, ':')) {
-            return [$spec, []];
+        if (!is_array($entry)) {
+            return [];
         }
 
-        [$alias, $rawArgs] = explode(':', $spec, 2);
-        $params = array_values(array_filter(
-            array_map('trim', explode(',', $rawArgs)),
-            static fn(string $a): bool => $a !== '',
-        ));
+        $specs = $entry['filter_specs'] ?? null;
+        if (is_array($specs)) {
+            return $specs;
+        }
 
-        return [trim($alias), $params];
+        $filters = $entry['filters'] ?? [];
+        if (!is_array($filters) || $filters === []) {
+            return [];
+        }
+
+        $parsed = [];
+        foreach ($filters as $spec) {
+            $parsed[] = CompileRouteManifestStage::parseFilterSpec((string) $spec);
+        }
+
+        return $parsed;
     }
 }

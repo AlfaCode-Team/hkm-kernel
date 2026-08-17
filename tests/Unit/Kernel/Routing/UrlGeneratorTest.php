@@ -176,4 +176,143 @@ final class UrlGeneratorTest extends TestCase
 
         self::assertFalse($this->generator(secret: 'a-completely-different-key')->hasValidSignature($signed));
     }
+
+    public function test_a_query_key_php_would_mangle_still_validates(): void
+    {
+        // parse_str() rewrites '.', ' ' and '[' inside parameter NAMES, so
+        // round-tripping the query through it made a legitimately signed URL
+        // impossible to verify. The comparison is now byte-for-byte.
+        $url = $this->generator()->signedRoute('search', ['user.name' => 'ada', 'a b' => 'c']);
+
+        self::assertTrue($this->generator()->hasValidSignature($url));
+    }
+
+    public function test_a_second_injected_signature_is_rejected(): void
+    {
+        $url = $this->generator()->signedRoute('user.show', ['id' => 7]);
+
+        self::assertFalse($this->generator()->hasValidSignature($url . '&signature=deadbeef'));
+    }
+
+    public function test_tampering_with_the_query_invalidates_the_signature(): void
+    {
+        $url = $this->generator()->signedRoute('search', ['q' => 'safe']);
+
+        self::assertFalse($this->generator()->hasValidSignature(str_replace('safe', 'evil', $url)));
+    }
+
+    // ── Repeated and optional placeholders ──────────────────────────────────
+
+    public function test_a_repeated_placeholder_is_substituted_everywhere(): void
+    {
+        $url = new UrlGenerator(
+            ['GET /a/{id}/b/{id}' => ['name' => 'twice', 'handler' => 'C@m']],
+            secret: self::SECRET,
+        );
+
+        // Consumption used to remove the value, so the second {id} reported a
+        // missing parameter.
+        self::assertSame('/a/7/b/7', $url->route('twice', ['id' => 7]));
+    }
+
+    public function test_an_optional_parameter_may_be_omitted(): void
+    {
+        $url = new UrlGenerator(
+            ['GET /posts/{page:num?}' => ['name' => 'posts', 'handler' => 'C@m']],
+            secret: self::SECRET,
+        );
+
+        self::assertSame('/posts', $url->route('posts'), 'the separator goes with it');
+        self::assertSame('/posts/2', $url->route('posts', ['page' => 2]));
+    }
+
+    public function test_an_optional_parameter_is_still_type_checked(): void
+    {
+        $url = new UrlGenerator(
+            ['GET /posts/{page:num?}' => ['name' => 'posts', 'handler' => 'C@m']],
+            secret: self::SECRET,
+        );
+
+        $this->expectExceptionMessageMatches('/does not satisfy type \[num\]/');
+        $url->route('posts', ['page' => 'two']);
+    }
+
+    // ── Absolute URLs follow the route's own domain group ───────────────────
+
+    private function multiBrand(string $base = 'https://hkmvote.local'): UrlGenerator
+    {
+        return new UrlGenerator(
+            [
+                'GET@hkmvote.local /'      => ['name' => 'vote.home',   'handler' => 'C@m'],
+                'GET@africavoting.local /' => ['name' => 'africa.home', 'handler' => 'C@m'],
+                'GET@*.africavoting.local /t' => ['name' => 'tenant.home', 'handler' => 'C@m'],
+                'GET@api /ping'            => ['name' => 'api.ping',    'handler' => 'C@m'],
+                'GET /health'              => ['name' => 'health',      'handler' => 'C@m'],
+            ],
+            base: $base,
+            secret: self::SECRET,
+        );
+    }
+
+    public function test_a_grouped_route_is_absolute_against_its_own_host(): void
+    {
+        // Generating both brands against one APP_URL would send half the links
+        // to the wrong site.
+        $url = $this->multiBrand();
+
+        self::assertSame('https://hkmvote.local/', $url->route('vote.home', absolute: true));
+        self::assertSame('https://africavoting.local/', $url->route('africa.home', absolute: true));
+    }
+
+    public function test_the_scheme_is_taken_from_the_configured_base(): void
+    {
+        self::assertSame(
+            'http://africavoting.local/',
+            $this->multiBrand(base: 'http://hkmvote.local')->route('africa.home', absolute: true),
+        );
+    }
+
+    public function test_a_wildcard_or_bare_subdomain_falls_back_to_the_base(): void
+    {
+        // Neither names a single host, so there is no origin to build.
+        $url = $this->multiBrand();
+
+        self::assertSame('https://hkmvote.local/t', $url->route('tenant.home', absolute: true));
+        self::assertSame('https://hkmvote.local/ping', $url->route('api.ping', absolute: true));
+    }
+
+    public function test_an_ungrouped_route_still_uses_the_configured_base(): void
+    {
+        self::assertSame('https://hkmvote.local/health', $this->multiBrand()->route('health', absolute: true));
+    }
+
+    public function test_relative_generation_is_unaffected_by_the_domain(): void
+    {
+        self::assertSame('/', $this->multiBrand()->route('africa.home'));
+    }
+
+    public function test_the_domain_of_a_named_route_is_reportable(): void
+    {
+        self::assertSame('africavoting.local', $this->multiBrand()->domainFor('africa.home'));
+        self::assertSame('', $this->multiBrand()->domainFor('health'));
+    }
+
+    public function test_a_signed_absolute_url_uses_its_domain_and_still_verifies(): void
+    {
+        // The signature covers path+query only, never the host, so picking a
+        // per-domain origin cannot invalidate it.
+        $url    = $this->multiBrand();
+        $signed = $url->signedRoute('africa.home', ['id' => 7], absolute: true);
+
+        self::assertStringStartsWith('https://africavoting.local/', $signed);
+        self::assertTrue($url->hasValidSignature(substr($signed, strlen('https://africavoting.local'))));
+    }
+
+    public function test_a_trailing_newline_cannot_be_smuggled_into_a_value(): void
+    {
+        // '$' without the D modifier would accept "7\n" here and generate a URL
+        // the matcher then refuses.
+        $this->expectExceptionMessageMatches('/does not satisfy type \[num\]/');
+        $this->generator()->route('user.show', ['id' => "7\n"]);
+    }
 }

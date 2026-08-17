@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace AlfacodeTeam\PhpServicePlatform\Kernel;
 
-use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, BootPipeline, ManifestReader};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, BootPipeline, BootStamp, ManifestReader};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Config\Repository as ConfigRepository;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Container\CoreContainer;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Contracts\ModuleContract;
@@ -14,6 +14,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\{WorkerLoop, WorkerPipeline};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\{RouteIndex, UrlGenerator};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\SecurityLayerContract};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
@@ -47,6 +48,10 @@ final class Kernel
     private array $projectRoutes = [];
     /** @var array<string, string> disable-spec => spec (de-duplicated, insertion order) */
     private array $disabledRoutes = [];
+    /** @var array<string, mixed> project route groups + source-wide route defaults */
+    private array $projectGroups = [];
+    /** @var list<string> hosts this project serves (proj.json "domains") */
+    private array $projectDomains = [];
     private ?ErrorPipeline $errorPipeline = null;
     private ?\Closure $errorPipelineFun = null;
     private ?string $basePath = null;
@@ -190,7 +195,83 @@ final class Kernel
     public function withRoutes(array $routes): self
     {
         foreach ($routes as $route) {
-            $this->projectRoutes[strtoupper($route['method'] ?? '') . ' ' . ($route['path'] ?? '')] = $route;
+            // The de-duplication key includes the DOMAIN group: two domains may
+            // legitimately declare the same "METHOD /path" with different
+            // handlers, and keying on method+path alone would silently drop one.
+            $domain = strtolower(trim((string) ($route['domain'] ?? $route['subdomain'] ?? '')));
+
+            $this->projectRoutes[RouteIndex::key(
+                (string) ($route['method'] ?? ''),
+                $domain,
+                (string) ($route['path'] ?? ''),
+            )] = $route;
+        }
+        return $this;
+    }
+
+    /**
+     * Declare the project's route GROUPS and source-wide route defaults.
+     *
+     * A group states ONCE what would otherwise be repeated on every route inside
+     * it — a path prefix, filters, requires, a name prefix, and the DOMAIN the
+     * routes answer on. Groups may nest.
+     *
+     *   ->withRouteGroups([
+     *       'groups' => [
+     *           ['domain' => 'organizer', 'prefix' => '/dashboard',
+     *            'filters' => ['auth'], 'name' => 'organizer.',
+     *            'routes' => [ ... ]],
+     *       ],
+     *   ])
+     *
+     * Because `domain` is part of the compiled route KEY, two domains may each
+     * define `GET /` with a different handler — this is how one project serves
+     * several brands, or grants a different access level per host, without
+     * forking. The domain is written literally (`africavoting.local`,
+     * `*.africavoting.local`, or a bare `organizer` subdomain) and is grouped
+     * verbatim: nothing resolves or validates it.
+     *
+     * The whole structure is expanded at BOOT into ordinary flat routes, so
+     * grouping costs nothing at request time. Merged shallowly with previous
+     * calls; `groups` accumulate so a base builder can contribute groups a child
+     * project extends.
+     *
+     * @param array<string, mixed> $source
+     */
+    public function withRouteGroups(array $source): self
+    {
+        $groups = [...($this->projectGroups['groups'] ?? []), ...($source['groups'] ?? [])];
+
+        $this->projectGroups = [...$this->projectGroups, ...$source];
+
+        if ($groups !== []) {
+            $this->projectGroups['groups'] = $groups;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Declare the hosts this project serves — normally proj.json "domains", the
+     * same list DomainResolver matches an incoming Host against.
+     *
+     * Used to CHECK route domain groups at boot: grouping routes under a host the
+     * project never registered produces routes nothing can reach, because such a
+     * request would have been routed to another project (or refused) long before
+     * the router saw it. Declaring nothing here disables the check.
+     *
+     * A bare `"subdomain"` group is never checked — it answers on that label
+     * across every domain, so there is no single host to check it against.
+     *
+     * @param list<string> $domains
+     */
+    public function withProjectDomains(array $domains): self
+    {
+        foreach ($domains as $domain) {
+            $domain = strtolower(trim((string) $domain));
+            if ($domain !== '' && !in_array($domain, $this->projectDomains, true)) {
+                $this->projectDomains[] = $domain;
+            }
         }
         return $this;
     }
@@ -259,21 +340,71 @@ final class Kernel
         // deferred to materialize(), driven by whichever entry point is actually
         // used. A process that only serves HTTP never pays to build the worker
         // surface, and vice versa.
-        (new BootPipeline(
+        $reader   = new ManifestReader();
+        $pipeline = new BootPipeline(
             $this->moduleClasses,
             $this->core,
             $this->securityLayers,
             array_values($this->projectRoutes),
             array_values($this->disabledRoutes),
-        ))->run();
+            $this->projectGroups,
+            $this->projectDomains,
+            $reader,
+        );
+
+        // BOOT CACHE (opt-in). Under PHP-FPM every request re-runs this method,
+        // recompiling manifests that are byte-identical to the last request's.
+        // When BOOT_CACHE is on and nothing the compile read has changed, skip
+        // the compilation and keep only the validation stages, which touch no
+        // disk and must still catch a missing port or an unusable layer.
+        $cached = BootStamp::enabled() ? BootStamp::read($this->buildHash()) : null;
+
+        if ($cached !== null) {
+            $pipeline->runValidationOnly();
+            // Recomputing these means re-reading every module.json — the very
+            // cost the cache exists to avoid — so they are cached alongside it.
+            $this->essentialModules = $cached['essentials'];
+            $this->built = true;
+
+            return $this;
+        }
+
+        $pipeline->run();
 
         // Resolve essential DOMAIN entries (proj.json "essentials") to their
         // provider classes now that the module list is final. Fails the boot on
-        // an unknown domain — never a silent no-op essential.
-        $this->essentialModules = $this->resolveEssentialModules();
+        // an unknown domain — never a silent no-op essential. Reuses the
+        // pipeline's reader, whose module.json cache is already warm.
+        $this->essentialModules = $this->resolveEssentialModules($reader);
+
+        if (BootStamp::enabled()) {
+            BootStamp::write($this->buildHash(), $reader->files(), $this->essentialModules);
+        }
 
         $this->built = true;
         return $this;
+    }
+
+    /**
+     * Everything the BUILDER contributes to compilation, as one hash.
+     *
+     * proj.json reaches the kernel as PHP arrays (routes, groups, domains,
+     * essentials, disable policy), so hashing these covers a proj.json edit
+     * without stat'ing it — and covers an edit to bootstrap/app.php itself,
+     * which no file-mtime check would catch.
+     */
+    private function buildHash(): string
+    {
+        return BootStamp::hash([
+            'modules'    => $this->moduleClasses,
+            'essentials' => $this->essentialModules,
+            'routes'     => $this->projectRoutes,
+            'groups'     => $this->projectGroups,
+            'disabled'   => $this->disabledRoutes,
+            'domains'    => $this->projectDomains,
+            'base'       => $this->basePath,
+            'project'    => $this->projectPath,
+        ]);
     }
 
     /**
@@ -285,14 +416,13 @@ final class Kernel
      * @return list<class-string<ModuleContract>>
      * @throws BootException when a domain matches no registered module
      */
-    private function resolveEssentialModules(): array
+    private function resolveEssentialModules(ManifestReader $reader): array
     {
         if ($this->essentialModules === []) {
             return [];
         }
 
         $byDomain = [];
-        $reader = new ManifestReader();
         foreach ($this->moduleClasses as $class) {
             $m = $reader->read($class);
             if (isset($m['solves']) && is_string($m['solves'])) {
@@ -366,6 +496,13 @@ final class Kernel
         $this->core->instance(ConfigRepository::class, $this->config());
 
         // Expose kernel services to modules via the core container.
+        // UrlGenerator is a lazy singleton: a module that never builds a URL never
+        // pays for the route-name index, and one that does gets it injected rather
+        // than reaching for the global helper.
+        $this->core->singleton(
+            UrlGenerator::class,
+            static fn(): UrlGenerator => UrlGenerator::fromManifest((string) (env('APP_URL') ?: '')),
+        );
         $this->core->instance(EventBus::class, $this->eventBus);
         $this->core->instance(WorkerPipeline::class, $this->workerPipe);
         $this->core->instance(HttpPipeline::class, $this->http);

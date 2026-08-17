@@ -278,5 +278,6 @@ Swoole request isolation.
 
 - `docs/guides/05_REPOSITORY.md`   — repository layer rules in detail
 - `docs/guides/18_MIGRATIONS.md`    — LetMigrate engine + patterns
-- `docs/guides/19_DATABASE.md`      — multi-driver Database module + DatabasePort adapter
+- `hkm-plugin-database` → `docs/DATABASE.md` — the multi-driver `DatabasePort` adapter
+  (https://github.com/AlfaCode-Team/hkm-plugin-database)
 - `docs/guides/03_DOMAIN.md`        — entity / value object / reconstitute() patterns

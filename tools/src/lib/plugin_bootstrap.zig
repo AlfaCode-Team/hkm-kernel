@@ -117,10 +117,42 @@ pub fn collectFromArray(
         search = pos + needle.len;
         if (token.len == 0) continue;
 
+        // A commented-out provider is not enabled.
+        //
+        // Scanning for `::class` with no notion of comments meant the template's
+        // documented-as-optional identity stack — User, Feedback, Auth, Tenancy,
+        // all four written as `//   \Plugins\User\Provider::class,` — counted as
+        // enabled. Every new project downloaded and wired four plugins it had
+        // explicitly not asked for, and the comment that said "enable together
+        // in an app that needs accounts" was decoration.
+        if (isCommentedOut(block, b)) continue;
+
         const name = resolvePlugin(token, aliases) orelse token;
         if (isEnabled(out.items, name)) continue; // de-dupe
         try out.append(allocator, .{ .name = name, .token = token, .activation = activation });
     }
+}
+
+/// Is the token at `at` inside a comment?
+///
+/// Line-level: a `//` earlier on the same line, or a line whose first non-space
+/// character starts a block comment or continues one (` * `). That covers how
+/// providers are actually commented out in a bootstrap, and — unlike a full PHP
+/// parse — cannot itself go wrong in a way that silently drops a live entry.
+///
+/// Deliberately NOT fooled by a trailing comment: `Provider::class, // note`
+/// has its `//` AFTER the token and stays enabled.
+fn isCommentedOut(block: []const u8, at: usize) bool {
+    const line_start = if (std.mem.lastIndexOfScalar(u8, block[0..at], '\n')) |nl| nl + 1 else 0;
+    const before = block[line_start..at];
+
+    if (std.mem.indexOf(u8, before, "//") != null) return true;
+
+    const trimmed = std.mem.trimStart(u8, before, " \t");
+    if (std.mem.startsWith(u8, trimmed, "*")) return true; // inside a docblock
+    if (std.mem.startsWith(u8, trimmed, "/*")) return true;
+
+    return false;
 }
 
 pub fn isEnabled(items: []const Enabled, name: []const u8) bool {
@@ -214,15 +246,38 @@ pub fn supportTag(allocator: std.mem.Allocator, folder: []const u8) ![]const u8 
     return std.fmt.allocPrint(allocator, "{s}{s}]", .{ support_tag_open, folder });
 }
 
+/// Is `folder`'s Support helpers require ACTUALLY present?
+///
+/// The marker comment alone is not enough. It tracks ownership, not presence,
+/// and the two come apart the moment someone deletes the require line while
+/// debugging and leaves the comment above it — after which every check keyed on
+/// the marker reports the helpers as wired while PHP fatals on the first call
+/// to one of them. Requiring the `require_once` itself makes the check say what
+/// it claims to say.
+pub fn supportRequireWired(allocator: std.mem.Allocator, source: []const u8, folder: []const u8, expr: []const u8) bool {
+    const tag = supportTag(allocator, folder) catch return false;
+    if (std.mem.indexOf(u8, source, tag) == null) return false;
+
+    // The expression identifies the file; a require_once naming it is the wiring.
+    if (expr.len > 0) {
+        if (std.mem.indexOf(u8, source, expr)) |at| {
+            const before = source[0..at];
+            if (std.mem.lastIndexOf(u8, before, "require_once") != null) return true;
+        }
+        return false;
+    }
+    return true;
+}
+
 /// Insert a managed `require_once <expr>` for `folder`'s Support/helpers.php after
 /// the autoload call in the bootstrap. `expr` is the PHP expression that follows
 /// `require_once ` (including its trailing `;`). Idempotent — returns the source
 /// unchanged (same slice) when the plugin's require is already present, so callers
 /// can compare pointers to detect a no-op.
 pub fn insertSupportRequire(allocator: std.mem.Allocator, source: []const u8, folder: []const u8, expr: []const u8) ![]const u8 {
-    const tag = try supportTag(allocator, folder);
-    if (std.mem.indexOf(u8, source, tag) != null) return source; // already wired
+    if (supportRequireWired(allocator, source, folder, expr)) return source;
 
+    const tag = try supportTag(allocator, folder);
     const block = try std.fmt.allocPrint(
         allocator,
         "\n// {s} Support helpers — managed by `hkm plugins`\nrequire_once {s}",
@@ -338,4 +393,32 @@ pub fn removeFromArray(allocator: std.mem.Allocator, source: []const u8, token: 
         first = false;
     }
     return .{ .text = try out.toOwnedSlice(allocator), .removed = try removed.toOwnedSlice(allocator) };
+}
+
+test "a commented-out provider is not enabled" {
+    const a = std.testing.allocator;
+    const src =
+        \\<?php
+        \\return Kernel::configure()
+        \\    ->withModules([
+        \\        \Plugins\Logger\Provider::class,
+        \\        // Identity stack (enable together in an app that needs accounts):
+        \\        //   \Plugins\User\Provider::class,
+        \\        //   \Plugins\Auth\Provider::class,
+        \\        \Plugins\View\Provider::class,   // still enabled — the // is AFTER it
+        \\    ])
+        \\    ->build();
+    ;
+
+    var aliases: std.ArrayList(Alias) = .empty;
+    defer aliases.deinit(a);
+    var out: std.ArrayList(Enabled) = .empty;
+    defer out.deinit(a);
+    try collectEnabled(a, src, aliases.items, &out);
+
+    try std.testing.expectEqual(@as(usize, 2), out.items.len);
+    try std.testing.expect(isEnabled(out.items, "Logger"));
+    try std.testing.expect(isEnabled(out.items, "View"));
+    try std.testing.expect(!isEnabled(out.items, "User"));
+    try std.testing.expect(!isEnabled(out.items, "Auth"));
 }

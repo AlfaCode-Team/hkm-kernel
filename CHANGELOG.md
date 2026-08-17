@@ -6,6 +6,250 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-08-17
+
+Fixes a class of failure that made installing or upgrading on a machine with an
+existing install appear to do nothing. A machine can hold BOTH a system install
+(`.deb` → `/opt/hkm-kernel` + `/usr/bin`) and a user install (tarball →
+`~/.local`); the CLI did not model that, and every symptom below followed from
+the same gap.
+
+**If you are upgrading from 1.3.1 or earlier, the old launcher cannot install
+the user scope.** Install it from the release instead — the fixed `hkm upgrade`
+takes over from there:
+
+```sh
+curl -fsSL https://github.com/AlfaCode-Team/hkm-kernel/releases/latest/download/install.sh | sh
+hkm version          # shows every install and which one your PATH runs
+```
+
+### Added
+- **`hkm version` reports every install on the machine**, not just the launcher's
+  own compile-time stamp: the kernel version in each scope (read from that
+  kernel's `composer.json`), the launcher serving it and the version IT was built
+  as, and an arrow on the one this invocation resolves. It also names the states
+  that make a later "my upgrade did nothing" report inevitable — another `hkm`
+  earlier on `PATH`, a kernel with no `vendor/`, a stale config pin. `hkm
+  --version` is unchanged and still prints one line for scripts.
+- **`hkm upgrade --user` / `--system`** to force a scope. Without either, the
+  target is chosen from privilege — root → system, otherwise → user — so
+  `sudo hkm upgrade` and `hkm upgrade` are two predictable commands rather than
+  one command whose target depends on machine state.
+- **`hkm-config unset <KEY>`**, for clearing a stale `HKM_KERNEL_HOME`.
+- `hkm doctor` gained an **Installs** table: both scopes, their versions and
+  whether each has resolved dependencies.
+
+### Changed
+- **Kernel resolution ranks sources by how specific they are to the invocation**
+  (`tools/src/lib/kernel.zig`): an exported `HKM_CLI_PATH` / `HKM_KERNEL_HOME`,
+  then self-location relative to the launcher's own binary, then a
+  `config.env` pin, then `/opt/hkm-kernel`. The pin was previously checked
+  first. It still applies wherever self-location genuinely fails — a custom
+  prefix — but no longer overrides an install sitting next to the binary.
+  A launcher in a system bin directory (`/usr/bin`) claims `/opt/hkm-kernel` at
+  the self-location step, since no relative probe can reach it from there.
+- **`hkm upgrade --user` installs to `~/.local/lib/hkm-kernel`**, matching
+  `install.sh`, instead of `~/.local/share/hkm/kernel`. The old path sits outside
+  every self-location probe, so it could only ever be reached through a
+  machine-wide pin — which is what created the cross-scope hijack below. An
+  install left at the old location is detected and reported, not silently used.
+- **`install.sh` removes a redundant or superseded `HKM_KERNEL_HOME` pin**
+  rather than repointing it. A repointed pin is still read by every launcher on
+  the machine; no pin lets each one find its own kernel. A pin aimed at a genuine
+  custom layout is reported and left alone. It also lists the installs already
+  present with their versions, and prints `Version: old -> new` when it finishes.
+- **`hkm-config check` no longer pins `HKM_KERNEL_HOME` for a self-locating
+  layout** — writing one on behalf of whichever install ran it last is how the
+  shared pin came to exist. It removes one that has become redundant.
+- `hkm upgrade --local` obeys the same scope rule (non-root installs to the user
+  scope, creating it if absent) and installs the launcher into that scope's `bin`
+  directory rather than always `/usr/bin`.
+- The scaffolded `kernel-autoload.php` tries `~/.local/lib/hkm-kernel` before
+  `/opt/hkm-kernel`, so a project run under PHP-FPM or systemd resolves the
+  kernel its owner actually manages. The pre-1.4 user path is still tried.
+
+### Fixed
+- **One install silently ran the other's kernel.** `~/.config/hkm/config.env` is
+  read by every `hkm` on the machine, and `HKM_KERNEL_HOME` was checked before
+  self-location — so whichever installer wrote that pin last redirected the other
+  install too. A `.deb` launcher would report its own version while running a
+  kernel out of the user's home, and upgrading either scope could not move the
+  number on screen.
+- **`hkm upgrade` could not update a user install on Linux.** It only ever
+  fetched the `.deb` and shelled out to `sudo apt-get`, despite the user-local
+  tarball being the documented default since 1.3.1. Because `PATH` usually
+  resolves `~/.local/bin` before `/usr/bin`, the command reported success and the
+  very next invocation ran the old launcher unchanged. The user scope now
+  installs from the tarball via its own `install.sh`, with no `sudo` anywhere in
+  that path.
+- **Upgrade decisions used the wrong version.** `hkm upgrade` compared the
+  LAUNCHER's compile-time stamp against the latest release tag, then went on to
+  replace a KERNEL somewhere else — two numbers that differ exactly when the
+  launcher on `PATH` belongs to the other scope. Versions are now read from the
+  kernel being replaced, and the command names the other scope when it is also
+  behind instead of reporting an unqualified "you are on the latest version".
+- **A `--local` install could never report what it was.** It copied the
+  checkout's `composer.json`, which carries no `version` field by design, so
+  `hkm version` read "unstamped" forever and the next upgrade had nothing to
+  compare. The `git describe` version is now recorded as semver build metadata
+  (`1.3.1-2-g34abb2c` → `1.3.1+2.g34abb2c`), which Composer accepts and which
+  semver excludes from precedence — a change of spelling, not of meaning. A
+  release build still stamps the exact tag or nothing.
+- A `--system` upgrade run without root now says so once, up front, with the
+  command that works, instead of failing one permission error at a time. The
+  system path no longer prefixes `sudo` unconditionally, which broke on the
+  containers and CI images where a system install is most useful and `sudo` is
+  frequently absent.
+
+## [1.3.1] - 2026-08-12
+
+Supersedes 1.3.0, which was tagged from a commit that never reached `master`
+(the branch had advanced remotely between the build and the push). Tags are
+immutable in this repository, so 1.3.0 was left in place rather than moved —
+it builds, but it predates the `php-io-cli` pin below. **Use 1.3.1.**
+
+### Added
+- **Domain lists.** `domain` / `subdomain` now take either a string or a LIST,
+  at all three levels — module-wide (`routeDomain` / `routeSubdomain`), group,
+  and route. A project serving several hosts can pin a group to "these three and
+  not that one" instead of duplicating the group per host. The domain is still
+  part of the route KEY, and a route grouped under a host the project does not
+  serve is still rejected at boot.
+- **Plugin env seeding.** Enabling a plugin writes the environment it declares
+  in `module.json` `config[]` straight into `.env`, in three shapes: a documented
+  default is written ACTIVE, a required key with no default is written active but
+  EMPTY (so the boot failure points at a line you can see), and an optional key
+  with no default is written COMMENTED. Previously that list was discoverable
+  only from a boot stack trace, one variable per attempt.
+- **A user-local install that needs no root.** Linux releases now ship a portable
+  tarball alongside the `.deb`; `tools/install.sh` unpacks kernel and launcher
+  entirely inside `$HOME` and writes nothing outside it. Published with the
+  release assets, so `curl … | sh` works without a checkout. The `.deb` remains
+  for multi-user machines and CI images.
+- **Scaffold support for `@pageflow/admin`** (Pageflow v1.1.0): a three-state
+  theme provider (`{ theme, resolvedTheme, setTheme, toggle }` with a "system"
+  default that keeps following the OS), the sidebar CSS variables the shell
+  consumes, and a globbed `ui/admin/nav.ts` navigation registry. Both scaffold
+  surfaces now wrap their tree in `AppErrorBoundary`.
+
+### Fixed
+- **`modules/php-io-cli` pinned back to its last loadable commit.** The newer
+  pointer merged two parallel implementations of unknown-option handling and kept
+  both, declaring `AbstractCommand::$unknownOptions` twice — a fatal at class
+  load, so every command built on `AbstractCommand` died, not just the test that
+  surfaced it. Only the pointer is reverted; which implementation is canonical is
+  php-io-cli's call.
+
+### Changed
+- `hkm doctor` reports which install is actually in use, and whether a stale
+  `HKM_KERNEL_HOME` pin in `~/.config/hkm/config.env` is overriding it — the
+  failure that otherwise presents as "my changes do nothing".
+
+## [1.2.0] - 2026-08-12
+
+### Added
+- **Route groups.** `groups[]` in `module.json` / `proj.json` states a `prefix`,
+  `filters`, `requires`, `name` prefix and `domain` once for every route inside;
+  groups nest (max depth 16). Module-wide `routePrefix` / `routeFilters` /
+  `routeRequires` / `routeName` / `routeDomain` / `routeSubdomain` do the same for
+  a whole file. Expanded at BOOT into ordinary flat routes — zero request-time cost.
+- **Domain grouping.** A route may declare the host it answers on
+  (`"domain": "africavoting.local"`, `"domain": "*.example.com"`, or a bare
+  `"subdomain": "api"`). The domain is part of the route KEY, so one project can
+  answer `GET /` differently per host. Ungrouped routes stay global; a bare
+  subdomain answers on that label of every domain. A declared host is validated
+  against `proj.json` `"domains"`.
+- **Parameter types `path` and `enum(a|b)`, and optional `{id?}`.** `path` is a
+  traversal-safe catch-all (`any` is unchanged and still has no guard);
+  `enum` members are `preg_quote`d, so no regex can be injected from JSON.
+- `HEAD` requests are served by the `GET` route (`ROUTE_HEAD_FALLBACK`), with the
+  body stripped. Opt-in `405 Method Not Allowed` + `Allow`
+  (`ROUTE_METHOD_NOT_ALLOWED`) and trailing-slash policy (`ROUTE_TRAILING_SLASH`).
+- **`BOOT_CACHE`** — `Kernel::build()` skips recompiling manifests that are already
+  current. Under PHP-FPM the boot pipeline previously ran on *every request*
+  (~2 ms, ~150 KB of writes for ~130 routes); with the cache that becomes ~0.02 ms.
+  Off by default; clear `var/cache/manifests/` on deploy.
+- `route()`, `signed_route()` and `url()` global helpers; `UrlGenerator` bound in
+  the `CoreContainer`. Absolute URLs follow the route's own domain group.
+- `signed` route filter (SecurityFilters) — enforces a `signed_route()` link
+  declaratively, the URL counterpart to `hmac`.
+- Two derived manifests beside `route-manifest.php`: `route-index.php` (the
+  matcher-ready index) and `route-names.php` (the name index `UrlGenerator` reads).
+  Both optional at runtime — every consumer falls back to the flat manifest.
+
+### Fixed
+- **Captured route parameters are percent-decoded and re-validated against their
+  type.** `/files/..%2F..%2Fetc%2Fpasswd` no longer satisfies `{name}`, and
+  `/users/Jos%C3%A9` now reaches the controller as `José` rather than `Jos%C3%A9`.
+- Route patterns are anchored with the `D` modifier — a trailing newline in the
+  request path no longer satisfies `$`.
+- Literal path text is `preg_quote`d, so `/feed.xml/{id}` no longer matches
+  `/feedXxml/1`.
+- Signed-URL verification compares the query byte-for-byte instead of round-tripping
+  it through `parse_str()`, which rewrote `.`, ` ` and `[` in parameter names and
+  made some legitimately signed URLs impossible to verify.
+- `UrlGenerator` supports a repeated placeholder (`/a/{id}/b/{id}`), which
+  previously reported the second occurrence as a missing parameter.
+- `resolveEssentialModules()` no longer re-reads every `module.json` a second time
+  during `build()`.
+
+### Changed
+- Route filter stages are resolved once per worker instead of being reconstructed
+  on every request; filter specs, the handler split and the dependency-graph key
+  are precompiled into the manifest.
+- Dynamic routes are bucketed by their first literal path segment, so a request
+  tests only the patterns that could match its prefix.
+- These now FAIL THE BOOT instead of compiling into a route that silently never
+  matched: a path not starting with `/`, a duplicated or PCRE-invalid capture name,
+  a handler without exactly one `@`, a filter alias no `Provider::boot()`
+  registered, and a route domain absent from `proj.json` `"domains"`.
+- `RouteCatalog::publicPaths()` takes an optional `$domain` — the default is
+  unchanged (shared routes only).
+
+### Docs
+- `docs/Sentinel-Routing-Guide.pdf` — a practical, example-driven routing manual.
+
+## [1.1.0-beta.1] - 2026-08-07
+
+First **installable** pre-release of the 1.1.0 line. `1.1.0-dev.2` and
+`1.1.0-dev.3` are withdrawn — see below.
+
+### Fixed
+- **`composer install` aborted on every machine that took `1.1.0-dev.2` or
+  `-dev.3`.** The build stamps its version into `composer.json`, and
+  `1.1.0-dev.N` is not a valid Composer version: Composer's `dev` suffix takes
+  no counter. `composer install` refuses to run at all on an unparseable
+  version, so the package unpacked and then failed to resolve its dependencies.
+  The stamper now validates and skips rather than writing something Composer
+  rejects, and this release is named `-beta.1`, which Composer accepts — so the
+  version marker the native distribution needs is actually present again.
+- The stamper trimmed `v` from both ends of the version, so any version ending
+  in `v` lost it — `1.1.0-dev` became `1.1.0-de`, the one pre-release form
+  Composer does accept.
+
+### Note on upgrading from 1.0.21
+A 1.0.21 client has no pre-release filter: it strips the suffix, sees
+`1.1.0 > 1.0.21` and offers this automatically. That filter ships **in** this
+release, so the behaviour self-corrects after one upgrade. If you took
+`1.1.0-dev.2` or `-dev.3` and the install reported a composer schema error,
+upgrading to this release repairs it.
+
+## [1.1.0-dev.3] - 2026-08-07
+
+Re-cut of `1.1.0-dev.2` from `main` rather than `master`, so the artefacts
+include the PHPStan work that landed with #107. Contents are otherwise
+identical — see `[1.1.0-dev.2]` below for the full list.
+
+### Fixed
+- **`ProcessLocalLock` could not write its own lock table.** The registry was
+  typed as an anonymous `object{locks: ...}` shape, whose properties PHPStan
+  treats as read-only, so every write was an error against a type that
+  described the shape but never named the one class satisfying it.
+- PHPStan is green again: the project scaffolding that binds to plugin
+  contracts is scoped out of analysis here, since those plugins are
+  deliberately not dependencies of the kernel. It is analysed in a project that
+  has installed them.
+
 ## [1.1.0-dev.2] - 2026-08-07
 
 Development pre-release. Published so the new tooling can be exercised against
