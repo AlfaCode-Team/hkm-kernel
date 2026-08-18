@@ -51,6 +51,108 @@ pub fn chmod600(io: Io, path: []const u8) void {
     f.setPermissions(io, @enumFromInt(0o600)) catch {};
 }
 
+/// Locate an executable by walking PATH, returning the FIRST match — the one
+/// that would actually run. Null when it is nowhere on PATH.
+///
+/// A name containing a '/' is treated as a path, not a PATH lookup, matching
+/// what execve itself does — so `HKM_PHP_BIN=/opt/php/bin/php` resolves to that
+/// file rather than being searched for as a filename.
+///
+/// Lives here because `doctor` and `version` had grown a private copy each, and
+/// a third was about to appear in main.zig for the passthrough diagnostic.
+pub fn findOnPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap, name: []const u8) ?[]const u8 {
+    if (name.len == 0) return null;
+
+    if (std.mem.indexOfScalar(u8, name, '/') != null) {
+        return if (fileExists(io, name)) name else null;
+    }
+
+    const path = env.get("PATH") orelse return null;
+    var it = std.mem.splitScalar(u8, path, ':');
+    while (it.next()) |dir| {
+        if (dir.len == 0) continue;
+        const cand = std.fs.path.join(allocator, &.{ dir, name }) catch continue;
+        if (fileExists(io, cand)) return cand;
+    }
+    return null;
+}
+
+/// Whether an executable is runnable — `findOnPath` as a predicate.
+pub fn onPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap, name: []const u8) bool {
+    return findOnPath(allocator, io, env, name) != null;
+}
+
+/// Every match for `name` on PATH, counted — used to detect one install
+/// shadowing another.
+pub fn countOnPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap, name: []const u8) usize {
+    const path = env.get("PATH") orelse return 0;
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, path, ':');
+    while (it.next()) |dir| {
+        if (dir.len == 0) continue;
+        const cand = std.fs.path.join(allocator, &.{ dir, name }) catch continue;
+        if (fileExists(io, cand)) n += 1;
+    }
+    return n;
+}
+
+/// The first argument that looks like a flag but is not in `known`, or null.
+///
+/// Every command in this tree parses flags by testing for the ones it knows and
+/// ignoring the rest, with a comment saying that keeps future flags from hard
+/// failing. For a read-only command that is a fair trade. For a DESTRUCTIVE one
+/// it is not, because the ignored token is usually a typo of the flag that was
+/// meant to make it safe:
+///
+///     hkm uninstall --dryrun --yes     # --dry-run misspelled
+///
+/// which parsed as "no dry run, and don't ask" and deleted the install. Commands
+/// that can destroy or escalate should reject what they do not recognise.
+///
+/// `--flag=value` is compared on the name before `=`. A bare `-` or `--` is not
+/// treated as a flag, and everything after a `--` separator is left alone so a
+/// passthrough command can forward its own arguments.
+pub fn unknownFlag(args: []const []const u8, known: []const []const u8) ?[]const u8 {
+    for (args) |raw| {
+        if (std.mem.eql(u8, raw, "--")) return null; // end of options
+        if (raw.len < 2 or raw[0] != '-') continue; // positional
+        if (std.mem.eql(u8, raw, "-")) continue; // stdin convention
+
+        const name = if (std.mem.indexOfScalar(u8, raw, '=')) |i| raw[0..i] else raw;
+        if (!contains(known, name)) return raw;
+    }
+    return null;
+}
+
+/// Write `data` to `path` atomically: fill a sibling temp file, then rename it
+/// over the target.
+///
+/// `writeFile` truncates first and then writes, so a process killed part way
+/// through — or a full disk — leaves a truncated file rather than the old one.
+/// That is tolerable for a cache and not for USER DATA: `projects.json` is the
+/// registry of every project on the machine, the one file `hkm uninstall`
+/// deliberately rescues before deleting anything, and it was being replaced by
+/// the destructive method.
+///
+/// rename(2) within a directory is atomic, so a reader sees either the previous
+/// file or the new one and never a half-written one. The pattern is already used
+/// twice in this tree — `install.sh` stages to `.new` before `mv`, and the
+/// launcher install writes `.hkm-new` then renames — it had simply never reached
+/// the registry.
+pub fn writeFileAtomic(io: Io, path: []const u8, data: []const u8) !void {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp = std.fmt.bufPrint(&buf, "{s}.hkm-tmp", .{path}) catch {
+        // No room for the suffix — a direct write still beats not writing.
+        return Dir.cwd().writeFile(io, .{ .sub_path = path, .data = data });
+    };
+
+    try Dir.cwd().writeFile(io, .{ .sub_path = tmp, .data = data });
+    Dir.cwd().rename(tmp, Dir.cwd(), path, io) catch |e| {
+        Dir.cwd().deleteFile(io, tmp) catch {};
+        return e;
+    };
+}
+
 /// Is `path` a symbolic link? readLink succeeds only on one.
 pub fn isSymlink(io: Io, path: []const u8) bool {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -321,4 +423,38 @@ test "an existing suffix is not doubled" {
     try std.testing.expectEqualStrings("Widget", stripSuffix("Widget", "Seeder"));
     // Not a suffix, merely a substring.
     try std.testing.expectEqualStrings("SeederThing", stripSuffix("SeederThing", "Seeder"));
+}
+
+test "unknownFlag catches the typo that made a destructive command run for real" {
+    // The exact input that deleted an install: `--dry-run` misspelled, so the
+    // guard flag was ignored and `--yes` suppressed the confirmation.
+    const known = [_][]const u8{ "--dry-run", "-n", "--yes", "-y", "--help", "-h" };
+    const args = [_][]const u8{ "--dryrun", "--yes" };
+    try std.testing.expectEqualStrings("--dryrun", unknownFlag(&args, &known).?);
+}
+
+test "unknownFlag accepts every flag a command declares" {
+    const known = [_][]const u8{ "--dry-run", "-n", "--yes", "-y" };
+    try std.testing.expect(unknownFlag(&[_][]const u8{ "--dry-run", "-y" }, &known) == null);
+    try std.testing.expect(unknownFlag(&[_][]const u8{}, &known) == null);
+}
+
+test "unknownFlag ignores positionals and the stdin dash" {
+    const known = [_][]const u8{"--yes"};
+    try std.testing.expect(unknownFlag(&[_][]const u8{ "shop", "--yes" }, &known) == null);
+    try std.testing.expect(unknownFlag(&[_][]const u8{"-"}, &known) == null);
+    // A negative number is a positional, not a flag people expect to be rejected.
+    try std.testing.expect(unknownFlag(&[_][]const u8{"/some/path"}, &known) == null);
+}
+
+test "unknownFlag compares --flag=value on the name" {
+    const known = [_][]const u8{"--prefix"};
+    try std.testing.expect(unknownFlag(&[_][]const u8{"--prefix=/srv/hkm"}, &known) == null);
+    try std.testing.expectEqualStrings("--prefx=/srv", unknownFlag(&[_][]const u8{"--prefx=/srv"}, &known).?);
+}
+
+test "unknownFlag stops at a -- separator so passthrough args are left alone" {
+    const known = [_][]const u8{"--yes"};
+    const args = [_][]const u8{ "--yes", "--", "--anything-goes", "-x" };
+    try std.testing.expect(unknownFlag(&args, &known) == null);
 }

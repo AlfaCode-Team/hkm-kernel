@@ -129,7 +129,9 @@ pub fn upsert(allocator: std.mem.Allocator, io: Io, jsonPath: []const u8, entry:
     if (!replaced) try entries.append(allocator, entry);
 
     const out = try render(allocator, entries.items);
-    try cwd.writeFile(io, .{ .sub_path = jsonPath, .data = out });
+    // Atomic: this is the project registry, and a half-written one loses every
+    // registration on the machine. See util.writeFileAtomic.
+    try util.writeFileAtomic(io, jsonPath, out);
 }
 
 /// Parse the registry JSON object into `entries`.

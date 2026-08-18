@@ -43,6 +43,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var env = try init.environ.createMap(allocator);
     defer env.deinit();
 
+    // Bind the output streams before anything prints — same contract as the
+    // hkm launcher: results to stdout, diagnostics to stderr, colour only when
+    // the destination is a terminal.
+    prompt.init(io, &env);
+
     // Make already-saved config visible to resolution below.
     userconfig.load(allocator, io, &env);
 

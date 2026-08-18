@@ -135,6 +135,21 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // `hkm upgrade` two different, predictable commands.
     var scope: ?Scope = null;
 
+    // Same reasoning as `uninstall`: an ignored typo here silently changes WHICH
+    // install is replaced. `--systm` would fall through to the privilege default
+    // and upgrade the user's install while the operator believed they had named
+    // the system one.
+    const known = [_][]const u8{
+        "--check",  "-c", "--local",  "-l", "--dry-run", "-n",
+        "--yes",    "-y", "--pre",    "--user", "-u", "--system",
+        "-s",       "--no-build", "--help", "-h",
+    };
+    if (util.unknownFlag(args[1..], &known)) |bad| {
+        prompt.err(std.fmt.allocPrint(allocator, "unknown option: {s}", .{bad}) catch "unknown option");
+        prompt.muted("  nothing was changed. Run `hkm upgrade --help` for the accepted flags.");
+        return 1;
+    }
+
     for (args[1..]) |a| {
         if (std.mem.eql(u8, a, "--check") or std.mem.eql(u8, a, "-c")) check_only = true;
         if (std.mem.eql(u8, a, "--local") or std.mem.eql(u8, a, "-l")) from_local = true;

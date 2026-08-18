@@ -184,7 +184,9 @@ pub fn render(allocator: std.mem.Allocator, lock: *const Lock, kernelVersion: []
 pub fn write(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8, lock: *const Lock, kernelVersion: []const u8) !void {
     const body = try render(allocator, lock, kernelVersion);
     const p = try path(allocator, projectRoot);
-    try Dir.cwd().writeFile(io, .{ .sub_path = p, .data = body });
+    // Atomic — plugins.lock.json is committed alongside composer.lock and a
+    // truncated one breaks `hkm plugins lock` for every checkout of the project.
+    try util.writeFileAtomic(io, p, body);
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-18
+
+Follows 1.3.2 within a day, and the theme is narrower: 1.3.2 fixed *which*
+kernel a command acts on, this one fixes *how* commands talk to the shell around
+them, plus a full uninstall. An audit of the Zig toolchain drove it — every item
+below was reproduced against the shipped `--release=small` binary.
+
+### Added
+- **`hkm uninstall`** — removes every hkm install on the machine (both kernels,
+  both pairs of launchers, the pre-1.4 user kernel, `~/.config/hkm` and the
+  shared plugin store) and deregisters the `.deb` from dpkg, while keeping **your
+  projects and the project registry**. Those two are protected by construction,
+  not by a filter: every path it can delete is computed from the install layout,
+  so a project directory cannot enter the plan at all; and `projects.json` +
+  `platform.json` are rescued out of a kernel tree into the userdata directory
+  *before* anything is deleted, so the registry survives even when its only copy
+  was inside the tree being removed. `--dry-run` prints the plan and exits;
+  system paths are reported rather than silently skipped when not root.
+
+### Changed
+- `hkm doctor` and `hkm version` share one PATH lookup with the launcher
+  passthrough (`util.findOnPath`). Three private copies of "which binary would
+  actually run" is three chances to disagree.
+
+### Fixed
+- **Command output went to stderr, so nothing could be piped.** The whole
+  `prompt` renderer used `std.debug.print`, which writes to stderr — so
+  `hkm list > projects.txt` produced an empty file and a command's results were
+  indistinguishable from its errors. Results (`intro`/`section`/`item`/`ok`/
+  `muted`/`note`/`table`/`outro`) now go to **stdout**; `err`/`warn` and every
+  interactive prompt stay on **stderr**. This was found once before and fixed a
+  single function wide (`banner.printShort`); the cause was in the shared
+  renderer all along.
+- **ANSI escapes were emitted unconditionally and `NO_COLOR` was ignored**, so
+  colour codes landed in redirected output, log files and CI transcripts.
+  Colour is now decided per stream from the rule `tools/install.sh` already
+  applied: off when `NO_COLOR` is set, when `TERM=dumb`, or when that stream is
+  not a terminal.
+- **Tables truncated to 80 columns when redirected.** `termCols()` falls back to
+  80 whenever the `ioctl` fails — exactly the non-TTY case — so piping cut the
+  end off every long path, with the `…` as the only clue. Truncation now applies
+  only when stdout really is a terminal.
+- **A mistyped command printed a raw Zig error.** Anything not handled natively
+  is forwarded to the PHP CLI, and a spawn failure propagated out of `main` as
+  `error: FileNotFound` — no filename, no mention of PHP, no pointer to
+  `hkm doctor`. The three causes (no PHP, no kernel CLI, an unknown command) are
+  now told apart and each names its own fix.
+- **Unknown flags were silently ignored, which inverted a destructive command.**
+  Every command parsed the flags it knew and dropped the rest. The token most
+  likely to be misspelled is the one that makes a command safe, so
+  `hkm uninstall --dryrun --yes` parsed as "no dry run, and don't ask" and
+  deleted the install without a prompt. `uninstall` and `upgrade` now reject
+  anything they do not recognise before acting on anything they do.
+- **`projects.json` and `plugins.lock.json` were written non-atomically.**
+  `writeFile` truncates before writing, so a process killed part way through — or
+  a full disk — left a truncated registry rather than the previous one. Both now
+  write a sibling temp file and `rename()` over the target, the same pattern
+  `install.sh` and the launcher install already used.
+- **A failed `.deb` install could still report success.** The fallback path
+  treated `apt-get -f install` exiting 0 as evidence the package had landed, but
+  it exits 0 whenever it finds nothing to repair — so a `dpkg -i` that failed for
+  any non-dependency reason (a truncated download, a corrupt `.deb`) was reported
+  as "updated" with the previous kernel still installed. The dependency repair is
+  now followed by a second `dpkg -i`, and that result alone is the verdict.
+- **`prompt.item` padded by byte count**, so a key containing any multi-byte
+  glyph shifted its description column left — a single `→` misaligned the row by
+  two. It now measures display width using the helper already written for
+  `table()`.
+
 ## [1.3.2] - 2026-08-17
 
 Fixes a class of failure that made installing or upgrading on a machine with an
@@ -100,12 +169,6 @@ hkm version          # shows every install and which one your PATH runs
   system path no longer prefixes `sudo` unconditionally, which broke on the
   containers and CI images where a system install is most useful and `sudo` is
   frequently absent.
-- **A failed `.deb` install could still report success.** The fallback path
-  treated `apt-get -f install` exiting 0 as evidence the package had landed, but
-  it exits 0 whenever it finds nothing to repair — so a `dpkg -i` that failed for
-  any non-dependency reason (a truncated download, a corrupt `.deb`) was reported
-  as "updated" with the previous kernel still installed. The dependency repair is
-  now followed by a second `dpkg -i`, and that result alone is the verdict.
 
 ## [1.3.1] - 2026-08-12
 

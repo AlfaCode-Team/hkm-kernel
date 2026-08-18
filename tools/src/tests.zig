@@ -34,6 +34,7 @@ test {
     _ = @import("commands/plugins.zig");
     _ = @import("commands/run.zig");
     _ = @import("commands/ui.zig");
+    _ = @import("commands/uninstall.zig");
     _ = @import("commands/update.zig");
     _ = @import("commands/upgrade.zig");
     _ = @import("commands/version.zig");

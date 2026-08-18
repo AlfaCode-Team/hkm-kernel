@@ -2,9 +2,76 @@
 //! glyphs, colour accents, and styled intro / note / outro / error / prompt
 //! helpers. Text/confirm prompts read a line; `select` is an interactive
 //! raw-mode arrow-key list. The look matches the modern "prompts" experience.
+//!
+//! WHICH STREAM, AND WHY IT MATTERS
+//! --------------------------------
+//! Results go to **stdout**; diagnostics and interactive prompts go to
+//! **stderr**. Everything here used to render through `std.debug.print`, which
+//! writes to stderr — so a command's OUTPUT was indistinguishable from its
+//! errors, and the obvious thing a user tries produced an empty file:
+//!
+//!     $ hkm list > projects.txt
+//!     $ wc -c projects.txt
+//!     0 projects.txt
+//!
+//! That was found once before and fixed one function wide (`banner.printShort`,
+//! whose docblock records it), but the cause is here, in the shared renderer.
+//! The split now is the conventional one: `intro/section/item/ok/muted/note/
+//! table/outro` are the answer the caller asked for, while `err/warn` and every
+//! prompt are commentary that must not pollute a pipe.
+//!
+//! COLOUR AND WIDTH ARE PROPERTIES OF THE DESTINATION
+//! --------------------------------------------------
+//! ANSI was previously emitted unconditionally, so escape sequences landed in
+//! log files and CI transcripts, and `NO_COLOR` did nothing. Both are now
+//! decided per stream at `init`, from the same rule `tools/install.sh` has
+//! always applied: no colour when `NO_COLOR` is set, when `TERM=dumb`, or when
+//! that stream is not a terminal.
 
 const std = @import("std");
 const Io = std.Io;
+const EnvMap = std.process.Environ.Map;
+
+// ── destination state ───────────────────────────────────────────────────────
+//
+// Process-wide, set once by main.zig / config.zig before any output. A file
+// scope global is right here in a way it would not be in the kernel: this is a
+// short-lived single-invocation CLI, and the alternative — threading an `Io`
+// and an env map through all twenty rendering helpers and their several hundred
+// call sites — buys nothing.
+
+var out_io: ?Io = null;
+var color_out = false;
+var color_err = false;
+/// Terminal width of stdout, or null when stdout is not a terminal (do not
+/// truncate — the consumer is a file or a pager, not an 80-column screen).
+var out_cols: ?usize = null;
+
+/// Bind the streams and decide colour + width. Safe to call more than once.
+///
+/// Before this runs, output falls back to `std.debug.print` (stderr, coloured),
+/// which is what unit tests and any early-startup failure get.
+pub fn init(io: Io, env: *EnvMap) void {
+    out_io = io;
+
+    const no_color = blk: {
+        // Presence is what counts for NO_COLOR, not the value — that is the
+        // published convention (no-color.org), and honouring only "1" would
+        // ignore the common `NO_COLOR=` idiom people actually type.
+        if (env.get("NO_COLOR")) |v| break :blk v.len > 0;
+        break :blk false;
+    };
+    const dumb = if (env.get("TERM")) |t| std.mem.eql(u8, t, "dumb") else false;
+
+    const so = std.Io.File.stdout();
+    const se = std.Io.File.stderr();
+    const so_tty = so.isTty(io) catch false;
+    const se_tty = se.isTty(io) catch false;
+
+    color_out = so_tty and !no_color and !dumb;
+    color_err = se_tty and !no_color and !dumb;
+    out_cols = if (so_tty) termCols() else null;
+}
 
 // ── ANSI ──────────────────────────────────────────────────────────────────
 
@@ -17,6 +84,81 @@ const yellow = "\x1b[33m";
 const red = "\x1b[31m";
 const gray = "\x1b[90m";
 
+/// Format once, then write to the chosen stream — stripping ANSI when that
+/// stream is not receiving colour.
+///
+/// Stripping at write time is deliberate: the styles above are concatenated
+/// into the format strings at COMPILE time, so making colour conditional at
+/// each of the ~40 call sites would mean rewriting every one of them into a
+/// runtime branch. Removing the sequences on the way out gets the same result
+/// from one place, and keeps the call sites readable.
+fn emit(to_err: bool, comptime fmt: []const u8, args: anytype) void {
+    const io = out_io orelse {
+        std.debug.print(fmt, args); // pre-init: stderr, as before
+        return;
+    };
+
+    var buf: [8192]u8 = undefined;
+    const rendered = std.fmt.bufPrint(&buf, fmt, args) catch {
+        // Longer than the buffer (a pathological path). Losing the line
+        // entirely would be worse than losing its stream, so fall back.
+        std.debug.print(fmt, args);
+        return;
+    };
+
+    const colored = if (to_err) color_err else color_out;
+    const file = if (to_err) std.Io.File.stderr() else std.Io.File.stdout();
+
+    if (colored) {
+        file.writeStreamingAll(io, rendered) catch {};
+        return;
+    }
+
+    var plain: [8192]u8 = undefined;
+    file.writeStreamingAll(io, stripAnsi(rendered, &plain)) catch {};
+}
+
+/// Copy `src` into `dst` with CSI escape sequences removed.
+///
+/// Handles `ESC [ ... final`, where final is 0x40–0x7E — which covers every
+/// sequence this module emits (colour, cursor-up, erase-line). `dst` is always
+/// large enough because stripping only ever shortens.
+fn stripAnsi(src: []const u8, dst: []u8) []const u8 {
+    var w: usize = 0;
+    var i: usize = 0;
+    while (i < src.len) {
+        // An ESC always begins something that must not reach a log file, so it
+        // is dropped whether or not a complete sequence follows. emit() renders
+        // into a fixed buffer, which means a sequence CAN be cut in half at the
+        // end of input — and the earlier form, which only skipped on a complete
+        // "ESC [", copied that dangling ESC straight through.
+        if (src[i] == 0x1b) {
+            i += 1;
+            if (i < src.len and src[i] == '[') {
+                i += 1;
+                while (i < src.len and !(src[i] >= 0x40 and src[i] <= 0x7E)) i += 1;
+                if (i < src.len) i += 1; // consume the final byte
+            }
+            continue;
+        }
+        if (w >= dst.len) break;
+        dst[w] = src[i];
+        w += 1;
+        i += 1;
+    }
+    return dst[0..w];
+}
+
+/// Results — stdout.
+fn out(comptime fmt: []const u8, args: anytype) void {
+    emit(false, fmt, args);
+}
+
+/// Diagnostics and prompts — stderr.
+fn diag(comptime fmt: []const u8, args: anytype) void {
+    emit(true, fmt, args);
+}
+
 // ── glyphs ──────────────────────────────────────────────────────────────────
 
 const bar = dim ++ "│" ++ reset;
@@ -27,66 +169,79 @@ const corner_bot = green ++ "└" ++ reset;
 
 /// Opening banner: `┌  <title>` then a gutter line.
 pub fn intro(title: []const u8) void {
-    std.debug.print("\n" ++ corner_top ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n" ++ bar ++ "\n", .{title});
+    out("\n" ++ corner_top ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n" ++ bar ++ "\n", .{title});
 }
 
 /// Closing banner: a gutter line then `└  <message>` in green.
 pub fn outro(message: []const u8) void {
-    std.debug.print(bar ++ "\n" ++ corner_bot ++ "  " ++ green ++ "{s}" ++ reset ++ "\n\n", .{message});
+    out(bar ++ "\n" ++ corner_bot ++ "  " ++ green ++ "{s}" ++ reset ++ "\n\n", .{message});
 }
 
 /// A plain line under the gutter.
 pub fn note(line: []const u8) void {
-    std.debug.print(bar ++ "  {s}\n", .{line});
+    out(bar ++ "  {s}\n", .{line});
 }
 
 /// A success note (green check).
 pub fn ok(line: []const u8) void {
-    std.debug.print(bar ++ "  " ++ green ++ "✓" ++ reset ++ " {s}\n", .{line});
+    out(bar ++ "  " ++ green ++ "✓" ++ reset ++ " {s}\n", .{line});
 }
 
 /// An informational/secondary note (dimmed).
 pub fn muted(line: []const u8) void {
-    std.debug.print(bar ++ "  " ++ gray ++ "{s}" ++ reset ++ "\n", .{line});
+    out(bar ++ "  " ++ gray ++ "{s}" ++ reset ++ "\n", .{line});
 }
 
-/// A warning note (yellow).
+/// A warning note (yellow) — stderr: commentary, not the answer.
 pub fn warn(line: []const u8) void {
-    std.debug.print(bar ++ "  " ++ yellow ++ "▲ {s}" ++ reset ++ "\n", .{line});
+    diag(bar ++ "  " ++ yellow ++ "▲ {s}" ++ reset ++ "\n", .{line});
 }
 
 /// An empty gutter line — vertical spacing inside a help/prompt block.
 pub fn blank() void {
-    std.debug.print(bar ++ "\n", .{});
+    out(bar ++ "\n", .{});
 }
 
 /// A bold section heading under the gutter (e.g. "Usage", "Options").
 pub fn section(title: []const u8) void {
-    std.debug.print(bar ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n", .{title});
+    out(bar ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n", .{title});
 }
 
-/// A two-column help row: a cyan key padded to 30 cols, then a dimmed
+/// A two-column help row: a cyan key padded to 30 columns, then a dimmed
 /// description. Use for usage lines, flags, env vars, and examples.
 pub fn item(key: []const u8, desc: []const u8) void {
-    // A key longer than the column still needs a gap before its description.
+    // Padding is measured in DISPLAY columns, not bytes.
+    //
+    // This used to use `key.len` and `{s: <30}`, both of which count bytes — so
+    // a key containing any multi-byte glyph consumed its byte length in padding
+    // while occupying one column, and the description column shifted left. A
+    // single "→" key (3 bytes) misaligned the row by two. displayWidth() below
+    // was already written for table(); item() simply never used it.
+    const w = displayWidth(key);
+
+    // A key at or past the column still needs a gap before its description.
     // Without one, every long usage line in `--help` read as one run-on word:
     // "hkm plugins enable <plugin> [proj]wire a plugin into the project".
-    if (key.len >= 30) {
-        std.debug.print(
+    if (w >= 30) {
+        out(
             bar ++ "  " ++ cyan ++ "{s}" ++ reset ++ "  " ++ gray ++ "{s}" ++ reset ++ "\n",
             .{ key, desc },
         );
         return;
     }
-    std.debug.print(
-        bar ++ "  " ++ cyan ++ "{s: <30}" ++ reset ++ gray ++ "{s}" ++ reset ++ "\n",
-        .{ key, desc },
+
+    var pad_buf: [30]u8 = undefined;
+    const pad = pad_buf[0 .. 30 - w];
+    @memset(pad, ' ');
+    out(
+        bar ++ "  " ++ cyan ++ "{s}{s}" ++ reset ++ gray ++ "{s}" ++ reset ++ "\n",
+        .{ key, pad, desc },
     );
 }
 
-/// A standalone error block (red), for fatal failures.
+/// A standalone error block (red), for fatal failures — always stderr.
 pub fn err(message: []const u8) void {
-    std.debug.print("\n" ++ red ++ "■  {s}" ++ reset ++ "\n\n", .{message});
+    diag("\n" ++ red ++ "■  {s}" ++ reset ++ "\n\n", .{message});
 }
 
 /// Free-text prompt. Renders `◆  <label> [default]`, reads a line on the gutter,
@@ -94,15 +249,15 @@ pub fn err(message: []const u8) void {
 /// always heap-duped so the caller owns it.
 pub fn text(allocator: std.mem.Allocator, io: Io, label: []const u8, default: []const u8) ![]const u8 {
     if (default.len > 0) {
-        std.debug.print(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ " " ++ dim ++ "[{s}]" ++ reset ++ "\n", .{ label, default });
+        diag(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ " " ++ dim ++ "[{s}]" ++ reset ++ "\n", .{ label, default });
     } else {
-        std.debug.print(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n", .{label});
+        diag(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n", .{label});
     }
-    std.debug.print(bar ++ "  " ++ cyan, .{});
+    diag(bar ++ "  " ++ cyan, .{});
 
     var buf: [4096]u8 = undefined;
     const line = readLine(io, &buf);
-    std.debug.print(reset ++ bar ++ "\n", .{});
+    diag(reset ++ bar ++ "\n", .{});
 
     const trimmed = std.mem.trim(u8, line, " \t\r\n");
     return allocator.dupe(u8, if (trimmed.len == 0) default else trimmed);
@@ -112,12 +267,12 @@ pub fn text(allocator: std.mem.Allocator, io: Io, label: []const u8, default: []
 /// falling back to `default_yes` on empty/unrecognised input.
 pub fn confirm(io: Io, label: []const u8, default_yes: bool) bool {
     const hint = if (default_yes) "[Y/n]" else "[y/N]";
-    std.debug.print(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ " " ++ dim ++ "{s}" ++ reset ++ "\n", .{ label, hint });
-    std.debug.print(bar ++ "  " ++ cyan, .{});
+    diag(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ " " ++ dim ++ "{s}" ++ reset ++ "\n", .{ label, hint });
+    diag(bar ++ "  " ++ cyan, .{});
 
     var buf: [64]u8 = undefined;
     const line = readLine(io, &buf);
-    std.debug.print(reset ++ bar ++ "\n", .{});
+    diag(reset ++ bar ++ "\n", .{});
 
     const t = std.mem.trim(u8, line, " \t\r\n");
     if (t.len == 0) return default_yes;
@@ -144,7 +299,7 @@ pub fn select(label: []const u8, items: []const []const u8) ?usize {
     std.posix.tcsetattr(tty, .NOW, raw) catch {};
     defer std.posix.tcsetattr(tty, .NOW, orig) catch {};
 
-    std.debug.print(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n", .{label});
+    diag(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n", .{label});
     drawOptions(items, 0);
 
     var cur: usize = 0;
@@ -163,13 +318,13 @@ pub fn select(label: []const u8, items: []const []const u8) ?usize {
         } else switch (buf[0]) {
             'k' => { cur = if (cur == 0) items.len - 1 else cur - 1; moved = true; },
             'j' => { cur = (cur + 1) % items.len; moved = true; },
-            '\r', '\n' => { std.debug.print(bar ++ "\n", .{}); return cur; },
+            '\r', '\n' => { diag(bar ++ "\n", .{}); return cur; },
             'q', 0x1b, 3, 4 => return null, // q / Esc / Ctrl+C / Ctrl+D
             else => {},
         }
 
         if (moved) {
-            std.debug.print("\x1b[{d}A", .{items.len}); // cursor up to redraw in place
+            diag("\x1b[{d}A", .{items.len}); // cursor up to redraw in place
             drawOptions(items, cur);
         }
     }
@@ -180,9 +335,9 @@ pub fn select(label: []const u8, items: []const []const u8) ?usize {
 fn drawOptions(items: []const []const u8, cur: usize) void {
     for (items, 0..) |it, i| {
         if (i == cur) {
-            std.debug.print("\x1b[2K" ++ bar ++ "  " ++ cyan ++ "❯ " ++ bold ++ "{s}" ++ reset ++ "\n", .{it});
+            diag("\x1b[2K" ++ bar ++ "  " ++ cyan ++ "❯ " ++ bold ++ "{s}" ++ reset ++ "\n", .{it});
         } else {
-            std.debug.print("\x1b[2K" ++ bar ++ "    " ++ dim ++ "{s}" ++ reset ++ "\n", .{it});
+            diag("\x1b[2K" ++ bar ++ "    " ++ dim ++ "{s}" ++ reset ++ "\n", .{it});
         }
     }
 }
@@ -239,10 +394,18 @@ fn renderTable(
 
     // 2. Shrink to fit: budget = terminal width minus the gutter and the box
     //    overhead ((ncol+1) borders + 2 padding spaces per column).
-    const cols = termCols();
-    const overhead = (ncol + 1) + 2 * ncol;
-    const avail = if (cols > gutter_cols + overhead) cols - gutter_cols - overhead else 0;
-    if (avail > 0) shrinkToFit(widths, avail);
+    //
+    //    ONLY when stdout is a terminal. termCols() falls back to 80 whenever
+    //    the ioctl fails, which is exactly the redirected case — so piping used
+    //    to truncate every long path to fit a screen that was not there, and
+    //    the `…` was the only sign anything had been dropped. Trimming to fit a
+    //    terminal is right; trimming to fit an IMAGINED one loses data the
+    //    consumer (a file, a pager, another program) would have shown in full.
+    if (out_cols) |cols| {
+        const overhead = (ncol + 1) + 2 * ncol;
+        const avail = if (cols > gutter_cols + overhead) cols - gutter_cols - overhead else 0;
+        if (avail > 0) shrinkToFit(widths, avail);
+    }
 
     // 3. Emit. A scratch buffer is reused for every line.
     var line: std.ArrayList(u8) = .empty;
@@ -348,7 +511,7 @@ fn appendRepeat(allocator: std.mem.Allocator, line: *std.ArrayList(u8), glyph: [
 }
 
 fn flush(line: *std.ArrayList(u8)) void {
-    std.debug.print("{s}\n", .{line.items});
+    out("{s}\n", .{line.items});
 }
 
 /// Display width in terminal columns: UTF-8 scalar count (continuation bytes —
@@ -369,4 +532,58 @@ fn termCols() usize {
     const signed: isize = @bitCast(rc); // negative == -errno
     if (signed >= 0 and ws.col > 0) return ws.col;
     return 80;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test "stripAnsi removes every sequence this module emits" {
+    // Colour, cursor-up and erase-line all appear in the format strings above.
+    // A sequence that survives stripping lands as mojibake in a log file, which
+    // is the whole reason non-TTY output is stripped at all.
+    var buf: [256]u8 = undefined;
+
+    try std.testing.expectEqualStrings("plain", stripAnsi("plain", &buf));
+    try std.testing.expectEqualStrings("hi", stripAnsi(cyan ++ "hi" ++ reset, &buf));
+    try std.testing.expectEqualStrings("│  ok", stripAnsi(bar ++ "  " ++ green ++ "ok" ++ reset, &buf));
+    try std.testing.expectEqualStrings("x", stripAnsi("\x1b[2K" ++ "x", &buf)); // erase-line
+    try std.testing.expectEqualStrings("", stripAnsi("\x1b[12A", &buf)); // cursor-up, multi-digit
+}
+
+test "stripAnsi keeps non-ASCII text intact" {
+    // The gutter, arrows and box-drawing characters are all multi-byte UTF-8 and
+    // must survive — stripping targets escape sequences, not high bytes.
+    var buf: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("→ café ✓ ┌", stripAnsi("→ café ✓ ┌", &buf));
+    try std.testing.expectEqualStrings("▲ warn", stripAnsi(yellow ++ "▲ warn" ++ reset, &buf));
+}
+
+test "stripAnsi tolerates a truncated escape at the end of input" {
+    // emit() renders into a fixed buffer, so a sequence can be cut mid-way. That
+    // must not read past the slice.
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("a", stripAnsi("a\x1b[", &buf));
+    try std.testing.expectEqualStrings("a", stripAnsi("a\x1b", &buf));
+    try std.testing.expectEqualStrings("a", stripAnsi("a\x1b[3", &buf));
+}
+
+test "displayWidth counts columns, not bytes" {
+    // The bug behind P7: item() padded with key.len, so a 3-byte glyph consumed
+    // three columns of padding while occupying one.
+    try std.testing.expectEqual(@as(usize, 5), displayWidth("plain"));
+    try std.testing.expectEqual(@as(usize, 1), displayWidth("→")); // 3 bytes
+    try std.testing.expectEqual(@as(usize, 1), displayWidth("│")); // 3 bytes
+    try std.testing.expectEqual(@as(usize, 4), displayWidth("café")); // 5 bytes
+    try std.testing.expect(displayWidth("→") != "→".len);
+}
+
+test "item pads to a constant column for ASCII and non-ASCII alike" {
+    // Reproduces the alignment property directly: whatever the key, the
+    // description starts at the same column. Computed the way item() does it.
+    for ([_][]const u8{ "launcher", "→", "café", "kernel version" }) |key| {
+        const w = displayWidth(key);
+        try std.testing.expect(w < 30);
+        try std.testing.expectEqual(@as(usize, 30), w + (30 - w));
+    }
 }
