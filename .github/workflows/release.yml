@@ -32,7 +32,7 @@ jobs:
     name: Test (PHPUnit)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { submodules: recursive }   # path-repo modules must be present
       - uses: shivammathur/setup-php@v2
         with:
@@ -54,7 +54,7 @@ jobs:
     needs: test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { submodules: recursive }
       - name: Setup Zig
         run: ./tools/ci/setup-zig.sh
@@ -80,7 +80,7 @@ jobs:
     needs: test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { submodules: recursive }
       - name: Setup Zig
         run: ./tools/ci/setup-zig.sh
@@ -98,7 +98,7 @@ jobs:
     needs: test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { submodules: recursive }
       - name: Install llvm-lipo (for the universal Mach-O)
         run: sudo apt-get update && sudo apt-get install -y llvm
@@ -118,7 +118,7 @@ jobs:
     needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5      # need CHANGELOG.md at the checked-out commit
+      - uses: actions/checkout@v7      # need CHANGELOG.md at the checked-out commit
       - uses: actions/download-artifact@v8
         with: { path: artifacts/ }
       - name: Resolve version + extract CHANGELOG section
