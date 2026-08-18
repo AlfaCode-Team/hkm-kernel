@@ -78,8 +78,23 @@ fn reportPassthroughFailure(
     cli: []const u8,
     cmd: []const u8,
 ) u8 {
+    // Order matters: spawn() launches PHP with `cli` as its ARGUMENT, so a
+    // missing `cli` is not a PHP problem. Checking php first would have blamed
+    // the interpreter for a kernel that simply is not installed.
     const have_php = util.onPath(allocator, io, env, php);
     const have_cli = util.fileExists(io, cli);
+
+    if (have_php and !have_cli) {
+        prompt.err(std.fmt.allocPrint(
+            allocator,
+            "the kernel's PHP CLI is missing: {s}",
+            .{cli},
+        ) catch "the kernel's PHP CLI is missing.");
+        prompt.item("diagnose it", "hkm doctor");
+        prompt.item("show installs", "hkm version");
+        prompt.item("reinstall", "hkm upgrade");
+        return 1;
+    }
 
     if (!have_php) {
         prompt.err(std.fmt.allocPrint(
@@ -91,18 +106,6 @@ fn reportPassthroughFailure(
         prompt.item("Debian/Ubuntu", "sudo apt install php8.4-cli");
         prompt.item("macOS", "brew install php");
         prompt.item("or point at it", "HKM_PHP_BIN=/full/path/to/php");
-        return 1;
-    }
-
-    if (!have_cli) {
-        prompt.err(std.fmt.allocPrint(
-            allocator,
-            "the kernel's PHP CLI is missing: {s}",
-            .{cli},
-        ) catch "the kernel's PHP CLI is missing.");
-        prompt.item("diagnose it", "hkm doctor");
-        prompt.item("show installs", "hkm version");
-        prompt.item("reinstall", "hkm upgrade");
         return 1;
     }
 
