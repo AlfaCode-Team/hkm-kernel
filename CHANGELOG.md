@@ -71,6 +71,12 @@ below was reproduced against the shipped `--release=small` binary.
   a full disk — left a truncated registry rather than the previous one. Both now
   write a sibling temp file and `rename()` over the target, the same pattern
   `install.sh` and the launcher install already used.
+- **Every unknown long option crashed the CLI parser.** `php-io-cli`'s
+  long-option branch recorded a different array shape than its two siblings, and
+  `rejectUnknownOptions()` reads the key it omitted — so the feature meant to
+  suggest a correction raised `TypeError: suggestOption(): Argument #1 ($name)
+  must be of type string, null given` on every unknown `--flag`. Fixed upstream
+  (php-io-cli `b1dd657`) rather than pinned back, so the handling stays in.
 - **A failed `.deb` install could still report success.** The fallback path
   treated `apt-get -f install` exiting 0 as evidence the package had landed, but
   it exits 0 whenever it finds nothing to repair — so a `dpkg -i` that failed for
