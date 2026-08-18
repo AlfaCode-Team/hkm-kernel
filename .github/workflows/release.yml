@@ -66,12 +66,12 @@ jobs:
       # TWO artifacts. The tarball is the DEFAULT install path — user-local,
       # no root (tools/install.sh). The .deb is for multi-user machines and CI
       # images where a system-wide install and apt-managed PHP are the point.
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: linux-tarball, path: dist/*linux*.tar.gz }
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: linux-deb, path: dist/*.deb }
       # Published alongside the assets so `curl | sh` works without a checkout.
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: installer, path: tools/install.sh }
 
   # ── Windows: .zip (x86_64, cross-compiled) ────────────────────────────────
@@ -89,7 +89,7 @@ jobs:
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (windows)
         run: VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}" ./tools/bundle.sh windows
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: windows-zip, path: dist/*.zip }
 
   # ── macOS: universal .app tarball (arm64 + x86_64), built ON LINUX ─────────
@@ -109,7 +109,7 @@ jobs:
         with: { php-version: "8.4", tools: composer }
       - name: Bundle (macos)
         run: VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}" ./tools/bundle.sh macos
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: macos-app, path: dist/*.tar.gz }
 
   # ── Publish GitHub Release with all artifacts ─────────────────────────────
@@ -119,7 +119,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5      # need CHANGELOG.md at the checked-out commit
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with: { path: artifacts/ }
       - name: Resolve version + extract CHANGELOG section
         id: notes
@@ -137,7 +137,7 @@ jobs:
           else
             echo "No CHANGELOG entry for $VERSION — using auto-generated notes only."
           fi
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           # When called from auto-release the ref is a branch, so name the tag
           # explicitly; on a tag push this matches GITHUB_REF_NAME anyway.

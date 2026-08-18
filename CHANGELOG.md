@@ -29,6 +29,13 @@ below was reproduced against the shipped `--release=small` binary.
 - `hkm doctor` and `hkm version` share one PATH lookup with the launcher
   passthrough (`util.findOnPath`). Three private copies of "which binary would
   actually run" is three chances to disagree.
+- **CI actions moved off the deprecated Node 20 runtime.** `upload-artifact`
+  v5→v7, `download-artifact` v5→v8, `codeql-action/upload-sarif` v3→v4 and
+  `action-gh-release` v2→v3 all declared `node20`, which the runners were
+  already forcing onto Node 24. A `.github/dependabot.yml` now watches the
+  `github-actions` ecosystem weekly and groups the bumps into one PR, so the
+  next runtime deprecation arrives as a reviewable change rather than a notice
+  in the log of a workflow that still passes.
 
 ### Fixed
 - **Command output went to stderr, so nothing could be piped.** The whole
