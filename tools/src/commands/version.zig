@@ -224,17 +224,7 @@ fn warnings(
     }
 }
 
-/// First match for `name` on PATH — the one a bare command actually runs.
-fn findOnPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap, name: []const u8) ?[]const u8 {
-    const path = env.get("PATH") orelse return null;
-    var it = std.mem.splitScalar(u8, path, ':');
-    while (it.next()) |dir| {
-        if (dir.len == 0) continue;
-        const cand = std.fs.path.join(allocator, &.{ dir, name }) catch continue;
-        if (util.fileExists(io, cand)) return cand;
-    }
-    return null;
-}
+const findOnPath = util.findOnPath;
 
 fn printHelp() void {
     prompt.intro("hkm version");
@@ -245,8 +235,6 @@ fn printHelp() void {
     prompt.section("What the columns mean");
     prompt.item("kernel version", "from <kernel>/composer.json — the code that actually runs");
     prompt.item("launcher", "the hkm binary for that scope, and the version it was built as");
-    // Spelled out rather than printed as the bare glyph: prompt.item pads keys
-    // by byte length, and a 3-byte arrow would misalign the whole block.
-    prompt.item("arrow marker", "the install this invocation resolves");
+    prompt.item("→", "the install this invocation resolves");
     prompt.outro("a launcher and kernel that disagree is why an upgrade can look like a no-op");
 }

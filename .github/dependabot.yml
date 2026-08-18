@@ -1,0 +1,28 @@
+# Keeps GitHub Actions current so a runtime deprecation is a pull request, not a
+# warning nobody sees.
+#
+# The Node 20 deprecation is the case this exists for: five actions kept working
+# while the runners forced them onto Node 24, and the only signal was a notice in
+# the log of a workflow that still passed. Pinned majors do not rot loudly — they
+# rot silently until the forced runtime is withdrawn and every workflow fails at
+# once. A weekly PR turns that into something reviewable.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Matches the Conventional Commits style the rest of the history uses, so
+      # these land in the CHANGELOG tooling like anything else.
+      prefix: ci
+    labels:
+      - dependencies
+    groups:
+      # One PR for all of them: they are bumped together in practice (upload and
+      # download artifact must stay compatible), and five separate PRs for the
+      # same deprecation is five reviews of the same decision.
+      actions:
+        patterns:
+          - "*"

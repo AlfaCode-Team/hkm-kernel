@@ -43,6 +43,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var env = try init.environ.createMap(allocator);
     defer env.deinit();
 
+    // Bind the output streams before anything prints — same contract as the
+    // hkm launcher: results to stdout, diagnostics to stderr, colour only when
+    // the destination is a terminal.
+    prompt.init(io, &env);
+
     // Make already-saved config visible to resolution below.
     userconfig.load(allocator, io, &env);
 
@@ -58,7 +63,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         prompt.item("path", p);
         if (std.Io.Dir.cwd().readFileAlloc(io, p, allocator, .limited(64 * 1024))) |c| {
             prompt.blank();
-            std.debug.print("{s}\n", .{c});
+            // The whole point of `print` is to be captured, so the contents go
+            // to stdout. It rendered via std.debug.print (stderr), so
+            // `hkm-config print > cfg.env` produced an empty file — the same
+            // bug prompt.zig fixed for every other command.
+            prompt.raw(c);
         } else |_| prompt.muted("(file does not exist yet — run `hkm-config` to create it)");
         return;
     }

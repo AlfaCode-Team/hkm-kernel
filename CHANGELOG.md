@@ -6,6 +6,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-18
+
+Follows 1.3.2 within a day, and the theme is narrower: 1.3.2 fixed *which*
+kernel a command acts on, this one fixes *how* commands talk to the shell around
+them, plus a full uninstall. An audit of the Zig toolchain drove it — every item
+below was reproduced against the shipped `--release=small` binary.
+
+### Added
+- **`hkm uninstall`** — removes every hkm install on the machine (both kernels,
+  both pairs of launchers, the pre-1.4 user kernel, `~/.config/hkm` and the
+  shared plugin store) and deregisters the `.deb` from dpkg, while keeping **your
+  projects and the project registry**. Those two are protected by construction,
+  not by a filter: every path it can delete is computed from the install layout,
+  so a project directory cannot enter the plan at all; and `projects.json` +
+  `platform.json` are rescued out of a kernel tree into the userdata directory
+  *before* anything is deleted, so the registry survives even when its only copy
+  was inside the tree being removed. `--dry-run` prints the plan and exits;
+  system paths are reported rather than silently skipped when not root.
+
+### Changed
+- `hkm doctor` and `hkm version` share one PATH lookup with the launcher
+  passthrough (`util.findOnPath`). Three private copies of "which binary would
+  actually run" is three chances to disagree.
+- **CI actions moved off the deprecated Node 20 runtime.** `upload-artifact`
+  v5→v7, `download-artifact` v5→v8, `codeql-action/upload-sarif` v3→v4 and
+  `action-gh-release` v2→v3 all declared `node20`, which the runners were
+  already forcing onto Node 24. A `.github/dependabot.yml` now watches the
+  `github-actions` ecosystem weekly and groups the bumps into one PR, so the
+  next runtime deprecation arrives as a reviewable change rather than a notice
+  in the log of a workflow that still passes.
+
+### Fixed
+- **Command output went to stderr, so nothing could be piped.** The whole
+  `prompt` renderer used `std.debug.print`, which writes to stderr — so
+  `hkm list > projects.txt` produced an empty file and a command's results were
+  indistinguishable from its errors. Results (`intro`/`section`/`item`/`ok`/
+  `muted`/`note`/`table`/`outro`) now go to **stdout**; `err`/`warn` and every
+  interactive prompt stay on **stderr**. This was found once before and fixed a
+  single function wide (`banner.printShort`); the cause was in the shared
+  renderer all along.
+- **ANSI escapes were emitted unconditionally and `NO_COLOR` was ignored**, so
+  colour codes landed in redirected output, log files and CI transcripts.
+  Colour is now decided per stream from the rule `tools/install.sh` already
+  applied: off when `NO_COLOR` is set, when `TERM=dumb`, or when that stream is
+  not a terminal.
+- **Tables truncated to 80 columns when redirected.** `termCols()` falls back to
+  80 whenever the `ioctl` fails — exactly the non-TTY case — so piping cut the
+  end off every long path, with the `…` as the only clue. Truncation now applies
+  only when stdout really is a terminal.
+- **A mistyped command printed a raw Zig error.** Anything not handled natively
+  is forwarded to the PHP CLI, and a spawn failure propagated out of `main` as
+  `error: FileNotFound` — no filename, no mention of PHP, no pointer to
+  `hkm doctor`. The three causes (no PHP, no kernel CLI, an unknown command) are
+  now told apart and each names its own fix.
+- **Unknown flags were silently ignored, which inverted a destructive command.**
+  Every command parsed the flags it knew and dropped the rest. The token most
+  likely to be misspelled is the one that makes a command safe, so
+  `hkm uninstall --dryrun --yes` parsed as "no dry run, and don't ask" and
+  deleted the install without a prompt. `uninstall` and `upgrade` now reject
+  anything they do not recognise before acting on anything they do.
+- **`projects.json` and `plugins.lock.json` were written non-atomically.**
+  `writeFile` truncates before writing, so a process killed part way through — or
+  a full disk — left a truncated registry rather than the previous one. Both now
+  write a sibling temp file and `rename()` over the target, the same pattern
+  `install.sh` and the launcher install already used.
+- **Every unknown long option crashed the CLI parser.** `php-io-cli`'s
+  long-option branch recorded a different array shape than its two siblings, and
+  `rejectUnknownOptions()` reads the key it omitted — so the feature meant to
+  suggest a correction raised `TypeError: suggestOption(): Argument #1 ($name)
+  must be of type string, null given` on every unknown `--flag`. Fixed upstream
+  (php-io-cli `b1dd657`) rather than pinned back, so the handling stays in.
+- **`hkm uninstall` could destroy the registry it promises to keep** (found in
+  review). Two holes: `HKM_USERDATA_DIR` may point INSIDE a deletion target —
+  `/opt/hkm-kernel/projects` is the obvious case — so the plan listed it under
+  "Will KEEP" and deleted its parent moments later; and `rescueRegistry`
+  swallowed every write failure, so a failed rescue was followed by the delete
+  anyway while the command reported success. It now refuses the first layout
+  outright and aborts before removing anything if the rescue fails. Rescued
+  files are written atomically.
+- **Output fixes that had gaps of their own** (found in review): `hkm-config
+  print` still wrote the config to stderr; a line longer than 8 KiB fell back to
+  `std.debug.print` and silently changed stream; remediation text printed after
+  an error went to stdout, splitting one message across two streams;
+  `writeFileAtomic` used a fixed temp name two processes could collide on;
+  `findOnPath` skipped empty `PATH` entries, which POSIX defines as the current
+  directory; the passthrough blamed a missing PHP for a missing kernel CLI; and
+  `--` ended flag VALIDATION but not flag PARSING, so `hkm upgrade -- --system`
+  still selected the system scope.
+- **A failed `.deb` install could still report success.** The fallback path
+  treated `apt-get -f install` exiting 0 as evidence the package had landed, but
+  it exits 0 whenever it finds nothing to repair — so a `dpkg -i` that failed for
+  any non-dependency reason (a truncated download, a corrupt `.deb`) was reported
+  as "updated" with the previous kernel still installed. The dependency repair is
+  now followed by a second `dpkg -i`, and that result alone is the verdict.
+- **`prompt.item` padded by byte count**, so a key containing any multi-byte
+  glyph shifted its description column left — a single `→` misaligned the row by
+  two. It now measures display width using the helper already written for
+  `table()`.
+
 ## [1.3.2] - 2026-08-17
 
 Fixes a class of failure that made installing or upgrading on a machine with an

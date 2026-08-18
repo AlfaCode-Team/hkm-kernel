@@ -10,6 +10,7 @@ const ui_cmd = @import("commands/ui.zig");
 const cli_cmd = @import("commands/cli.zig");
 const doctor_cmd = @import("commands/doctor.zig");
 const upgrade_cmd = @import("commands/upgrade.zig");
+const uninstall_cmd = @import("commands/uninstall.zig");
 const version_cmd = @import("commands/version.zig");
 const kernel = @import("lib/kernel.zig");
 const util = @import("lib/util.zig");
@@ -34,6 +35,7 @@ fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
     prompt.item("hkm update <path|name>", "refresh a project's kernel registry entry");
     prompt.item("hkm upgrade [--check]", "update YOUR install; sudo hkm upgrade updates the system one");
     prompt.item("hkm upgrade --local", "install THIS checkout over an installed kernel");
+    prompt.item("hkm uninstall", "remove every hkm install (keeps projects + registry)");
     prompt.item("hkm doctor", "diagnose the local environment");
     prompt.item("hkm version", "kernel version in each install scope (also --version, -v)");
     prompt.item("hkm help", "show this help");
@@ -59,6 +61,64 @@ fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
 fn envGet(allocator: std.mem.Allocator, map: *std.process.Environ.Map, key: []const u8) !?[]const u8 {
     const v = map.get(key) orelse return null;
     return try allocator.dupe(u8, v);
+}
+
+/// Explain why the PHP passthrough could not start.
+///
+/// Everything not handled natively in Zig is forwarded to the kernel's PHP CLI,
+/// so this one spawn is where a typo and a missing runtime both surface. It has
+/// to separate them, because the fixes are unrelated: one is "you meant a
+/// different word", the other is "this machine has no PHP".
+fn reportPassthroughFailure(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: *std.process.Environ.Map,
+    e: anyerror,
+    php: []const u8,
+    cli: []const u8,
+    cmd: []const u8,
+) u8 {
+    // Order matters: spawn() launches PHP with `cli` as its ARGUMENT, so a
+    // missing `cli` is not a PHP problem. Checking php first would have blamed
+    // the interpreter for a kernel that simply is not installed.
+    const have_php = util.onPath(allocator, io, env, php);
+    const have_cli = util.fileExists(io, cli);
+
+    if (have_php and !have_cli) {
+        prompt.err(std.fmt.allocPrint(
+            allocator,
+            "the kernel's PHP CLI is missing: {s}",
+            .{cli},
+        ) catch "the kernel's PHP CLI is missing.");
+        prompt.item("diagnose it", "hkm doctor");
+        prompt.item("show installs", "hkm version");
+        prompt.item("reinstall", "hkm upgrade");
+        return 1;
+    }
+
+    if (!have_php) {
+        prompt.err(std.fmt.allocPrint(
+            allocator,
+            "PHP is required to run `hkm {s}`, and `{s}` was not found on your PATH.",
+            .{ cmd, php },
+        ) catch "PHP was not found on your PATH.");
+        prompt.item("see what is missing", "hkm doctor");
+        prompt.item("Debian/Ubuntu", "sudo apt install php8.4-cli");
+        prompt.item("macOS", "brew install php");
+        prompt.item("or point at it", "HKM_PHP_BIN=/full/path/to/php");
+        return 1;
+    }
+
+    // PHP and the CLI both exist, so the command word itself is the suspect —
+    // `hkm` forwards anything it does not handle, and a typo lands here.
+    prompt.err(std.fmt.allocPrint(
+        allocator,
+        "could not run `hkm {s}` ({t}).",
+        .{ cmd, e },
+    ) catch "could not run that command.");
+    prompt.item("list the commands", "hkm help");
+    prompt.item("check the environment", "hkm doctor");
+    return 1;
 }
 
 fn findCliPath(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Environ.Map) ![]const u8 {
@@ -171,6 +231,11 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
     var env_map = try init.environ.createMap(allocator);
     defer env_map.deinit();
 
+    // Bind the output streams BEFORE anything can print. This decides results →
+    // stdout / diagnostics → stderr, and whether either gets colour. Until it
+    // runs, prompt falls back to stderr, so it must come first.
+    prompt.init(io, &env_map);
+
     // Load persistent config (~/.config/hkm/config.env) so values written by
     // `hkm-config` take effect. Real environment variables always win.
     userconfig.load(allocator, io, &env_map);
@@ -263,6 +328,11 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         defer scope.end();
         return try upgrade_cmd.run(scope.allocator(), io, &env_map, args);
     }
+    if (std.mem.eql(u8, cmd, "uninstall")) {
+        var scope = CmdScope.begin(mm, "uninstall");
+        defer scope.end();
+        return try uninstall_cmd.run(scope.allocator(), io, &env_map, args);
+    }
 
     // `new` / `update` are handled natively in Zig (no PHP required).
     if (std.mem.eql(u8, cmd, "new")) {
@@ -339,13 +409,21 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         try child_argv.append(pass, args[i]);
     }
 
-    var child = try std.process.spawn(io, .{
+    // A spawn failure here is the ONLY thing standing between a mistyped
+    // command and a raw Zig error as the user-facing message. Propagating it
+    // printed exactly `error: FileNotFound` on a release build — no filename,
+    // no mention of PHP, and no pointer to `hkm doctor`, the command that
+    // exists to explain a missing runtime. Both causes are known at this point,
+    // so both get said.
+    var child = std.process.spawn(io, .{
         .argv = child_argv.items,
         .environ_map = &env_map,
         .stdin = .inherit,
         .stdout = .inherit,
         .stderr = .inherit,
-    });
+    }) catch |e| {
+        return reportPassthroughFailure(pass, io, &env_map, e, php, cli, cmd);
+    };
 
     const term = try child.wait(io);
     return switch (term) {

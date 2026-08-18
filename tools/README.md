@@ -146,6 +146,40 @@ So a pin still works wherever it was actually needed; it no longer overrides an
 install sitting next to the binary. `hkm-config check` writes one only when
 self-location failed, and `hkm-config unset HKM_KERNEL_HOME` clears a stale one.
 
+### `hkm uninstall` — remove everything, keep the projects
+
+```sh
+hkm uninstall --dry-run    # print the plan, delete nothing
+hkm uninstall              # everything this user can remove
+sudo hkm uninstall         # …including the .deb under /opt + /usr/bin
+```
+
+| Removed | Kept |
+|---|---|
+| `/opt/hkm-kernel`, `~/.local/lib/hkm-kernel`, the pre-1.4 user kernel | **your projects**, wherever they live |
+| `/usr/bin/{hkm,hkm-config}`, `~/.local/bin/{hkm,hkm-config}` | **`projects.json`** + **`platform.json`** |
+| `~/.config/hkm` (config.env), the shared plugin store | |
+| the `hkm-kernel` dpkg registration (`remove`, never `purge`) | |
+
+The two kept items are protected **by construction, not by a filter**:
+
+- Every path the command can delete is *computed* from the install layout. None
+  is read from the registry, the working directory, or an argument — so a
+  project directory cannot appear in the plan at all.
+- `projects.json` and `platform.json` are **rescued into the userdata directory
+  before anything is deleted**, so the registry survives even when its only copy
+  was inside the kernel tree being removed. Reinstall later and `hkm list` still
+  shows every project.
+
+Two rules in the rescue exist because testing found them the hard way: it only
+copies from a tree it is *actually removing*, and it prefers the user's kernel
+over the system one. The `.deb` ships `projects/projects.json` as `{}` (a
+packaged conffile), and without both rules that empty default won the race to the
+destination and shadowed the user's real project list.
+
+`tools/install.sh --uninstall` remains deliberately narrow — it removes only what
+that script installed, at that prefix. `hkm uninstall` is the full removal.
+
 ### `hkm upgrade --local`
 
 Installs the current checkout over an installed kernel, obeying the same scope

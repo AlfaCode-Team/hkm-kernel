@@ -135,7 +135,27 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // `hkm upgrade` two different, predictable commands.
     var scope: ?Scope = null;
 
+    // Same reasoning as `uninstall`: an ignored typo here silently changes WHICH
+    // install is replaced. `--systm` would fall through to the privilege default
+    // and upgrade the user's install while the operator believed they had named
+    // the system one.
+    const known = [_][]const u8{
+        "--check",  "-c", "--local",  "-l", "--dry-run", "-n",
+        "--yes",    "-y", "--pre",    "--user", "-u", "--system",
+        "-s",       "--no-build", "--help", "-h",
+    };
+    if (util.unknownFlag(args[1..], &known)) |bad| {
+        prompt.err(std.fmt.allocPrint(allocator, "unknown option: {s}", .{bad}) catch "unknown option");
+        prompt.muted("  nothing was changed. Run `hkm upgrade --help` for the accepted flags.");
+        return 1;
+    }
+
     for (args[1..]) |a| {
+        // Stop where unknownFlag stops. Without this the validator tolerated
+        // everything after a `--` while the parser below kept interpreting it,
+        // so `hkm upgrade -- --system` passed validation and then selected the
+        // system scope from an argument that was explicitly quoted out.
+        if (std.mem.eql(u8, a, "--")) break;
         if (std.mem.eql(u8, a, "--check") or std.mem.eql(u8, a, "-c")) check_only = true;
         if (std.mem.eql(u8, a, "--local") or std.mem.eql(u8, a, "-l")) from_local = true;
         if (std.mem.eql(u8, a, "--dry-run") or std.mem.eql(u8, a, "-n")) dry_run = true;
@@ -455,15 +475,26 @@ fn linuxUpgrade(
             var argv = [_][]const u8{ "apt-get", "install", "-y", tmp };
             const code = run_cmd.spawnWait(io, env, &argv) catch 1;
             if (code != 0) {
-                // Fallback: dpkg then fix deps. Both results are KEPT: with them
-                // discarded, an upgrade where apt AND dpkg both failed printed
-                // "updated" and left the old kernel installed — the user then
-                // debugs a version they believe they are no longer running.
+                // Fallback: dpkg, then repair dependencies, then dpkg AGAIN —
+                // and the verdict is that SECOND dpkg, never the repair.
+                //
+                // `apt-get -f install -y` exits 0 when it finds nothing to
+                // repair. So when `dpkg -i` failed for a reason that is not a
+                // missing dependency — a truncated download, a corrupt .deb —
+                // the repair returned 0 and the old condition
+                // (`dpkg_code != 0 and fix_code != 0`) was false. The command
+                // then printed "updated" with the previous kernel still
+                // installed: the exact outcome this block exists to prevent,
+                // and the same "upgrade did nothing" the rest of this release
+                // is about. Only a dpkg that succeeds proves the package landed.
                 var dpkg = [_][]const u8{ "dpkg", "-i", tmp };
-                const dpkg_code = run_cmd.spawnWait(io, env, &dpkg) catch 1;
-                var fix = [_][]const u8{ "apt-get", "-f", "install", "-y" };
-                const fix_code = run_cmd.spawnWait(io, env, &fix) catch 1;
-                if (dpkg_code != 0 and fix_code != 0) {
+                var verdict = run_cmd.spawnWait(io, env, &dpkg) catch 1;
+                if (verdict != 0) {
+                    var fix = [_][]const u8{ "apt-get", "-f", "install", "-y" };
+                    _ = run_cmd.spawnWait(io, env, &fix) catch {};
+                    verdict = run_cmd.spawnWait(io, env, &dpkg) catch 1;
+                }
+                if (verdict != 0) {
                     prompt.err("installation FAILED — the previous kernel is still in place.");
                     prompt.muted(try std.fmt.allocPrint(allocator, "  the package is downloaded at {s}", .{tmp}));
                     prompt.muted("  try it by hand:  sudo apt-get install -y <path>");

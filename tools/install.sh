@@ -73,13 +73,20 @@ done
 
 # ── uninstall ───────────────────────────────────────────────────────────────
 if [ "$DO_UNINSTALL" -eq 1 ]; then
+  # Deliberately NARROW: this removes only what this script installed, at this
+  # prefix. It does not touch a system (.deb) install, the pre-1.4 user kernel,
+  # the config file or the plugin cache — `hkm uninstall` does all of that, and
+  # rescues the project registry out of any kernel tree before deleting it.
   say "Removing $DEST"
   rm -rf "$DEST"
   rm -f "$BINDIR/hkm" "$BINDIR/hkm-config"
   ok "Removed. Your data was left alone:"
   printf '    %s\n    %s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/hkm" \
                             "${XDG_DATA_HOME:-$HOME/.local/share}/hkm"
-  printf '  Delete those too if you want a clean slate.\n'
+  printf '\n  For a FULL removal — every install on this machine, the config and\n'
+  printf '  the plugin cache, while keeping your projects and projects.json:\n'
+  printf '      hkm uninstall --dry-run    # see the plan first\n'
+  printf '      hkm uninstall              # then do it (sudo for the .deb too)\n'
   exit 0
 fi
 

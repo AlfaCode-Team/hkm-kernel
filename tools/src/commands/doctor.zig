@@ -56,31 +56,11 @@ fn mark(present: bool) []const u8 {
     return if (present) OK else MISSING;
 }
 
-/// Locate an executable by walking PATH. Returns the FIRST match, which is the
-/// one that would actually run.
-fn findOnPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap, name: []const u8) ?[]const u8 {
-    const path = env.get("PATH") orelse return null;
-    var it = std.mem.splitScalar(u8, path, ':');
-    while (it.next()) |dir| {
-        if (dir.len == 0) continue;
-        const cand = std.fs.path.join(allocator, &.{ dir, name }) catch continue;
-        if (util.fileExists(io, cand)) return cand;
-    }
-    return null;
-}
-
-/// Every match on PATH, in order — used to detect one install shadowing another.
-fn countOnPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap, name: []const u8) usize {
-    const path = env.get("PATH") orelse return 0;
-    var n: usize = 0;
-    var it = std.mem.splitScalar(u8, path, ':');
-    while (it.next()) |dir| {
-        if (dir.len == 0) continue;
-        const cand = std.fs.path.join(allocator, &.{ dir, name }) catch continue;
-        if (util.fileExists(io, cand)) n += 1;
-    }
-    return n;
-}
+// findOnPath / countOnPath now live in lib/util.zig — doctor, version and the
+// passthrough diagnostic in main.zig all needed the same walk, and three copies
+// of "which binary would actually run" is three chances to disagree.
+const findOnPath = util.findOnPath;
+const countOnPath = util.countOnPath;
 
 fn dirOnPath(env: *EnvMap, dir: []const u8) bool {
     const path = env.get("PATH") orelse return false;
