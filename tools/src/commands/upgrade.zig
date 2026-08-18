@@ -151,6 +151,11 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     }
 
     for (args[1..]) |a| {
+        // Stop where unknownFlag stops. Without this the validator tolerated
+        // everything after a `--` while the parser below kept interpreting it,
+        // so `hkm upgrade -- --system` passed validation and then selected the
+        // system scope from an argument that was explicitly quoted out.
+        if (std.mem.eql(u8, a, "--")) break;
         if (std.mem.eql(u8, a, "--check") or std.mem.eql(u8, a, "-c")) check_only = true;
         if (std.mem.eql(u8, a, "--local") or std.mem.eql(u8, a, "-l")) from_local = true;
         if (std.mem.eql(u8, a, "--dry-run") or std.mem.eql(u8, a, "-n")) dry_run = true;
