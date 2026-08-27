@@ -1,5 +1,6 @@
 const std = @import("std");
 const new_cmd = @import("commands/new.zig");
+const install_cmd = @import("commands/install.zig");
 const update_cmd = @import("commands/update.zig");
 const run_cmd = @import("commands/run.zig");
 const list_cmd = @import("commands/list.zig");
@@ -24,6 +25,7 @@ fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
 
     prompt.section("Usage");
     prompt.item("hkm new <path> [opts]", "scaffold a new PhpServicePlatform project");
+    prompt.item("hkm install [path|name]", "register a project, restore var/userdata/plugins after a git clone");
     prompt.item("hkm run [path|name]", "run a project locally (PHP dev server)");
     prompt.item("hkm cli [command]", "run a project's console interactively");
     prompt.item("hkm worker [args]", "run a project's queue worker");
@@ -336,6 +338,11 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         var scope = CmdScope.begin(mm, "new");
         defer scope.end();
         return try new_cmd.run(scope.allocator(), io, &env_map, args);
+    }
+    if (std.mem.eql(u8, cmd, "install")) {
+        var scope = CmdScope.begin(mm, "install");
+        defer scope.end();
+        return try install_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "update")) {
         var scope = CmdScope.begin(mm, "update");

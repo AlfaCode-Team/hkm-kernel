@@ -20,6 +20,7 @@ hkm <command> --help        # detailed help for a command
 
 ```
 hkm new <path> [opts]        scaffold a new PhpServicePlatform project
+hkm install [path|name]      register a project, restore var/userdata/plugins after a git clone
 hkm run [path|name]          run a project locally (PHP dev server / Swoole)
 hkm cli [command]            run a project's console interactively
 hkm worker [args]            run a project's queue worker
@@ -59,6 +60,69 @@ hkm new ./scratch --no-register
 > On creation, hkm also **publishes the assets** (config, migrations, seeders,
 > factories, views) of every plugin the new project enables — copy only, no
 > migrations are run.
+
+---
+
+## hkm install — bring a cloned/pulled project up to a runnable state
+
+`plugins/`, `var/*` and `userdata/storage/*` are gitignored on purpose: plugin
+source is fetched from its own git remote, and `var/`/`userdata/` are runtime
+state, not source. That means a project pushed to git and pulled somewhere
+else — a teammate's machine, a fresh server, CI — is missing all three and
+will not boot. Run `hkm install` once, from inside the project, to fix that.
+
+```
+hkm install [path|name] [options]
+
+--no-register             skip kernel registry registration
+--no-key                   skip creating .env / generating APP_KEY
+--no-install               skip composer install
+--no-plugins               skip fetching the bootstrap's plugins
+--no-chmod                 skip fixing var/ and userdata/ mode bits
+--verify-plugins           run each plugin's own test suite while installing (slow)
+--production, --prod       tighter mode bits (dir 0750/file 0640, no world access)
+--owner=<user>[:<group>]   chown var/ and userdata/ to this user[:group] (needs root/sudo)
+```
+
+What it does, in order: registers the project in the kernel registry; recreates
+`var/logs`, `var/cache/manifests`, `var/tmp`, `var/locks`, `var/sessions`,
+`var/queue` and `userdata/storage` if missing; chmods `var/` and `userdata/`
+(and anything already inside them) writable; creates `.env` from `.env.example`
+and generates `APP_KEY` if either is missing or empty (never overwrites a real
+key); runs `composer install`; then fetches every plugin the project's own
+`app/bootstrap/app.php` wires, the same fetch-and-lock step `hkm new` runs
+right after scaffolding.
+
+### `--production` / `--owner` — correct permissions AND ownership on a server
+
+Dev mode chmods `var/`/`userdata/` to `0775`/`0664` (group-writable, world
+readable) and stops there — good enough when the files are already owned by
+whoever is running `hkm`. On a real server that is rarely the case: the web
+server / PHP-FPM pool usually runs as its own account (`www-data`, `nginx`,
+`app`, …), and CHMOD alone cannot fix that — only `chown` can.
+
+- `--production` swaps the mode bits for `0750`/`0640` (owner + group only, no
+  "other" access at all). It does **not** guess an owner — correctness matters
+  more than convenience here, and guessing wrong on a shared box is worse than
+  asking.
+- `--owner=<user>[:<group>]` recursively `chown`s `var/` and `userdata/` to
+  that account. It is passed straight through to the system `chown`, so
+  `www-data`, `www-data:www-data` and `:www-data` (group only) all work.
+  Requires root/sudo unless the process already owns the target files — a
+  failed chown is reported per-directory, never swallowed silently.
+- Set `HKM_PROD_OWNER` once in your deploy environment to avoid repeating
+  `--owner=` on every run; an explicit `--owner=` flag always wins.
+- `--production` with no `--owner` (and no `HKM_PROD_OWNER`) still tightens the
+  mode bits, but warns that ownership was left unchanged instead of guessing.
+
+```bash
+cd my-shop && hkm install       # after a fresh git clone
+hkm install ./my-shop
+hkm install shop                # by registered name
+hkm install --no-install        # vendor/ already cached — skip composer
+sudo hkm install --production --owner=www-data:www-data   # on a server
+HKM_PROD_OWNER=www-data:www-data sudo hkm install --production
+```
 
 ---
 

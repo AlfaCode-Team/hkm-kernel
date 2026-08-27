@@ -221,6 +221,38 @@ pub fn chmodExec(io: Io, path: []const u8) void {
     f.setPermissions(io, @enumFromInt(0o755)) catch {};
 }
 
+/// Set a path's own mode bits (chmod) via `Dir.cwd()`, without having to open
+/// it first — works on both files and directories. No-op on Windows.
+/// Best-effort — swallows the error rather than propagating it, same contract
+/// as chmod600/chmodExec: a path that could not be rechmod'd (wrong owner, a
+/// read-only mount) should not fail the whole command.
+pub fn chmodPath(io: Io, path: []const u8, mode: u32) void {
+    if (@import("builtin").os.tag == .windows) return;
+    Dir.cwd().setFilePermissions(io, path, @enumFromInt(mode), .{}) catch {};
+}
+
+/// Recursively make `path` writable: `dirMode` (e.g. 0o775) on every directory
+/// including `path` itself, `fileMode` (e.g. 0o664) on every regular file
+/// beneath it. Fixes a runtime tree (var/, userdata/) left behind by a
+/// previous run under a different owner (root inside a container, a different
+/// dev's clone). Depth-limited and best-effort: a subtree that cannot be
+/// opened or rechmod'd is skipped rather than failing the caller.
+pub fn chmodTreeWritable(allocator: std.mem.Allocator, io: Io, path: []const u8, dirMode: u32, fileMode: u32, depth: usize) void {
+    chmodPath(io, path, dirMode);
+    if (depth == 0) return;
+
+    var dir = Dir.cwd().openDir(io, path, .{ .iterate = true }) catch return;
+    defer dir.close(io);
+    var it = dir.iterate();
+    while (it.next(io) catch null) |entry| {
+        const child = std.fmt.allocPrint(allocator, "{s}/{s}", .{ path, entry.name }) catch continue;
+        switch (entry.kind) {
+            .directory => chmodTreeWritable(allocator, io, child, dirMode, fileMode, depth - 1),
+            else => chmodPath(io, child, fileMode),
+        }
+    }
+}
+
 // ── path strings ────────────────────────────────────────────────────────────
 
 /// Trim trailing path separators (keeps a lone "/").
