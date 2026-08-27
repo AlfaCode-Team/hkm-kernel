@@ -6,6 +6,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-28
+
+A project's `plugins/`, `var/*` and `userdata/storage/*` are gitignored on
+purpose — plugin source is fetched from its own git remote, and `var/`/
+`userdata/` are runtime state, not source. That leaves a project pulled onto a
+new machine (a teammate's clone, a fresh server, CI) missing all three, unable
+to boot until someone reconstructs them by hand.
+
+### Added
+- **`hkm install [path|name]`** — brings a cloned/pulled project up to a
+  runnable state in one command: registers it in the kernel registry;
+  recreates `var/logs`, `var/cache/manifests`, `var/tmp`, `var/locks`,
+  `var/sessions`, `var/queue` and `userdata/storage`; creates `.env` from
+  `.env.example` and generates `APP_KEY` if either is missing or empty (never
+  touches a key that is already set); runs `composer install`; then fetches
+  every plugin the project's own `app/bootstrap/app.php` wires — the same
+  fetch-and-lock step `hkm new` runs right after scaffolding, now shared via
+  `lib/plugin_provision.zig` instead of duplicated. Every step past directory
+  creation has a `--no-*` flag.
+- **`hkm install --production` / `--owner=<user>[:<group>]`** — correct
+  permissions AND ownership on a server, not just "writable". `--production`
+  tightens `var/`/`userdata/` to `0750`/`0640` (no "other" access) instead of
+  the dev defaults `0775`/`0664`; it deliberately does not guess an owner.
+  `--owner` recursively `chown`s both directories to the account your web
+  server / PHP-FPM pool actually runs as (`user`, `user:group` and `:group`
+  all work, passed straight through to the system `chown`) and reports a
+  failed chown per-directory rather than swallowing it — unlike chmod, a
+  production ownership fix that silently didn't happen is worse than one that
+  says so. `HKM_PROD_OWNER` sets a default so a deploy environment does not
+  have to repeat `--owner=` on every run.
+
 ## [1.3.3] - 2026-08-18
 
 Follows 1.3.2 within a day, and the theme is narrower: 1.3.2 fixed *which*
