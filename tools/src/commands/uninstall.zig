@@ -66,13 +66,14 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     const known = [_][]const u8{ "--dry-run", "-n", "--yes", "-y", "--help", "-h" };
     if (util.unknownFlag(args[1..], &known)) |bad| {
         prompt.err(std.fmt.allocPrint(allocator, "unknown option: {s}", .{bad}) catch "unknown option");
-        prompt.muted("  nothing was removed. Run `hkm uninstall --help` for the accepted flags.");
+        prompt.hintLine("  nothing was removed. Run `hkm uninstall --help` for the accepted flags.");
         return 1;
     }
 
     var dry_run = false;
     var assume_yes = false;
     for (args[1..]) |a| {
+        if (std.mem.eql(u8, a, "--")) break; // end of options, as unknownFlag treats it
         if (std.mem.eql(u8, a, "--dry-run") or std.mem.eql(u8, a, "-n")) dry_run = true;
         if (std.mem.eql(u8, a, "--yes") or std.mem.eql(u8, a, "-y")) assume_yes = true;
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
@@ -135,6 +136,35 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         return 0;
     }
 
+    // ── The registry must not live inside something we are about to delete ───
+    //
+    // "Kept" and "removed" are only different outcomes while the kept path sits
+    // OUTSIDE every target. HKM_USERDATA_DIR is operator-settable and can point
+    // straight into one — `/opt/hkm-kernel/projects` is the obvious case, since
+    // that is where the registry lived before it was migrated out. The plan
+    // would then list that directory under "Will KEEP" and delete its parent a
+    // moment later, which is precisely the loss this command promises cannot
+    // happen. Refuse instead of guessing: moving the registry is the operator's
+    // decision, and either choice they make is destructive to get wrong.
+    if (keep_dir) |k| {
+        for (targets.items) |t| {
+            if (!t.present or !t.is_dir) continue;
+            if (t.needs_root and !is_root) continue; // not ours to delete
+            if (!util.isInside(k, t.path)) continue;
+
+            prompt.err(try std.fmt.allocPrint(
+                allocator,
+                "the registry directory is inside a directory this would delete.",
+                .{},
+            ));
+            prompt.item("registry", k);
+            prompt.item("would delete", t.path);
+            prompt.muted("  nothing was removed. Move the registry somewhere outside the install first:");
+            prompt.muted("    hkm-config set HKM_USERDATA_DIR ~/.local/share/hkm   # then re-run");
+            return 1;
+        }
+    }
+
     // ── Show it ─────────────────────────────────────────────────────────────
     prompt.section("Will remove");
     var rows: std.ArrayList([]const []const u8) = .empty;
@@ -158,8 +188,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     } else {
         prompt.warn("could not resolve a registry directory (no HOME) — nothing to preserve.");
     }
-    prompt.muted("  your projects are never touched: no path above is read from the registry,");
-    prompt.muted("  the working directory, or an argument — every one is a fixed install path.");
+    prompt.hintLine("  your projects are never touched: no path above is read from the registry,");
+    prompt.hintLine("  the working directory, or an argument — every one is a fixed install path.");
 
     if (dry_run) {
         prompt.blank();
@@ -178,7 +208,18 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // The only copy of projects.json may live inside a kernel tree that is about
     // to go (that is where it lived before `hkm-config check` migrated it out).
     // Copying first means the guarantee holds even then.
-    if (keep_dir) |k| rescueRegistry(allocator, io, k, targets.items, is_root);
+    if (keep_dir) |k| {
+        rescueRegistry(allocator, io, k, targets.items, is_root) catch |e| {
+            prompt.err(try std.fmt.allocPrint(
+                allocator,
+                "could not preserve the project registry ({t}) — nothing was removed.",
+                .{e},
+            ));
+            prompt.muted("  the registry is the one thing this command guarantees, so it stops");
+            prompt.muted("  rather than delete a kernel whose copy it failed to save.");
+            return 1;
+        };
+    }
 
     // ── Remove ───────────────────────────────────────────────────────────────
     prompt.section("Removing");
@@ -302,8 +343,12 @@ fn rescueRegistry(
     keep: []const u8,
     targets: []const Target,
     is_root: bool,
-) void {
-    Dir.cwd().createDirPath(io, keep) catch {};
+) !void {
+    Dir.cwd().createDirPath(io, keep) catch |e| switch (e) {
+        error.PathAlreadyExists => {},
+        // Nowhere to rescue TO. Continuing would delete the only copy.
+        else => return e,
+    };
 
     // Pass 1 = the user's own kernels, pass 2 = system. Ordering is the fix for
     // rule 2 above and must not be flattened back into one loop.
@@ -317,12 +362,24 @@ fn rescueRegistry(
             if (t.needs_root and !is_root) continue;
 
             for (registry_files) |f| {
-                const dest = std.fs.path.join(allocator, &.{ keep, f }) catch continue;
+                const dest = try std.fs.path.join(allocator, &.{ keep, f });
                 if (util.fileExists(io, dest)) continue; // the live copy wins
 
-                const src = std.fs.path.join(allocator, &.{ t.path, "projects", f }) catch continue;
-                const data = Dir.cwd().readFileAlloc(io, src, allocator, .limited(8 * 1024 * 1024)) catch continue;
-                Dir.cwd().writeFile(io, .{ .sub_path = dest, .data = data }) catch continue;
+                const src = try std.fs.path.join(allocator, &.{ t.path, "projects", f });
+
+                // An ABSENT source is the only tolerable failure: this kernel
+                // simply has no registry, and the next one may. Every other
+                // error propagates, because the caller is about to delete this
+                // tree and a swallowed write error means the only copy is gone
+                // while the command reports success.
+                const data = Dir.cwd().readFileAlloc(io, src, allocator, .limited(8 * 1024 * 1024)) catch |e| switch (e) {
+                    error.FileNotFound => continue,
+                    else => return e,
+                };
+
+                // Atomic, for the same reason the registry writer is: a partial
+                // rescue is indistinguishable from a complete one afterwards.
+                try util.writeFileAtomic(io, dest, data);
                 prompt.item("rescued", dest);
             }
         }
@@ -558,4 +615,20 @@ test "sudo preserves the invoking user's paths" {
     try std.testing.expectEqualStrings("/home/tester/.local/share/hkm", userdataDir(a, &env).?);
     try std.testing.expectEqualStrings("/home/tester/.config/hkm", configDir(a, &env).?);
     try std.testing.expectEqualStrings("/home/tester/.cache/hkm/plugin-store", pluginStore(a, &env).?);
+}
+
+test "a registry inside a deletion target is detected, not deleted" {
+    // The critical case: HKM_USERDATA_DIR pointing into a kernel tree. The plan
+    // would list it under "Will KEEP" and delete its parent moments later — the
+    // exact loss this command promises cannot happen. isInside is what the
+    // guard keys on, so pin its behaviour for the real layouts.
+    try std.testing.expect(util.isInside("/opt/hkm-kernel/projects", "/opt/hkm-kernel"));
+    try std.testing.expect(util.isInside("/home/u/.local/lib/hkm-kernel/projects", "/home/u/.local/lib/hkm-kernel"));
+
+    // …and the SAFE default must not trip the guard, or uninstall never runs.
+    try std.testing.expect(!util.isInside("/home/u/.local/share/hkm", "/home/u/.local/lib/hkm-kernel"));
+    try std.testing.expect(!util.isInside("/home/u/.local/share/hkm", "/opt/hkm-kernel"));
+
+    // A sibling whose name merely starts the same way is not "inside".
+    try std.testing.expect(!util.isInside("/opt/hkm-kernel-old", "/opt/hkm-kernel"));
 }

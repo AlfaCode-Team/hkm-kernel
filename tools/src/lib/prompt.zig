@@ -100,14 +100,17 @@ fn emit(to_err: bool, comptime fmt: []const u8, args: anytype) void {
 
     var buf: [8192]u8 = undefined;
     const rendered = std.fmt.bufPrint(&buf, fmt, args) catch {
-        // Longer than the buffer (a pathological path). Losing the line
-        // entirely would be worse than losing its stream, so fall back.
-        std.debug.print(fmt, args);
+        // Longer than the buffer (a pathological path). Fall back to a direct
+        // formatted write on the SAME stream — the earlier std.debug.print here
+        // silently rerouted oversized stdout lines to stderr, which is the very
+        // bug this module was changed to fix, reappearing only for long paths.
+        var w = streamFor(to_err).writerStreaming(io, &.{});
+        w.interface.print(fmt, args) catch {};
         return;
     };
 
     const colored = if (to_err) color_err else color_out;
-    const file = if (to_err) std.Io.File.stderr() else std.Io.File.stdout();
+    const file = streamFor(to_err);
 
     if (colored) {
         file.writeStreamingAll(io, rendered) catch {};
@@ -116,6 +119,23 @@ fn emit(to_err: bool, comptime fmt: []const u8, args: anytype) void {
 
     var plain: [8192]u8 = undefined;
     file.writeStreamingAll(io, stripAnsi(rendered, &plain)) catch {};
+}
+
+fn streamFor(to_err: bool) std.Io.File {
+    return if (to_err) std.Io.File.stderr() else std.Io.File.stdout();
+}
+
+/// Write a block verbatim to stdout — no gutter, no styling.
+///
+/// For content whose whole purpose is to be captured (a config file dumped by
+/// `hkm-config print`), where the gutter would corrupt what the caller reads.
+pub fn raw(block: []const u8) void {
+    const io = out_io orelse {
+        std.debug.print("{s}\n", .{block});
+        return;
+    };
+    std.Io.File.stdout().writeStreamingAll(io, block) catch {};
+    std.Io.File.stdout().writeStreamingAll(io, "\n") catch {};
 }
 
 /// Copy `src` into `dst` with CSI escape sequences removed.
@@ -239,6 +259,29 @@ pub fn item(key: []const u8, desc: []const u8) void {
     );
 }
 
+/// A remediation line that belongs with a preceding `err` / `warn` — stderr.
+///
+/// `item` and `muted` render results, so they go to stdout. The lines that
+/// FOLLOW a diagnostic are part of that diagnostic ("here is how to fix it"),
+/// and sending them to stdout split a two-line message across two streams: the
+/// error appeared in the terminal while its fix landed in the redirected file.
+pub fn hint(key: []const u8, desc: []const u8) void {
+    const w = displayWidth(key);
+    if (w >= 30) {
+        diag(bar ++ "  " ++ cyan ++ "{s}" ++ reset ++ "  " ++ gray ++ "{s}" ++ reset ++ "\n", .{ key, desc });
+        return;
+    }
+    var pad_buf: [30]u8 = undefined;
+    const pad = pad_buf[0 .. 30 - w];
+    @memset(pad, ' ');
+    diag(bar ++ "  " ++ cyan ++ "{s}{s}" ++ reset ++ gray ++ "{s}" ++ reset ++ "\n", .{ key, pad, desc });
+}
+
+/// A dimmed follow-up line for a diagnostic — stderr, for the same reason.
+pub fn hintLine(line: []const u8) void {
+    diag(bar ++ "  " ++ gray ++ "{s}" ++ reset ++ "\n", .{line});
+}
+
 /// A standalone error block (red), for fatal failures — always stderr.
 pub fn err(message: []const u8) void {
     diag("\n" ++ red ++ "■  {s}" ++ reset ++ "\n\n", .{message});
@@ -266,8 +309,8 @@ pub fn text(allocator: std.mem.Allocator, io: Io, label: []const u8, default: []
 /// Yes/No prompt. Renders `◆  <label> [Y/n]` (or `[y/N]`) and parses the answer,
 /// falling back to `default_yes` on empty/unrecognised input.
 pub fn confirm(io: Io, label: []const u8, default_yes: bool) bool {
-    const hint = if (default_yes) "[Y/n]" else "[y/N]";
-    diag(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ " " ++ dim ++ "{s}" ++ reset ++ "\n", .{ label, hint });
+    const suffix = if (default_yes) "[Y/n]" else "[y/N]";
+    diag(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ " " ++ dim ++ "{s}" ++ reset ++ "\n", .{ label, suffix });
     diag(bar ++ "  " ++ cyan, .{});
 
     var buf: [64]u8 = undefined;
@@ -291,12 +334,12 @@ pub fn select(label: []const u8, items: []const []const u8) ?usize {
     const tty = std.posix.STDIN_FILENO;
 
     const orig = std.posix.tcgetattr(tty) catch return 0; // not a TTY → first item
-    var raw = orig;
-    raw.lflag.ICANON = false;
-    raw.lflag.ECHO = false;
-    raw.lflag.ISIG = false;
-    raw.lflag.IEXTEN = false;
-    std.posix.tcsetattr(tty, .NOW, raw) catch {};
+    var raw_mode = orig;
+    raw_mode.lflag.ICANON = false;
+    raw_mode.lflag.ECHO = false;
+    raw_mode.lflag.ISIG = false;
+    raw_mode.lflag.IEXTEN = false;
+    std.posix.tcsetattr(tty, .NOW, raw_mode) catch {};
     defer std.posix.tcsetattr(tty, .NOW, orig) catch {};
 
     diag(diamond_active ++ "  " ++ bold ++ "{s}" ++ reset ++ "\n", .{label});

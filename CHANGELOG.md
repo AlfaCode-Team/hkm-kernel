@@ -108,6 +108,23 @@ below was reproduced against the shipped `--release=small` binary.
   suggest a correction raised `TypeError: suggestOption(): Argument #1 ($name)
   must be of type string, null given` on every unknown `--flag`. Fixed upstream
   (php-io-cli `b1dd657`) rather than pinned back, so the handling stays in.
+- **`hkm uninstall` could destroy the registry it promises to keep** (found in
+  review). Two holes: `HKM_USERDATA_DIR` may point INSIDE a deletion target —
+  `/opt/hkm-kernel/projects` is the obvious case — so the plan listed it under
+  "Will KEEP" and deleted its parent moments later; and `rescueRegistry`
+  swallowed every write failure, so a failed rescue was followed by the delete
+  anyway while the command reported success. It now refuses the first layout
+  outright and aborts before removing anything if the rescue fails. Rescued
+  files are written atomically.
+- **Output fixes that had gaps of their own** (found in review): `hkm-config
+  print` still wrote the config to stderr; a line longer than 8 KiB fell back to
+  `std.debug.print` and silently changed stream; remediation text printed after
+  an error went to stdout, splitting one message across two streams;
+  `writeFileAtomic` used a fixed temp name two processes could collide on;
+  `findOnPath` skipped empty `PATH` entries, which POSIX defines as the current
+  directory; the passthrough blamed a missing PHP for a missing kernel CLI; and
+  `--` ended flag VALIDATION but not flag PARSING, so `hkm upgrade -- --system`
+  still selected the system scope.
 - **A failed `.deb` install could still report success.** The fallback path
   treated `apt-get -f install` exiting 0 as evidence the package had landed, but
   it exits 0 whenever it finds nothing to repair — so a `dpkg -i` that failed for

@@ -69,8 +69,10 @@ pub fn findOnPath(allocator: std.mem.Allocator, io: Io, env: *EnvMap, name: []co
 
     const path = env.get("PATH") orelse return null;
     var it = std.mem.splitScalar(u8, path, ':');
-    while (it.next()) |dir| {
-        if (dir.len == 0) continue;
+    while (it.next()) |entry| {
+        // POSIX: an EMPTY PATH element means the current directory. Skipping it
+        // made findOnPath disagree with the shell that resolved the command.
+        const dir = if (entry.len == 0) "." else entry;
         const cand = std.fs.path.join(allocator, &.{ dir, name }) catch continue;
         if (fileExists(io, cand)) return cand;
     }
@@ -140,8 +142,16 @@ pub fn unknownFlag(args: []const []const u8, known: []const []const u8) ?[]const
 /// launcher install writes `.hkm-new` then renames — it had simply never reached
 /// the registry.
 pub fn writeFileAtomic(io: Io, path: []const u8, data: []const u8) !void {
+    // The temp name carries the pid, so two hkm processes writing the same
+    // registry cannot land on one another's staging file — one would otherwise
+    // rename a half-written copy over the target the other was still filling.
+    const pid: u32 = switch (@import("builtin").os.tag) {
+        .windows => 0,
+        .linux => @bitCast(std.os.linux.getpid()),
+        else => @bitCast(std.c.getpid()),
+    };
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp = std.fmt.bufPrint(&buf, "{s}.hkm-tmp", .{path}) catch {
+    const tmp = std.fmt.bufPrint(&buf, "{s}.hkm-tmp.{d}", .{ path, pid }) catch {
         // No room for the suffix — a direct write still beats not writing.
         return Dir.cwd().writeFile(io, .{ .sub_path = path, .data = data });
     };
