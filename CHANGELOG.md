@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.1] - 2026-08-28
+## [1.4.2] - 2026-08-28
 
 ### Added
 - **`tools/install-macos.sh`** — a macOS-specific installer. Previously
@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently finding the wrong kernel (or none). Shipped as its own release
   asset (`install-macos.sh`) and bundled inside the macOS tarball itself,
   mirroring how `install.sh` ships with the Linux one.
+
+## [1.4.1] - 2026-08-28
 
 ### Fixed
 - **`hkm upgrade --user` / `--system` crashing on a self-upgrade** — the
