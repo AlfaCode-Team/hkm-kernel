@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was marked failed. Both blocked paths now degrade to warnings that name the
   branch, a ready-made compare link, and the two settings that make the bump
   fully automatic. The release itself was never at risk; only the report was.
+- **The documented Homebrew install did not work as written.** Homebrew 6
+  refuses to load a formula from a third-party tap until it is trusted, and it
+  refuses at `brew install` rather than at `brew tap` — so the two-line
+  instruction appeared to succeed and then failed with "Refusing to load formula
+  … from untrusted tap". `brew trust alfacode-team/hkm` is now part of the
+  documented sequence, in the README and in the formula's own header.
 
 ## [1.5.0] - 2026-08-28
 
