@@ -259,7 +259,9 @@ if [[ "$want" == all || "$want" == macos ]]; then
   <key>CFBundlePackageType</key><string>APPL</string>
 </dict></plist>
 EOF
-  ( cd "$DIST" && tar -czf "hkm-kernel-${VERSION}-macos-universal.tar.gz" HKM.app )
+  cp "$TOOLS/install-macos.sh" "$DIST/install-macos.sh"
+  chmod +x "$DIST/install-macos.sh"
+  ( cd "$DIST" && tar -czf "hkm-kernel-${VERSION}-macos-universal.tar.gz" HKM.app install-macos.sh && rm -f install-macos.sh )
   say "wrote $DIST/hkm-kernel-${VERSION}-macos-universal.tar.gz"
 fi
 

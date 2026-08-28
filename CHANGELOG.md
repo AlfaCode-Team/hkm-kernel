@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.1] - 2026-08-28
 
+### Added
+- **`tools/install-macos.sh`** — a macOS-specific installer. Previously
+  `tools/install.sh` (Linux-only auto-download) simply refused to run on
+  macOS with no working alternative documented anywhere, leaving `HKM.app`
+  users to hand-discover that it needs the Gatekeeper quarantine flag cleared
+  and a `PATH` entry before `hkm` runs at all. The new installer downloads
+  (or accepts a local) `hkm-kernel-<version>-macos-universal.tar.gz`, swaps
+  `HKM.app` into `/Applications`, clears `com.apple.quarantine`, and wires
+  `hkm`/`hkm-config` onto `PATH` via a tiny `exec` wrapper script rather than
+  a symlink — `_NSGetExecutablePath` is not guaranteed to resolve through a
+  symlink the way Linux's `/proc/self/exe` does, and the launcher self-locates
+  its kernel relative to its own executable path, so a symlink risked it
+  silently finding the wrong kernel (or none). Shipped as its own release
+  asset (`install-macos.sh`) and bundled inside the macOS tarball itself,
+  mirroring how `install.sh` ships with the Linux one.
+
 ### Fixed
 - **`hkm upgrade --user` / `--system` crashing on a self-upgrade** — the
   tarball's `tools/install.sh` replaced `bin/hkm` and `bin/hkm-config` with a

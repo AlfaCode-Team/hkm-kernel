@@ -158,6 +158,9 @@ if [ -n "$TARBALL" ]; then
   say "Using $TARBALL"
 else
   OS="$(uname -s)"
+  if [ "$OS" = "Darwin" ]; then
+    die "macOS uses a separate installer — tools/install-macos.sh (curl -fsSL https://github.com/$REPO/releases/latest/download/install-macos.sh | sh)"
+  fi
   [ "$OS" = "Linux" ] || die "auto-download supports Linux; on $OS use the .app/.zip bundle, or pass a tarball"
   ARCH="$(arch_slug)"
 

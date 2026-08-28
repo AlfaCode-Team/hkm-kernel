@@ -65,6 +65,29 @@ the run.
 Installing **PHP and its extensions** is the one part that needs an
 administrator. Everything else `doctor` reports, you can fix yourself.
 
+### macOS
+
+`tools/install.sh`'s auto-download only covers the Linux tarball; on macOS use
+`tools/install-macos.sh` instead — it installs `HKM.app` to `/Applications`,
+clears the Gatekeeper quarantine flag (required for an unsigned/unnotarized
+build to run at all), and wires `hkm`/`hkm-config` onto `PATH` via a tiny
+wrapper script:
+
+```sh
+curl -fsSL https://github.com/AlfaCode-Team/hkm-kernel/releases/latest/download/install-macos.sh | sh
+
+# or, from a downloaded tarball
+./tools/install-macos.sh hkm-kernel-1.4.1-macos-universal.tar.gz
+./tools/install-macos.sh --uninstall
+```
+
+`HKM.app` is not a double-click GUI app — `Contents/MacOS/hkm` is the same CLI
+binary as every other platform, just wrapped for Gatekeeper/Finder. The
+launcher self-locates its kernel relative to its own executable path, which is
+why the installer writes an `exec` wrapper script rather than a symlink onto
+`PATH` — see the comment at the top of `install-macos.sh` for why a symlink is
+unsafe here.
+
 ### The `.deb` (system-wide, needs root)
 
 `hkm-kernel_<version>_amd64.deb` installs `/opt/hkm-kernel` + `/usr/bin/hkm` for

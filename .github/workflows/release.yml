@@ -111,6 +111,10 @@ jobs:
         run: VERSION="${RELEASE_VERSION:-${GITHUB_REF_NAME#v}}" ./tools/bundle.sh macos
       - uses: actions/upload-artifact@v7
         with: { name: macos-app, path: dist/*.tar.gz }
+      # Published alongside the assets so `curl | sh` works without a checkout
+      # — same reasoning as the Linux `installer` artifact below.
+      - uses: actions/upload-artifact@v7
+        with: { name: macos-installer, path: tools/install-macos.sh }
 
   # ── Publish GitHub Release with all artifacts ─────────────────────────────
   release:
@@ -148,6 +152,7 @@ jobs:
             artifacts/windows-zip/*.zip
             artifacts/macos-app/*.tar.gz
             artifacts/installer/install.sh
+            artifacts/macos-installer/install-macos.sh
           # Curated section (if present) goes first; GitHub appends the
           # auto-generated "What's Changed" / contributors below it.
           body_path: ${{ steps.notes.outputs.has_notes == 'true' && 'release-body.md' || '' }}
