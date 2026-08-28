@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-28
+
+### Fixed
+- **`hkm upgrade --user` / `--system` crashing on a self-upgrade** — the
+  tarball's `tools/install.sh` replaced `bin/hkm` and `bin/hkm-config` with a
+  plain `cp`, which truncates and writes INTO the existing file. Since the
+  process running the upgrade IS that exact binary, the kernel it's running
+  under refuses with `cp: cannot create regular file '.../hkm': Text file
+  busy` — the same failure `hkm upgrade --local` was fixed for previously, just
+  never carried over to this installer. Now stages each binary beside its
+  target and `mv`s it over, so the running process keeps its old (unlinked)
+  inode and the next invocation picks up the new build.
+
 ## [1.4.0] - 2026-08-28
 
 A project's `plugins/`, `var/*` and `userdata/storage/*` are gitignored on
