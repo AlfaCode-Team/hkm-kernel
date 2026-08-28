@@ -184,8 +184,8 @@ case ":${PATH}:" in
   *)
     warn "$BINDIR is NOT on your PATH."
     printf '  Add it, then open a new terminal:\n'
-    case "${SHELL##*/}" in
-      fish) printf '    fish_add_path %s\n' "$BINDIR" ;;
+    case "${SHELL:-}" in
+      */fish) printf '    fish_add_path %s\n' "$BINDIR" ;;
       *)    printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.zprofile\n' "$BINDIR" ;;
     esac
     ;;
