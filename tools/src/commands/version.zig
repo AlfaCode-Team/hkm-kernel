@@ -107,7 +107,10 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // ── Anything that will mislead the reader later ─────────────────────────
     try warnings(allocator, io, env, active, self_exe);
 
-    prompt.outro("upgrade this scope with: hkm upgrade   (sudo hkm upgrade for system)");
+    prompt.outro(if (install_scope.bundles_apps)
+        "upgrade this install with: hkm upgrade   (--system for /Applications)"
+    else
+        "upgrade this scope with: hkm upgrade   (sudo hkm upgrade for system)");
     return 0;
 }
 
@@ -183,7 +186,9 @@ fn warnings(
     if (findOnPath(allocator, io, env, install_scope.launcher_name)) |first| {
         if (self_exe) |d| {
             const own = try std.fs.path.join(allocator, &.{ d, install_scope.launcher_name });
-            if (!std.mem.eql(u8, own, first)) {
+            // A wrapper script that execs THIS binary is how both macOS installs
+            // are reached — it is not another install shadowing this one.
+            if (!util.leadsTo(allocator, io, first, own)) {
                 note.head(&said);
                 prompt.warn("another hkm comes first on your PATH — that is the one a bare `hkm` runs.");
                 prompt.item("first on PATH", first);

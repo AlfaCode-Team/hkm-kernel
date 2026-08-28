@@ -54,12 +54,52 @@ pub const Scope = enum {
     /// How that scope is installed — used in guidance, so it names the command
     /// the reader should actually run.
     pub fn how(self: Scope) []const u8 {
+        if (bundles_apps) return switch (self) {
+            .system => "system-wide (/Applications, needs write access)",
+            .user => "user-local (~/Applications, no root)",
+        };
         return switch (self) {
             .system => "system-wide (.deb, needs root)",
             .user => "user-local (tarball, no root)",
         };
     }
 };
+
+/// Does this platform install .app BUNDLES rather than the Debian/tarball pair?
+///
+/// macOS has the same two scopes — one in your home, one machine-wide — but
+/// they are ~/Applications/HKM.app and /Applications/HKM.app. The Linux paths
+/// below are not merely unused there: reporting them listed two "not installed"
+/// rows on a machine with a perfectly good install, which is how `hkm doctor`
+/// came to advise `hkm upgrade --user` to fix an install that already worked.
+pub const bundles_apps = @import("builtin").os.tag == .macos;
+
+/// Everything below an .app bundle, shared by both macOS scopes.
+pub const mac_app_tail = "Applications/HKM.app/Contents/Resources/opt/hkm-kernel";
+
+/// The kernel root for `scope` on an .app platform.
+pub fn macAppRoot(allocator: std.mem.Allocator, env: *EnvMap, scope: Scope) ?[]const u8 {
+    return switch (scope) {
+        .system => "/" ++ mac_app_tail,
+        .user => blk: {
+            const home = homeDir(allocator, env) orelse break :blk null;
+            break :blk std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, mac_app_tail }) catch null;
+        },
+    };
+}
+
+/// The launcher directory for an .app kernel root: `<bundle>/Contents/MacOS`.
+///
+/// Not `<prefix>/bin` — that holds the wrapper SCRIPTS install-macos.sh writes,
+/// while the real binary this reports on lives inside the bundle.
+pub fn macAppBinDir(allocator: std.mem.Allocator, root: ?[]const u8) ?[]const u8 {
+    const r = root orelse return null;
+    // root is <bundle>/Contents/Resources/opt/hkm-kernel → up 3 to <bundle>/Contents
+    const opt = std.fs.path.dirname(r) orelse return null;
+    const resources = std.fs.path.dirname(opt) orelse return null;
+    const contents = std.fs.path.dirname(resources) orelse return null;
+    return std.fmt.allocPrint(allocator, "{s}/MacOS", .{contents}) catch null;
+}
 
 /// The system kernel root. Fixed by the .deb's own layout.
 pub const system_root = "/opt/hkm-kernel";
@@ -76,7 +116,15 @@ pub const system_bin_dir = "/usr/bin";
 pub const system_bin_dirs = [_][]const u8{ "/usr/bin", "/usr/local/bin", "/bin", "/sbin", "/usr/sbin" };
 
 /// Is `dir` one of the system bin directories?
+///
+/// Always false on macOS. The whole notion is a .deb fact — "a launcher here
+/// belongs to the system package, whose kernel is /opt/hkm-kernel" — and no
+/// .deb exists on macOS, so the only thing the answer can do there is mislead.
+/// `/usr/local/bin` makes that concrete: on an Intel Mac it is Homebrew's own
+/// bin directory, so a launcher installed there would have been declared the
+/// system install and pointed at a /opt/hkm-kernel that cannot exist.
 pub fn isSystemBinDir(dir: []const u8) bool {
+    if (@import("builtin").os.tag == .macos) return false;
     const d = util.trimSlash(dir);
     for (system_bin_dirs) |candidate| {
         if (std.mem.eql(u8, d, candidate)) return true;
@@ -86,15 +134,14 @@ pub fn isSystemBinDir(dir: []const u8) bool {
 
 /// The invoking user's home directory.
 ///
-/// Honours SUDO_USER, because under `sudo hkm …` HOME is root's (/root) while
+/// Honours SUDO_USER, because under `sudo hkm …` HOME is root's (/root on
+/// Linux, /var/root on macOS) while
 /// every user-scope path the command needs to REPORT belongs to the person who
 /// typed the command. Without this, `sudo hkm version` would claim there is no
 /// user install on a machine that has one.
 pub fn homeDir(allocator: std.mem.Allocator, env: *EnvMap) ?[]const u8 {
     if (env.get("SUDO_USER")) |user| {
-        if (user.len > 0 and !std.mem.eql(u8, user, "root")) {
-            return std.fmt.allocPrint(allocator, "/home/{s}", .{user}) catch null;
-        }
+        if (util.sudoUserHome(allocator, user)) |h| return h;
     }
     const home = env.get("HOME") orelse return null;
     if (home.len == 0) return null;
@@ -208,11 +255,15 @@ pub const Install = struct {
 
 /// Inspect one scope. Never fails: an absent install is a result, not an error.
 pub fn detect(allocator: std.mem.Allocator, io: Io, env: *EnvMap, scope: Scope) Install {
-    const maybe_root: ?[]const u8 = switch (scope) {
+    const maybe_root: ?[]const u8 = if (bundles_apps)
+        macAppRoot(allocator, env, scope)
+    else switch (scope) {
         .system => system_root,
         .user => userRoot(allocator, env),
     };
-    const bin_dir: ?[]const u8 = switch (scope) {
+    const bin_dir: ?[]const u8 = if (bundles_apps)
+        macAppBinDir(allocator, maybe_root)
+    else switch (scope) {
         .system => system_bin_dir,
         .user => userBinDir(allocator, env),
     };
@@ -247,7 +298,9 @@ pub fn detect(allocator: std.mem.Allocator, io: Io, env: *EnvMap, scope: Scope) 
     // A user install left at the pre-1.4 path is worth surfacing even when the
     // current one is fine — it is a second kernel on disk that a stale pin can
     // still point at.
-    if (scope == .user) {
+    // The pre-1.4 user kernel is a Linux-installer artefact; no macOS install
+    // ever wrote there, so probing for it would only add a row that cannot exist.
+    if (!bundles_apps and scope == .user) {
         if (legacyUserRoot(allocator, env)) |legacy| {
             if (!std.mem.eql(u8, legacy, root)) {
                 if (std.fs.path.join(allocator, &.{ legacy, "composer.json" })) |m| {
@@ -267,6 +320,20 @@ pub const launcher_name = if (@import("builtin").os.tag == .windows) "hkm.exe" e
 /// checkout, or an operator's custom prefix.
 pub fn scopeOf(allocator: std.mem.Allocator, env: *EnvMap, root: []const u8) ?Scope {
     const r = util.trimSlash(root);
+
+    // On an .app platform the scopes ARE the two bundle locations. Comparing
+    // against the Linux roots here made `hkm version` print "scope: neither — a
+    // checkout or a custom prefix" for a stock ~/Applications install, on the
+    // very line below a table that had just marked it as the user scope.
+    if (bundles_apps) {
+        for ([_]Scope{ .system, .user }) |sc| {
+            if (macAppRoot(allocator, env, sc)) |m| {
+                if (std.mem.eql(u8, r, util.trimSlash(m))) return sc;
+            }
+        }
+        return null;
+    }
+
     if (std.mem.eql(u8, r, system_root)) return .system;
     if (userRoot(allocator, env)) |u| {
         if (std.mem.eql(u8, r, util.trimSlash(u))) return .user;
@@ -336,8 +403,15 @@ test "sudo reports the invoking user's install, not root's" {
     try env.put("HOME", "/root");
     try env.put("SUDO_USER", "tester");
 
-    try std.testing.expectEqualStrings("/home/tester", homeDir(a, &env).?);
-    try std.testing.expectEqualStrings("/home/tester/.local/lib/hkm-kernel", userRoot(a, &env).?);
+    // The base differs per platform — /home on Linux, /Users on macOS — and
+    // asserting the Linux spelling everywhere is what let the macOS breakage
+    // (an autofs mount point that cannot be written) sit here looking tested.
+    const base = if (@import("builtin").os.tag == .macos) "/Users" else "/home";
+    const want_home = try std.fmt.allocPrint(a, "{s}/tester", .{base});
+    const want_root = try std.fmt.allocPrint(a, "{s}/tester/.local/lib/hkm-kernel", .{base});
+
+    try std.testing.expectEqualStrings(want_home, homeDir(a, &env).?);
+    try std.testing.expectEqualStrings(want_root, userRoot(a, &env).?);
 }
 
 test "SUDO_USER=root is not treated as a different user" {
@@ -362,13 +436,28 @@ test "scopeOf recognises both current roots and the legacy user one" {
     defer env.deinit();
     try env.put("HOME", "/home/tester");
 
-    try std.testing.expectEqual(Scope.system, scopeOf(a, &env, "/opt/hkm-kernel").?);
-    try std.testing.expectEqual(Scope.system, scopeOf(a, &env, "/opt/hkm-kernel/").?);
-    try std.testing.expectEqual(Scope.user, scopeOf(a, &env, "/home/tester/.local/lib/hkm-kernel").?);
-    // The pre-1.4 --user target still resolves to the user scope, so a machine
-    // holding one is diagnosed rather than reported as "neither".
-    try std.testing.expectEqual(Scope.user, scopeOf(a, &env, "/home/tester/.local/share/hkm/kernel").?);
-    // A dev checkout belongs to no install scope.
+    if (bundles_apps) {
+        // The .app pair, and a trailing slash must not change the answer.
+        const sys = macAppRoot(a, &env, .system).?;
+        const usr = macAppRoot(a, &env, .user).?;
+        try std.testing.expectEqual(Scope.system, scopeOf(a, &env, sys).?);
+        try std.testing.expectEqual(
+            Scope.system,
+            scopeOf(a, &env, try std.fmt.allocPrint(a, "{s}/", .{sys})).?,
+        );
+        try std.testing.expectEqual(Scope.user, scopeOf(a, &env, usr).?);
+        // The Linux roots are not scopes here, whatever they happen to contain.
+        try std.testing.expect(scopeOf(a, &env, "/opt/hkm-kernel") == null);
+    } else {
+        try std.testing.expectEqual(Scope.system, scopeOf(a, &env, "/opt/hkm-kernel").?);
+        try std.testing.expectEqual(Scope.system, scopeOf(a, &env, "/opt/hkm-kernel/").?);
+        try std.testing.expectEqual(Scope.user, scopeOf(a, &env, "/home/tester/.local/lib/hkm-kernel").?);
+        // The pre-1.4 --user target still resolves to the user scope, so a
+        // machine holding one is diagnosed rather than reported as "neither".
+        try std.testing.expectEqual(Scope.user, scopeOf(a, &env, "/home/tester/.local/share/hkm/kernel").?);
+    }
+
+    // A dev checkout belongs to no install scope, on any platform.
     try std.testing.expect(scopeOf(a, &env, "/home/tester/Documents/HKMCODE") == null);
 }
 
@@ -376,9 +465,15 @@ test "a launcher in a system bin dir is recognised as the system install" {
     // This is what lets /usr/bin/hkm claim /opt/hkm-kernel ahead of a
     // config-file pin. Without it the .deb launcher has no self-location at all
     // and follows whatever the last user-level installer wrote.
-    try std.testing.expect(isSystemBinDir("/usr/bin"));
-    try std.testing.expect(isSystemBinDir("/usr/bin/"));
-    try std.testing.expect(isSystemBinDir("/usr/local/bin"));
+    //
+    // The claim is Linux-shaped on purpose, so the assertion is too: there is
+    // no .deb on macOS, and /usr/local/bin there is Intel Homebrew's own bin.
+    const on_macos = @import("builtin").os.tag == .macos;
+    try std.testing.expectEqual(!on_macos, isSystemBinDir("/usr/bin"));
+    try std.testing.expectEqual(!on_macos, isSystemBinDir("/usr/bin/"));
+    try std.testing.expectEqual(!on_macos, isSystemBinDir("/usr/local/bin"));
+
+    // Never a system bin dir on any platform.
     try std.testing.expect(!isSystemBinDir("/home/tester/.local/bin"));
     try std.testing.expect(!isSystemBinDir("/opt/hkm-kernel/bin"));
 }
@@ -403,13 +498,49 @@ test "an unresolvable user scope never resolves to the system paths" {
     var env = std.process.Environ.Map.init(a);
     defer env.deinit();
 
+    // The invariant is platform-independent; only the spelling of the system
+    // root changes (/opt/hkm-kernel vs /Applications/HKM.app/…).
+    const sys_root: []const u8 = if (bundles_apps) "/" ++ mac_app_tail else system_root;
+
     const user = detect(a, threaded.io(), &env, .user);
     try std.testing.expect(!user.resolved);
-    try std.testing.expect(!std.mem.eql(u8, user.root, system_root));
+    try std.testing.expect(!std.mem.eql(u8, user.root, sys_root));
     try std.testing.expect(!user.present);
 
     // The system scope is always resolvable — its paths are constants.
     const system = detect(a, threaded.io(), &env, .system);
     try std.testing.expect(system.resolved);
-    try std.testing.expectEqualStrings(system_root, system.root);
+    try std.testing.expectEqualStrings(sys_root, system.root);
+}
+
+test "each platform's scopes are the layout its installer actually writes" {
+    // The pairing is the point: a home-directory install and a machine-wide one
+    // that mirror each other. Naming the Linux pair on macOS is what made
+    // `hkm doctor` report two absent installs beside a working bundle.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var env = std.process.Environ.Map.init(a);
+    defer env.deinit();
+    try env.put("HOME", "/home/tester");
+
+    if (bundles_apps) {
+        try std.testing.expectEqualStrings(
+            "/Applications/HKM.app/Contents/Resources/opt/hkm-kernel",
+            macAppRoot(a, &env, .system).?,
+        );
+        try std.testing.expectEqualStrings(
+            "/home/tester/Applications/HKM.app/Contents/Resources/opt/hkm-kernel",
+            macAppRoot(a, &env, .user).?,
+        );
+        // The launcher is the binary INSIDE the bundle, not the wrapper on PATH.
+        try std.testing.expectEqualStrings(
+            "/Applications/HKM.app/Contents/MacOS",
+            macAppBinDir(a, macAppRoot(a, &env, .system)).?,
+        );
+    } else {
+        try std.testing.expectEqualStrings("/opt/hkm-kernel", system_root);
+        try std.testing.expectEqualStrings("/home/tester/.local/lib/hkm-kernel", userRoot(a, &env).?);
+    }
 }

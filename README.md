@@ -185,8 +185,27 @@ sudo apt install ./hkm-kernel_<version>_amd64.deb
 hkm doctor        # verify PHP + extensions
 ```
 
-**macOS** — extract `hkm-kernel-<version>-macos-universal.tar.gz`, then run
-`HKM.app/Contents/Resources/opt/hkm-kernel/install.sh`.
+**macOS (Homebrew)** — the shortest path; `php` and `composer` come with it.
+```bash
+brew tap alfacode-team/hkm https://github.com/AlfaCode-Team/hkm-kernel
+brew install hkm
+hkm doctor
+```
+
+**macOS (installer)** — no root, like the Linux installer: `HKM.app` goes to
+`~/Applications`, the Gatekeeper quarantine flag is cleared, and `hkm` /
+`hkm-config` land on your `PATH`. Nothing is written outside your home.
+```bash
+curl -fsSL https://github.com/AlfaCode-Team/hkm-kernel/releases/latest/download/install-macos.sh | sh
+```
+Add `--system` for a machine-wide `/Applications` install — that is the only
+path that asks for sudo. An install that already exists is updated where it is,
+so re-running never leaves a stale copy shadowed by a new one.
+
+**macOS (manual)** — extract `hkm-kernel-<version>-macos-universal.tar.gz`
+wherever you want it, then run
+`HKM.app/Contents/Resources/opt/hkm-kernel/install.sh`. The launcher
+self-locates its kernel, so the bundle works from any directory.
 
 **Windows** — extract `hkm-kernel-<version>-windows-x86_64.zip`, run
 `hkm-kernel\install.bat`, and add the folder to `PATH`.
@@ -194,6 +213,11 @@ hkm doctor        # verify PHP + extensions
 The launcher **self-locates** the kernel — no environment variables required on a standard
 install. Runtime PHP dependencies are resolved with Composer on the target at install time,
 so they match your exact PHP.
+
+The Homebrew formula lives in this repository under [`HomebrewFormula/`](HomebrewFormula/hkm.rb),
+which is why the tap URL is the repo itself rather than a separate `homebrew-hkm`. It keeps the
+project registry in `~/.local/share/hkm` rather than inside the Cellar, so `brew upgrade` cannot
+take your registered projects with it.
 
 ### Requirements (verified by `hkm doctor`)
 
