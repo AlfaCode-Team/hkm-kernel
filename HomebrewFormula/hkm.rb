@@ -29,15 +29,8 @@
 class Hkm < Formula
   desc "CLI for the HKM kernel, a modular PHP service platform"
   homepage "https://github.com/AlfaCode-Team/hkm-kernel"
-  # PLACEHOLDER-DIGEST: v1.5.0 is the release that first carries this formula,
-  # so the digest below cannot exist yet and `brew install` will fail its
-  # checksum until that release ships. tools/homebrew-bump.sh rewrites the three
-  # lines under this notice and deletes the notice itself once the pin is real.
-  # No `version` line: Homebrew scans it out of the asset filename, and
-  # `brew audit` rejects stating it twice. It also removes the only way for the
-  # version and the URL to ever disagree.
   url "https://github.com/AlfaCode-Team/hkm-kernel/releases/download/v1.5.0/hkm-kernel-1.5.0-macos-universal.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "20e624db28e998cf088b19ae20453bc53c421aa0432f35a625b83515b2a3d1de"
   license "MIT"
 
   livecheck do
