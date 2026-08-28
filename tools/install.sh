@@ -304,10 +304,10 @@ case ":${PATH}:" in
   *)
     warn "$BINDIR is NOT on your PATH."
     printf '  Add it, then open a new terminal:\n'
-    case "${SHELL##*/}" in
-      zsh)  printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.zshrc\n' "$BINDIR" ;;
-      fish) printf '    fish_add_path %s\n' "$BINDIR" ;;
-      *)    printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.bashrc\n' "$BINDIR" ;;
+    case "${SHELL:-}" in
+      */zsh)  printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.zshrc\n' "$BINDIR" ;;
+      */fish) printf '    fish_add_path %s\n' "$BINDIR" ;;
+      *)      printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.bashrc\n' "$BINDIR" ;;
     esac
     ;;
 esac

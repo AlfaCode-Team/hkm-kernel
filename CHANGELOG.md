@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-08-28
+
+### Fixed
+- **`install.sh` / `install-macos.sh` crashing with `unbound variable`.** Both
+  installers' PATH hint used `${SHELL##*/}`, which throws under `set -u`
+  whenever `$SHELL` isn't exported in the invoking environment — unlike
+  `$HOME`, POSIX doesn't guarantee it, and it's commonly absent under
+  `curl | sh`, cron, and some IDE task runners. Guarded with `${SHELL:-}` and
+  matched by suffix instead, so a missing value now just falls through to the
+  generic PATH-hint case instead of aborting the whole install.
+
 ## [1.4.2] - 2026-08-28
 
 ### Added
