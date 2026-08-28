@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The Homebrew bump job failed a release that had already published.** Its PR
+  fallback pushed the bump branch, then called `gh pr create` — which the API
+  refuses unless *Settings → Actions → General → "Allow GitHub Actions to create
+  and approve pull requests"* is on, and it is off by default. The step exited
+  non-zero, so v1.5.0 shipped correctly with every asset in place while the run
+  was marked failed. Both blocked paths now degrade to warnings that name the
+  branch, a ready-made compare link, and the two settings that make the bump
+  fully automatic. The release itself was never at risk; only the report was.
+
 ## [1.5.0] - 2026-08-28
 
 ### Added
