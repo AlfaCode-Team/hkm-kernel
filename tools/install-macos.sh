@@ -3,14 +3,30 @@
 # install-macos.sh — install the HKM kernel (HKM.app) and wire up `hkm` /
 # `hkm-config` on macOS.
 #
+# NO ROOT BY DEFAULT. Like tools/install.sh on Linux, a plain run writes
+# nothing outside your home directory. `--system` opts into the machine-wide
+# location, and only that path ever asks for sudo.
+#
 #   ./install-macos.sh                                # download latest, install
 #   ./install-macos.sh hkm-kernel-1.4.1-macos-universal.tar.gz
 #   ./install-macos.sh --version v1.4.1               # download a specific tag
+#   ./install-macos.sh --system                       # /Applications, needs sudo
 #   ./install-macos.sh --uninstall
 #
 # Installs:
-#   /Applications/HKM.app                 the .app bundle (kernel + launcher)
+#   ~/Applications/HKM.app                the .app bundle (kernel + launcher)
 #   ~/.local/bin/hkm, hkm-config          tiny wrapper scripts onto PATH
+#
+# ~/Applications is a first-class macOS location, not a workaround: Finder and
+# Launchpad both show it, and it is the per-user half of the same pair as
+# /Applications. Defaulting there keeps the promise the Linux installer makes
+# in its own header — an install needs no administrator — instead of demanding
+# sudo for a CLI that will only ever be run by one user.
+#
+# An existing install is UPDATED WHERE IT IS. If /Applications/HKM.app is
+# already present this updates that, rather than silently leaving a stale copy
+# behind and shadowing it with a second one; `--user` forces the home location
+# regardless.
 #
 # Your data is NOT inside the install tree and survives upgrades:
 #   ~/.config/hkm/config.env              launcher config
@@ -40,14 +56,15 @@
 set -eu
 
 REPO="${HKM_REPO:-AlfaCode-Team/hkm-kernel}"
-APPDIR="${HKM_APPDIR:-/Applications}"
-APPDST="$APPDIR/HKM.app"
+USER_APPDIR="$HOME/Applications"
+SYS_APPDIR="/Applications"
 BINDIR="${HKM_BINDIR:-$HOME/.local/bin}"
 
 TARBALL=""
 WANT_TAG=""
 DO_UNINSTALL=0
 SKIP_COMPOSER=0
+WANT_SCOPE=""            # "user" | "system"; empty = decide from what exists
 
 # ── output helpers ──────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -61,7 +78,7 @@ warn() { printf "${C_Y}!${C_0} %s\n" "$*" >&2; }
 die()  { printf "${C_R}✗${C_0} %s\n" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '3,25p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,38p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -73,6 +90,8 @@ while [ $# -gt 0 ]; do
     -h|--help)      usage ;;
     --uninstall)    DO_UNINSTALL=1 ;;
     --version)      shift; [ $# -gt 0 ] || die "--version needs a tag (e.g. v1.4.1)"; WANT_TAG="$1" ;;
+    --user)         WANT_SCOPE=user ;;
+    --system)       WANT_SCOPE=system ;;
     --no-composer)  SKIP_COMPOSER=1 ;;
     -*)             die "unknown option: $1  (try --help)" ;;
     *)              TARBALL="$1" ;;
@@ -80,10 +99,48 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# ── where this install goes ─────────────────────────────────────────────────
+# Precedence: HKM_APPDIR → an explicit --user/--system → the install that is
+# already here → user-local. Updating in place is what stops a plain re-run
+# from leaving a stale /Applications copy behind while a new ~/Applications one
+# shadows it — two launchers, and PATH order alone deciding which `hkm` runs.
+if [ -n "${HKM_APPDIR:-}" ]; then
+  APPDIR="$HKM_APPDIR"
+elif [ "$WANT_SCOPE" = system ]; then
+  APPDIR="$SYS_APPDIR"
+elif [ "$WANT_SCOPE" = user ]; then
+  APPDIR="$USER_APPDIR"
+elif [ -d "$USER_APPDIR/HKM.app" ]; then
+  APPDIR="$USER_APPDIR"
+elif [ -d "$SYS_APPDIR/HKM.app" ]; then
+  APPDIR="$SYS_APPDIR"
+else
+  APPDIR="$USER_APPDIR"
+fi
+APPDST="$APPDIR/HKM.app"
+
 # ── uninstall ───────────────────────────────────────────────────────────────
 if [ "$DO_UNINSTALL" -eq 1 ]; then
-  say "Removing $APPDST"
-  if [ -w "$APPDIR" ]; then rm -rf "$APPDST"; else sudo rm -rf "$APPDST"; fi
+  # With two possible homes, removing only the one this run happened to resolve
+  # would leave the other installed — and a machine that still answers `hkm`
+  # after "Removed." is worse than one that refuses to. So an unqualified
+  # uninstall sweeps BOTH; naming a scope (or HKM_APPDIR) narrows it back.
+  if [ -n "${HKM_APPDIR:-}" ] || [ -n "$WANT_SCOPE" ]; then
+    APP_TARGETS="$APPDIR"
+  else
+    APP_TARGETS="$USER_APPDIR $SYS_APPDIR"
+  fi
+
+  found=0
+  for d in $APP_TARGETS; do
+    [ -d "$d/HKM.app" ] || continue
+    found=1
+    say "Removing $d/HKM.app"
+    # sudo only for a directory this user cannot write — never for ~/Applications.
+    if [ -w "$d" ]; then rm -rf "$d/HKM.app"; else sudo rm -rf "$d/HKM.app"; fi
+  done
+  [ "$found" -eq 1 ] || warn "no HKM.app found in: $APP_TARGETS"
+
   rm -f "$BINDIR/hkm" "$BINDIR/hkm-config"
   ok "Removed. Your data was left alone:"
   printf '    %s\n    %s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/hkm" \
@@ -121,7 +178,7 @@ else
   if [ -n "$WANT_TAG" ]; then
     TAG="$WANT_TAG"
   else
-    say "Looking up the latest release of $REPO…"
+    say "Looking up the latest release of ${REPO}…"
     API="https://api.github.com/repos/$REPO/releases/latest"
     fetch "$API" "$TMP/rel.json" || die "could not reach GitHub. Download the tarball and pass its path."
     TAG="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$TMP/rel.json" | head -1)"
@@ -149,7 +206,19 @@ SRC_APP="$TMP/x/HKM.app"
 # a half-copied .app is worse than the old one, and this also means a
 # currently-running `hkm` (launched from the old .app) is unaffected — it
 # keeps its old, now-unlinked inode and finishes normally.
-if [ -w "$APPDIR" ]; then SUDO=""; else SUDO="sudo"; warn "$APPDIR is not writable — using sudo"; fi
+# ~/Applications is not present on a fresh macOS account. Create it BEFORE the
+# writability test, or the default (user-local, no root) install would see a
+# missing directory, conclude it needs sudo, and prompt for a password to write
+# inside the user's own home.
+[ -d "$APPDIR" ] || mkdir -p "$APPDIR" 2>/dev/null || true
+
+if [ -w "$APPDIR" ]; then
+  SUDO=""
+else
+  SUDO="sudo"
+  warn "$APPDIR is not writable — using sudo"
+  warn "a user-local install needs no password:  $0 --user"
+fi
 
 NEW="$APPDIR/.HKM.app.new.$$"
 OLD="$APPDIR/.HKM.app.old.$$"
@@ -170,9 +239,21 @@ ok "Installed to $APPDST"
 
 # ── wrapper scripts onto PATH (see header for why not a symlink) ────────────
 mkdir -p "$BINDIR"
+# The wrapper also pins HKM_USERDATA_DIR. Without it the project registry
+# defaults to <kernel>/projects/projects.json — INSIDE the bundle — and
+# `hkm upgrade` replaces that bundle from an archive which ships its own default
+# projects.json. Every registered project would be lost on the next update, and
+# the only warning was a `hkm doctor` hint suggesting you pin it by hand. A real
+# environment variable still wins, as does a pin in ~/.config/hkm/config.env.
 for name in hkm hkm-config; do
   staged="$BINDIR/.$name.new.$$"
-  printf '#!/bin/sh\nexec "%s/Contents/MacOS/%s" "$@"\n' "$APPDST" "$name" > "$staged"
+  cat > "$staged" <<WRAPPER
+#!/bin/sh
+: "\${HKM_USERDATA_DIR:=\${XDG_DATA_HOME:-\$HOME/.local/share}/hkm}"
+export HKM_USERDATA_DIR
+[ -d "\$HKM_USERDATA_DIR" ] || mkdir -p "\$HKM_USERDATA_DIR" 2>/dev/null || true
+exec "$APPDST/Contents/MacOS/$name" "\$@"
+WRAPPER
   chmod +x "$staged"
   mv "$staged" "$BINDIR/$name"
 done

@@ -52,7 +52,7 @@ warn() { printf "${C_Y}!${C_0} %s\n" "$*" >&2; }
 die()  { printf "${C_R}✗${C_0} %s\n" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -167,7 +167,7 @@ else
   if [ -n "$WANT_TAG" ]; then
     TAG="$WANT_TAG"
   else
-    say "Looking up the latest release of $REPO…"
+    say "Looking up the latest release of ${REPO}…"
     API="https://api.github.com/repos/$REPO/releases/latest"
     fetch "$API" "$TMP/rel.json" || die "could not reach GitHub. Download the tarball and pass its path."
     # Deliberately not jq — this script must run on a bare machine.

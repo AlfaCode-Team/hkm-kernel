@@ -612,9 +612,19 @@ test "sudo preserves the invoking user's paths" {
     try env.put("HOME", "/root");
     try env.put("SUDO_USER", "tester");
 
-    try std.testing.expectEqualStrings("/home/tester/.local/share/hkm", userdataDir(a, &env).?);
-    try std.testing.expectEqualStrings("/home/tester/.config/hkm", configDir(a, &env).?);
-    try std.testing.expectEqualStrings("/home/tester/.cache/hkm/plugin-store", pluginStore(a, &env).?);
+    const base = if (@import("builtin").os.tag == .macos) "/Users" else "/home";
+    try std.testing.expectEqualStrings(
+        try std.fmt.allocPrint(a, "{s}/tester/.local/share/hkm", .{base}),
+        userdataDir(a, &env).?,
+    );
+    try std.testing.expectEqualStrings(
+        try std.fmt.allocPrint(a, "{s}/tester/.config/hkm", .{base}),
+        configDir(a, &env).?,
+    );
+    try std.testing.expectEqualStrings(
+        try std.fmt.allocPrint(a, "{s}/tester/.cache/hkm/plugin-store", .{base}),
+        pluginStore(a, &env).?,
+    );
 }
 
 test "a registry inside a deletion target is detected, not deleted" {
