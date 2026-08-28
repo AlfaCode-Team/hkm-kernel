@@ -33,7 +33,7 @@ jobs:
     name: composer audit
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { submodules: recursive }
       - uses: shivammathur/setup-php@v2
         with: { php-version: "8.4", tools: composer, coverage: none }
@@ -47,7 +47,7 @@ jobs:
     name: PHPStan
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { submodules: recursive }
       - uses: shivammathur/setup-php@v2
         with:
@@ -72,7 +72,7 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Run Semgrep (PHP + security rulesets)
         run: semgrep scan --sarif --output=semgrep.sarif --config=p/php --config=p/security-audit --config=p/secrets
         env:
