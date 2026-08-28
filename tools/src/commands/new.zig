@@ -31,9 +31,7 @@ const util = @import("../lib/util.zig");
 const services = @import("../lib/services.zig");
 const plugin_assets = @import("../lib/plugin_assets.zig");
 const plugins_cmd = @import("plugins.zig");
-const plugin_boot = @import("../lib/plugin_bootstrap.zig");
-const installer = @import("../lib/plugin_install.zig");
-const lockfile = @import("../lib/plugin_lock.zig");
+const plugin_provision = @import("../lib/plugin_provision.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -331,7 +329,9 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // from git here, which is the same path `hkm plugins install` uses.
     var plugins_missing: usize = 0;
     if (opts.install) {
-        plugins_missing = installBootstrapPlugins(allocator, io, env, opts) catch blk: {
+        plugins_missing = plugin_provision.installEnabled(allocator, io, env, opts.path, .{
+            .verify = opts.verify_plugins,
+        }) catch blk: {
             prompt.warn("Could not install the bootstrap's plugins — run 'hkm plugins install <name>' later.");
             break :blk 1;
         };
@@ -582,105 +582,6 @@ fn domainsJson(allocator: std.mem.Allocator, domains: []const []const u8) ![]con
     return out.toOwnedSlice(allocator);
 }
 
-/// Install every plugin the scaffolded bootstrap enables.
-///
-/// Reads app/bootstrap/app.php rather than a hard-coded list, so the set can
-/// never drift from what the template actually wires — a list here that fell
-/// behind the template would reproduce exactly the missing-class failure this
-/// exists to prevent.
-/// Returns the number of plugins that could NOT be installed.
-/// Record an installed plugin in plugins.lock.json, naming it if that fails.
-///
-/// The install itself succeeded, so this is not fatal — but a silent failure
-/// leaves the lock disagreeing with what is on disk, and the user with no idea
-/// which plugin to re-add.
-fn recordOrWarn(
-    allocator: std.mem.Allocator,
-    io: Io,
-    projectRoot: []const u8,
-    name: []const u8,
-    entry: lockfile.Entry,
-) void {
-    installer.recordInLock(allocator, io, projectRoot, entry) catch {
-        const msg = std.fmt.allocPrint(
-            allocator,
-            "{s}: installed, but could not be recorded in plugins.lock.json — run `hkm plugins add {s}` to repair the lock.",
-            .{ name, name },
-        ) catch return;
-        prompt.warn(msg);
-    };
-}
-
-fn installBootstrapPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, opts: Options) !usize {
-    const bootstrap = try util.join(allocator, opts.path, "app/bootstrap/app.php");
-    const source = Dir.cwd().readFileAlloc(io, bootstrap, allocator, .limited(4 * 1024 * 1024)) catch return 0;
-
-    var aliases: std.ArrayList(plugin_boot.Alias) = .empty;
-    try plugin_boot.collectAliases(allocator, source, &aliases);
-
-    var enabled: std.ArrayList(plugin_boot.Enabled) = .empty;
-    try plugin_boot.collectEnabled(allocator, source, aliases.items, &enabled);
-
-    if (enabled.items.len == 0) return 0;
-
-    prompt.section("Installing plugins");
-
-    var ok: usize = 0;
-    // Names, not just a count: the message that follows is the only place the
-    // user learns WHICH plugins are missing, and "3 of 19 failed" leaves them
-    // diffing the bootstrap against plugins/ to find out.
-    var failed: std.ArrayList([]const u8) = .empty;
-    for (enabled.items) |e| {
-        const outcome = installer.install(allocator, io, env, opts.path, e.name, .{
-            .interactive = false,
-            // Scaffolding installs ~19 pinned, already-released plugins. Running
-            // each one's suite means a composer install plus a phpunit run per
-            // plugin — tens of minutes, for versions that were tested when they
-            // were released. Verification stays the default for a deliberate
-            // single install, where it is worth the wait; here it is opt-in.
-            .verify = opts.verify_plugins,
-        }) catch {
-            try failed.append(allocator, e.name);
-            continue;
-        };
-        switch (outcome) {
-            .refused => |why| {
-                try failed.append(allocator, e.name);
-                prompt.warn(why);
-            },
-            .installed, .up_to_date, .linked, .updated => {
-                ok += 1;
-                _ = installer.report(allocator, e.name, outcome, false) catch {};
-                // A lockfile write that fails is NOT a successful install:
-                // swallowing it left the command reporting success while
-                // plugins.lock.json did not record the plugin, so the next
-                // `hkm plugins` run cannot tell it is already there.
-                switch (outcome) {
-                    .installed, .up_to_date, .linked => |entry| recordOrWarn(allocator, io, opts.path, e.name, entry),
-                    .updated => |u| recordOrWarn(allocator, io, opts.path, e.name, u.to),
-                    .refused => {},
-                }
-            },
-        }
-    }
-
-    if (failed.items.len > 0) {
-        prompt.warn(try std.fmt.allocPrint(
-            allocator,
-            "{d} of {d} plugin(s) could not be installed — the project will not boot until they are:",
-            .{ failed.items.len, enabled.items.len },
-        ));
-        // One command per plugin, and no separate list of bare names above it:
-        // the commands already name every one, and printing both meant reading
-        // the same nineteen names twice. `install` takes a SINGLE plugin — its
-        // second positional is the project path, so space-joining the names
-        // would install the first and treat the rest as a directory.
-        for (failed.items) |name| {
-            prompt.muted(try std.fmt.allocPrint(allocator, "  hkm plugins install {s}", .{name}));
-        }
-    } else {
-        prompt.ok(try std.fmt.allocPrint(allocator, "{d} plugin(s) installed", .{ok}));
-    }
-
-    return failed.items.len;
-}
+// Bootstrap plugin installation now lives in lib/plugin_provision.zig — shared
+// with `hkm install`, which needs the identical fetch-and-lock behaviour for
+// an existing project whose gitignored plugins/ did not travel with git.
