@@ -308,6 +308,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     prompt.item("git", findOnPath(allocator, io, env, "git") orelse "absent — needed by `hkm plugins` git sources");
     prompt.item("node", findOnPath(allocator, io, env, "node") orelse "absent — needed by `hkm ui` (frontend only)");
     prompt.item("npm", findOnPath(allocator, io, env, "npm") orelse "absent — needed by `hkm ui` (frontend only)");
+    prompt.item("vips", findOnPath(allocator, io, env, "vips") orelse "absent — needed by libvips-based image processing (e.g. the Vips image driver)");
 
     // ── PHP runtime & extensions ────────────────────────────────────────────
     prompt.section("PHP runtime & extensions");

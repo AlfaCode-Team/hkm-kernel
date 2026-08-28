@@ -223,9 +223,17 @@ if [ -d "$DEST" ]; then mv "$DEST" "$OLD"; fi
 mv "$NEW" "$DEST"
 rm -rf "$OLD"
 
-cp "$SRC/bin/hkm"        "$BINDIR/hkm"
-cp "$SRC/bin/hkm-config" "$BINDIR/hkm-config"
-chmod +x "$BINDIR/hkm" "$BINDIR/hkm-config"
+# Stage beside the destination, then rename over it. A plain `cp` truncates
+# and writes INTO the existing file, which fails with "Text file busy" the
+# moment that exact binary is the one currently running this script — i.e.
+# every `hkm upgrade` that reaches this installer. rename() swaps the
+# directory entry instead: the running process keeps its old (now-unlinked)
+# inode and finishes normally, and the next invocation picks up the new build.
+cp "$SRC/bin/hkm"        "$BINDIR/.hkm.new.$$"
+cp "$SRC/bin/hkm-config" "$BINDIR/.hkm-config.new.$$"
+chmod +x "$BINDIR/.hkm.new.$$" "$BINDIR/.hkm-config.new.$$"
+mv "$BINDIR/.hkm.new.$$"        "$BINDIR/hkm"
+mv "$BINDIR/.hkm-config.new.$$" "$BINDIR/hkm-config"
 ok "Installed to $DEST"
 
 # ── drop a kernel pin this install makes redundant ──────────────────────────
