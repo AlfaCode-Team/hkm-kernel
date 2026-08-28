@@ -29,7 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tools/homebrew-bump.sh` repoints the formula at a release, run by a new
     `homebrew` job in the release workflow. A tap formula pins one tarball by
     digest, so a stale one does not fail loudly — it silently installs the
-    previous version.
+    previous version. The digest is only knowable after the assets exist, so the
+    job runs post-publish and lands its commit on `main` directly where the
+    token allows it, else as an automatic pull request — `main` here requires
+    reviews, and without the fallback the bump would simply be dropped. It
+    never fails the workflow: the release is already out by then, and failing
+    would only misreport a good release as broken.
 
 ### Changed
 - **The macOS install is user-local by default — no root.** `install-macos.sh`

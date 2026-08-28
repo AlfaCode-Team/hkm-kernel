@@ -12,6 +12,11 @@
 # driven from the `homebrew` job in .github/workflows/release.yml. Do not hand-
 # edit them — bump the release and let the job commit the result.
 #
+# A release's digest cannot exist before the release does, so that job runs
+# AFTER publishing and lands the result on main: directly when the token is
+# allowed to, otherwise as an automatic pull request. Nothing here is ever a
+# number a human is expected to paste in.
+#
 # WHY A PREBUILT TARBALL AND NOT A SOURCE BUILD
 # ---------------------------------------------
 # The launcher is Zig, pinned to a *dev* toolchain (tools/.zig-version) for the
