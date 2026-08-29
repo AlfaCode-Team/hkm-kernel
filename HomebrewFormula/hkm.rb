@@ -2,7 +2,12 @@
 # Homebrew formula for the HKM kernel.
 #
 #   brew tap alfacode-team/hkm https://github.com/AlfaCode-Team/hkm-kernel
+#   brew trust alfacode-team/hkm
 #   brew install hkm
+#
+# The `brew trust` step is required: Homebrew 6 refuses to load a formula from a
+# third-party tap until it is trusted, and it refuses at `brew install` — so
+# `brew tap` reports success and the failure surfaces one command later.
 #
 # This repository doubles as its own tap: Homebrew reads formulae from a
 # `HomebrewFormula/` directory in any tapped repo, so there is no second
