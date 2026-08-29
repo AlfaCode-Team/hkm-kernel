@@ -6,7 +6,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-29
+
+### Added
+- **`Kernel::withWorkerSecret()` — the queue can finally be an authenticated
+  channel.** `WorkerLoop` has always carried a signature check, but the kernel
+  had no way to give it a key: `$signingSecret` defaulted to `''`, was never
+  passed at construction, and there was no builder method. In every deployment
+  that has ever run, the check was dead code and the worker executed whatever it
+  was handed. A queue is an input channel — whoever can write to it is calling
+  into the application — so this closes a hole, not a nicety. Defaults to
+  `JOB_SIGNING_SECRET` and stays OFF when that is unset, preserving today's
+  behaviour. It deliberately does **not** fall back to `APP_KEY`: that would
+  switch verification on for every existing application at once and reject every
+  job already in flight, since no `QueuePort` adapter signs by default. Turning
+  it on is a two-sided change — roll it out producer-first, teaching the adapter
+  to stamp `JobPayload::signatureFor()` at `push()` time.
+- **Graceful worker shutdown, a memory ceiling, and per-job timeouts.** There
+  was no `pcntl` anywhere in the kernel, so SIGTERM — what every process
+  supervisor and container runtime sends to stop a worker — killed PHP outright,
+  including in the window between `handle()` returning and `ack()` removing the
+  message. A job that had already run its side effects came back on the next
+  boot and ran them **again**. The loop now traps SIGTERM/SIGINT/SIGQUIT,
+  finishes the job it is on, resolves its ack/release/fail, and exits.
+  `run()` takes a `memoryLimitMb` so a supervised worker exits between jobs
+  rather than being OOM-killed inside one, and a job's declared `timeout` is
+  enforced with `pcntl_alarm` — best effort, since SIGALRM is dispatched between
+  opcodes and cannot preempt a job blocked inside one long query.
+- **`Request::withAttributes()`** — set several attributes in a single new
+  instance. Every `with*()` deep-clones all seven parameter bags, so a chain of
+  them pays that price once per link. `ResolveStage` attaching `route_entry`,
+  `route_params` and `target_service` is one logical step that cost three full
+  clones of a request nothing had read yet: **10.02 µs → 3.57 µs, 64% less**.
+- **`SecurityVerdict::allowWithIdentity()`** — allow while carrying an identity
+  that is not yet attached to a request. `allow()` reads the identity back *off*
+  a request, forcing a layer that has just resolved one to clone the entire
+  request so the constructor can read a single property.
+
 ### Fixed
+- **`BOOT_CACHE` never hit for the essentials shape the docs recommend.**
+  `Kernel::build()` computed `buildHash()` twice — before and after
+  `resolveEssentialModules()`, which rewrites `essentials` from proj.json's
+  DOMAINS (`tenancy.routing`) into provider CLASSES. So the stamp was written
+  under one hash and read under another, and every request recompiled all ten
+  manifests **and** rewrote the stamp on top of the recompile it had failed to
+  skip — measurably *worse* than leaving the flag off. Measured on a three-route
+  application: **2604 µs → 39 µs per request under PHP-FPM.** The hash is now
+  taken once, from the raw builder inputs; the derived class list rides in the
+  stamp's payload, never its key. `BootStampTest` tests the stamp in isolation
+  and could not see this, so `KernelBootCacheTest` builds twice through the real
+  `Kernel::build()` and watches the manifest inode.
+- **A job payload that failed verification was silently deleted.** The check
+  returned `skipped()`, which `processWithPort` then **acked** — removing the one
+  piece of evidence that something is writing to your queue. A misconfigured
+  producer and an active attacker were indistinguishable, and both looked like
+  nothing happening at all. An unverifiable payload now raises
+  `RejectedJobException`, goes through the `ErrorPipeline`, and is dead-lettered
+  via `fail()`. It is never retried: a signature that does not verify will not
+  verify on the second attempt.
+- **`retry` and `timeout` in `module.json` compiled to nothing.**
+  `CompileJobManifestStage` read `handler`, `queue`, `module` and `solves` and
+  dropped the other two, so every job in every application shared one hardcoded
+  exponential strategy and ran unbounded — while its manifest said otherwise. A
+  declaration that compiles to nothing is worse than no declaration: it reads as
+  a guarantee. Both are compiled through now and honoured per job, including the
+  `"retry": 5` shorthand; an unknown strategy falls back rather than failing the
+  boot, and `"max": 0` is raised to 1 (a job that can never run is never what it
+  meant).
+- **`hkm run` ignored its own documented default of `./`.** An `args.len <= 2`
+  guard printed usage and exited 2 before the resolver ever ran, contradicting
+  the command's module docblock, its help text, and the `resolveRoot()` call
+  below it — which already handled an empty target. It bit `hkm run --dev`
+  hardest: `--dev` is stripped before command parsing, so that invocation
+  arrived as exactly `["hkm", "run"]` and failed, while adding any unrelated flag
+  (`--port=8000`) got past the count and worked perfectly — making the failure
+  look like it was about `--dev`, or about the directory, rather than about how
+  many words were typed. Resolution now belongs entirely to `resolveRoot()`, and
+  a bare `hkm run` outside a project names the actual problem instead of dumping
+  a usage screen that does not mention it.
 - **The Homebrew bump job failed a release that had already published.** Its PR
   fallback pushed the bump branch, then called `gh pr create` — which the API
   refuses unless *Settings → Actions → General → "Allow GitHub Actions to create
@@ -21,6 +98,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instruction appeared to succeed and then failed with "Refusing to load formula
   … from untrusted tap". `brew trust alfacode-team/hkm` is now part of the
   documented sequence, in the README and in the formula's own header.
+
+### Changed
+- **A job signature now covers the whole envelope, not just `data`.** Signing
+  `data` alone left `jobClass` — the field that decides WHICH CODE RUNS —
+  unauthenticated. Capturing one legitimately signed envelope and swapping its
+  class for any other `JobContract` was enough; nothing about that required
+  forging a signature, only reusing one. The material is now
+  `jobId | jobClass | queue | maxAttempts | canonical(data)`. `attempts` is
+  deliberately excluded: the driver increments it on every `release()`, so
+  covering it would invalidate a job on its first retry — `maxAttempts` is signed
+  instead, so the retry budget cannot be widened in transit. The payload is
+  canonicalised (associative keys sorted at every depth, list order preserved)
+  because a driver round-tripping the envelope through JSON is under no
+  obligation to keep key order, and an unstable input makes an HMAC reject its
+  own legitimate messages. **No migration is required**: verification was
+  unreachable before this release, so no deployment has signed payloads in
+  flight. `JobPayload::signatureFor()` is the one implementation both producer
+  and verifier use.
+- **`SecurityGateway` no longer clones the request on its final layer.** The
+  clone existed so `SecurityVerdict::allow()` could read the identity back off
+  it, and `SecurityStage` then cloned a second time to put that identity on the
+  request the pipeline actually carries — so for the documented CSRF-then-Auth
+  stack, where the last layer is the one that authenticates, a whole request copy
+  was built and read once. A later layer still sees an earlier layer's identity;
+  only the final layer takes the shortcut. **4.17 µs → 0.87 µs, 79% less.**
 
 ## [1.5.0] - 2026-08-28
 
