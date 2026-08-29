@@ -14,8 +14,11 @@ name: Auto Release
     paths:
       - CHANGELOG.md            # only a version bump can start a release
 
+# Kept in step with the `release` job's block below — the two are separate
+# grants and drifting apart is what invalidates the workflow.
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: auto-release
@@ -75,7 +78,16 @@ jobs:
     needs: detect
     if: needs.detect.outputs.release == 'true'
     uses: ./.github/workflows/release.yml
+    # A called workflow cannot be granted more than its CALLER holds, so every
+    # permission any job in release.yml asks for must be listed here too.
+    # Omitting one is not a runtime warning: GitHub rejects the whole file
+    # before a single job starts ("startup_failure"), so no release happens and
+    # `detect` never even runs to create the tag.
+    #
+    # pull-requests: write is for release.yml's `homebrew` job, which opens a PR
+    # carrying the formula's sha256 when it cannot push to main directly.
     permissions:
       contents: write
+      pull-requests: write
     with:
       version: ${{ needs.detect.outputs.version }}

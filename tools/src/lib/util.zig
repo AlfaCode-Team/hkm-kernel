@@ -312,6 +312,50 @@ pub fn fileExists(io: Io, path: []const u8) bool {
     return true;
 }
 
+/// Does running `candidate` end up running `own_exe` — either because it IS
+/// that file, or because it is a wrapper script that execs it?
+///
+/// Both macOS install paths put a WRAPPER on PATH rather than the launcher
+/// itself (see tools/install-macos.sh's header, and the Homebrew formula), so
+/// comparing paths for equality reports a stock install as shadowed by a
+/// stranger — when the "stranger" is the very script that runs it.
+pub fn leadsTo(allocator: std.mem.Allocator, io: Io, candidate: []const u8, own_exe: []const u8) bool {
+    if (std.mem.eql(u8, candidate, own_exe)) return true;
+
+    // A wrapper is a few lines of shell. Cap the read so pointing this at a real
+    // (binary) launcher stays cheap — a genuinely different launcher is the
+    // shadowing case, and it falls out of here as `false`.
+    const body = Dir.cwd().readFileAlloc(io, candidate, allocator, .limited(64 * 1024)) catch return false;
+    return std.mem.indexOf(u8, body, own_exe) != null;
+}
+
+/// The home directory of the user named by `SUDO_USER`, on this platform.
+///
+/// Under `sudo`, HOME belongs to root (/root on Linux, /var/root on macOS)
+/// while every user-scope path the command needs to read or REPORT belongs to
+/// the person who typed it. Reconstructing that home needs the platform's own
+/// convention: Linux puts local accounts under /home, macOS under /Users.
+///
+/// The hardcoded "/home/<user>" this replaced was not merely non-native on
+/// macOS — /home there is an autofs automount (auto_home, nobrowse), so the
+/// path could not even be created. The result was a config path that silently
+/// resolved to nothing: every `sudo hkm …` lost HKM_DEV_HOME, HKM_KERNEL_HOME
+/// and HKM_USERDATA_DIR, `sudo hkm version` reported no user install on a
+/// machine that had one, and `sudo hkm-config set-kernel-home …` failed with a
+/// bare `error: Unexpected`.
+///
+/// Still a convention rather than a lookup: an account whose home sits
+/// somewhere else entirely is not covered. Doing better means getpwnam, and the
+/// statically linked Linux launcher deliberately has no libc to call it with.
+pub fn sudoUserHome(allocator: std.mem.Allocator, user: []const u8) ?[]const u8 {
+    if (user.len == 0 or std.mem.eql(u8, user, "root")) return null;
+    const base = switch (@import("builtin").os.tag) {
+        .macos => "/Users",
+        else => "/home",
+    };
+    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, user }) catch null;
+}
+
 /// True if `path` is an openable directory under `dir`.
 pub fn dirExists(dir: Dir, io: Io, path: []const u8) bool {
     var d = dir.openDir(io, path, .{}) catch return false;

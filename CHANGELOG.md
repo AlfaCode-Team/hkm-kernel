@@ -6,6 +6,237 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The Homebrew bump job failed a release that had already published.** Its PR
+  fallback pushed the bump branch, then called `gh pr create` — which the API
+  refuses unless *Settings → Actions → General → "Allow GitHub Actions to create
+  and approve pull requests"* is on, and it is off by default. The step exited
+  non-zero, so v1.5.0 shipped correctly with every asset in place while the run
+  was marked failed. Both blocked paths now degrade to warnings that name the
+  branch, a ready-made compare link, and the two settings that make the bump
+  fully automatic. The release itself was never at risk; only the report was.
+
+## [1.5.0] - 2026-08-28
+
+### Added
+- **Homebrew formula (`HomebrewFormula/hkm.rb`).**
+  `brew tap alfacode-team/hkm https://github.com/AlfaCode-Team/hkm-kernel &&
+  brew install hkm` — `php` and `composer` arrive as formula dependencies, and
+  the Gatekeeper quarantine dance disappears entirely. This repository doubles
+  as its own tap (Homebrew reads a `HomebrewFormula/` directory in any tapped
+  repo), so there is no second `homebrew-hkm` repo to keep in sync. The formula
+  consumes the same universal Mach-O the other macOS paths get rather than
+  building from source: the launcher is pinned to a Zig *dev* toolchain that
+  Homebrew's stable `zig` cannot compile. It reshapes the `.app` into the
+  `libexec/bin` + `libexec/lib/hkm-kernel` pairing the launcher already
+  self-locates against, and resolves `vendor/` by running the kernel's own
+  `install.sh` against the PHP Homebrew just installed.
+  - The `bin/` entry points are wrapper scripts, not symlinks — the same
+    `_NSGetExecutablePath` reasoning as `install-macos.sh`, plus they default
+    `HKM_USERDATA_DIR` to `~/.local/share/hkm`. Without that the project
+    registry defaults to `<kernel>/projects/projects.json` *inside the Cellar*,
+    which `brew upgrade` deletes wholesale.
+  - `tools/homebrew-bump.sh` repoints the formula at a release, run by a new
+    `homebrew` job in the release workflow. A tap formula pins one tarball by
+    digest, so a stale one does not fail loudly — it silently installs the
+    previous version. The digest is only knowable after the assets exist, so the
+    job runs post-publish and lands its commit on `main` directly where the
+    token allows it, else as an automatic pull request — `main` here requires
+    reviews, and without the fallback the bump would simply be dropped. It
+    never fails the workflow: the release is already out by then, and failing
+    would only misreport a good release as broken.
+  - `auto-release.yml` grants that job's `pull-requests: write` through to
+    `release.yml`. A called workflow cannot hold more than its caller, and the
+    shortfall is not a warning — GitHub rejects the whole file at startup, so
+    the release does not run at all and no tag is created.
+
+### Changed
+- **The macOS install is user-local by default — no root.** `install-macos.sh`
+  put `HKM.app` in `/Applications` and escalated to `sudo` whenever that was
+  not writable, which inverted on macOS the promise `tools/install.sh` makes in
+  its own header on Linux: *no root, nothing written outside your home*. It now
+  defaults to `~/Applications` — a first-class macOS location that Finder and
+  Launchpad both show — and `--system` opts into `/Applications` as the only
+  path that ever asks for a password. `--user` forces the home location.
+  - An existing install is **updated where it is**. Without that, a plain
+    re-run on a machine with `/Applications/HKM.app` would have left it in
+    place and shadowed it with a second copy in `~/Applications`, leaving two
+    launchers and `PATH` order alone to decide which `hkm` runs.
+  - `--uninstall` sweeps **both** locations unless a scope is named. Removing
+    only the one a given run resolved would leave a machine still answering
+    `hkm` after printing "Removed."
+
+### Fixed
+- **`hkm doctor` and `hkm version` described a machine that does not exist on
+  macOS.** `install_scope` modelled only the Debian/tarball pair, so both
+  commands listed `/opt/hkm-kernel` and `~/.local/lib/hkm-kernel` as "not
+  installed" beside a perfectly good bundle, and `hkm version` reported
+  `scope: neither — a checkout or a custom prefix` for a stock install on the
+  line below a table that had just marked it as the user scope. The module now
+  models the scopes each platform's installer actually writes — on macOS
+  `~/Applications/HKM.app` and `/Applications/HKM.app` — so `detect`,
+  `scopeOf` and `Scope.how()` are right for every command that asks. The
+  pre-1.4 legacy user root is no longer probed on macOS, where nothing ever
+  wrote it. `hkm upgrade --user` / `--system` now select those two locations,
+  while a bare `hkm upgrade` still updates the bundle it is running from — so a
+  custom `HKM_APPDIR` install is updated rather than shadowed by a second copy
+  in the canonical spot. The chosen root is passed down to the installer
+  instead of being resolved a second time, which is what previously let the
+  announced target and the written one differ.
+- **`hkm version` called the wrapper that runs it a shadowing install.** Same
+  wrapper blindness already fixed in `hkm doctor`, and the check now shares the
+  same helper (`util.leadsTo`) rather than a second copy of the comparison.
+- **A macOS upgrade could destroy the project registry.** `install-macos.sh`'s
+  wrappers did not pin `HKM_USERDATA_DIR`, so the registry defaulted to
+  `<kernel>/projects/projects.json` — inside the bundle that `hkm upgrade`
+  replaces from an archive shipping its own default `projects.json`. Every
+  registered project would have gone on the next update, warned about only by a
+  `doctor` hint suggesting you pin it by hand. The wrappers now default it to
+  `~/.local/share/hkm` and create it, matching the Homebrew formula.
+- **`hkm upgrade --user` on macOS installed system-wide.** The macOS branch
+  ignored the requested scope entirely and fell back to `/Applications`, so a
+  command asking for a user-local install wrote outside `$HOME` — while the
+  "Target" section above it named `~/.local/lib/hkm-kernel`, a third path that
+  was neither. macOS installs are `.app` bundles, so `install_scope`'s
+  Debian/tarball pair describes nothing that exists there; upgrade now reports
+  and acts on the bundle it actually self-locates into, defaulting a fresh
+  install to `~/Applications`. It also creates the destination (absent on a
+  fresh account) and refuses on an unwritable directory *before* downloading,
+  naming the no-root alternative — discovering that halfway through `tar`
+  leaves a partly replaced bundle.
+- **macOS: every child process the launcher spawns failed with
+  `error.FileNotFound`.** `hkm` and `hkm-config` built their `std.Io.Threaded`
+  instance with `.init(page_allocator, .{})`, leaving `InitOptions.environ` at
+  its `.empty` default. Zig resolves a bare command name against the `PATH`
+  held by the *Io instance* — not the `environ_map` handed to each spawn — so
+  with no environ it fell back to `Threaded.default_PATH`
+  (`/usr/local/bin:/bin/:/usr/bin`). On Linux that works by accident, since a
+  distro `php` lands in `/usr/bin`; on Apple Silicon nothing Homebrew installs
+  is on that list, so `php`, `composer`, `git`, and `tar` were all unreachable.
+  The symptom was maximally confusing: `hkm doctor` printed
+  `php  /opt/homebrew/bin/php` and then, one line later, "could not execute the
+  PHP binary". Every PHP passthrough command (`hkm list`, `hkm new`, `hkm run`)
+  was equally dead, making a macOS install non-functional even when it reported
+  success. Both entry points now pass `.{ .environ = init.environ }`, which also
+  fixes TTY/colour detection, and `HKM_PHP_BIN=/full/path/to/php` is no longer
+  needed as a workaround.
+- **`install-macos.sh` aborting on the first download with `REPO: unbound
+  variable`.** The progress line interpolated `$REPO…` — a bare variable
+  followed directly by a multi-byte `…`. macOS `/bin/sh` is bash 3.2, whose
+  parser is not multi-byte-aware and swallowed the `…` bytes into the variable
+  name, producing an unbound-variable abort under `set -u`. This hit *every*
+  macOS user of the default (auto-download) path, since it fires before
+  anything is fetched. Braced as `${REPO}`. `install.sh` carried the identical
+  line and is fixed too — it survives only because `/bin/sh` is dash on most
+  Linux distros.
+- **Every `sudo hkm …` on macOS silently lost its configuration.** `SUDO_USER`
+  was resolved to a hardcoded `/home/<user>` in two places
+  (`lib/userconfig.zig`, `lib/install_scope.zig`), which is not merely
+  non-native on macOS: `/home` there is an autofs automount (`auto_home`,
+  `nobrowse`), so the path cannot even be created. Reads found nothing, so
+  `sudo hkm --dev` lost `HKM_DEV_HOME`, `HKM_KERNEL_HOME` and
+  `HKM_USERDATA_DIR`; `sudo hkm version` reported no user install on a machine
+  that had one; `sudo hkm uninstall` looked for the user's files under `/home`
+  and left them behind; and `sudo hkm-config set-kernel-home …` failed with a
+  bare `error: Unexpected`. Home is now reconstructed per platform
+  (`util.sudoUserHome`), and the tests assert the platform's convention rather
+  than the Linux spelling that let this look covered. `hkm-config`'s setters
+  also report an unwritable config file with the path and the key instead of a
+  raw Zig error.
+- **`hkm-config check` under `sudo` pinned root's registry into your config.**
+  `ensureUserdata` read `env.HOME` while `userconfig.path` honoured
+  `SUDO_USER`, so the two disagreed about whose home this was — and the value
+  that got written was root's. Every later plain `hkm` run then pointed at a
+  registry under `/root` (or `/var/root`) it cannot read. Both now resolve home
+  the same way. This half was wrong on Linux too.
+- **`hkm upgrade` on macOS was a silent no-op that nested a second bundle.**
+  The extraction target was three `dirname()` calls off the kernel root, which
+  lands on `HKM.app/Contents` — but the tarball's top-level entry is `HKM.app/`,
+  so tar unpacked a whole second bundle at `HKM.app/Contents/HKM.app` and left
+  the real kernel untouched. `install.sh` then re-resolved the OLD tree and the
+  command printed "updated." The target is now found by walking up to the
+  `.app` component (`appContainerDir`), which is independent of nesting depth
+  and install prefix, and only the `HKM.app` member is extracted so the
+  archive's `install-macos.sh` no longer lands in `/Applications`.
+- **`hkm upgrade` did not know Homebrew, or its own limits, on macOS.** A
+  Cellar install is replaced wholesale by `brew upgrade`, so unpacking a bundle
+  into it is undone at best; it is now detected and refused up front — before
+  any download, and before the scope machinery prints a plan for a kernel that
+  is not the one running. A layout that is neither a `.app` nor a Cellar (a
+  portable tree, or an `HKM_KERNEL_HOME` pin) is refused too rather than
+  unpacked somewhere invented.
+- **`isSystemBinDir` claimed Intel Homebrew's bin as the system install.** It
+  is a `.deb` concept — "a launcher here belongs to the system package, whose
+  kernel is `/opt/hkm-kernel`" — and `/usr/local/bin` is exactly where Homebrew
+  installs on an Intel Mac. It now returns false on macOS, where no `.deb`
+  exists for it to be true of.
+- **Downloads went to a hardcoded `/tmp`.** They now honour `$TMPDIR`, falling
+  back to `/tmp`. macOS gives each user a private, auto-cleaned `TMPDIR`; the
+  artifact name is entirely predictable, so a world-writable `/tmp` is a file
+  another user on a shared machine can pre-create.
+- **`hkm doctor` giving advice that breaks a wrapper-based install.** Both
+  macOS install paths reach the launcher through a wrapper script, so the
+  binary's own directory is deliberately never on `PATH`. Doctor judged that by
+  directory alone and reported "on PATH: NO" on an install that worked, then
+  advised adding the real directory — which for Homebrew is the *version-scoped*
+  Cellar path, so following it breaks at the next `brew upgrade`. It now
+  recognises a wrapper that execs this launcher, which also stops it calling
+  that wrapper a shadowing copy. Separately, a self-contained install (Homebrew,
+  `HKM.app`, a portable tarball) no longer draws "no kernel installed in either
+  scope — `hkm upgrade --user` installs one": that would build a second,
+  competing kernel arbitrated by nothing but `PATH` order. Finally, the userdata
+  dir is now read from the environment rather than from `config.env` alone —
+  `registry.zig` consults the environment first and `userconfig.load()` folds
+  the file into it, so the file was only ever part of the answer, and an
+  exported `HKM_USERDATA_DIR` was reported "not pinned" while actively working.
+  The row now also says which of the two pinned it.
+- **`--help` on both installers printing past the end of the help text.**
+  The `sed -n` ranges in `usage()` overran their comment blocks:
+  `install-macos.sh` printed a dangling `WHY A WRAPPER SCRIPT…` heading and its
+  underline, and `install.sh` printed a literal `set -eu` as if it were help.
+
+## [1.4.3] - 2026-08-28
+
+### Fixed
+- **`install.sh` / `install-macos.sh` crashing with `unbound variable`.** Both
+  installers' PATH hint used `${SHELL##*/}`, which throws under `set -u`
+  whenever `$SHELL` isn't exported in the invoking environment — unlike
+  `$HOME`, POSIX doesn't guarantee it, and it's commonly absent under
+  `curl | sh`, cron, and some IDE task runners. Guarded with `${SHELL:-}` and
+  matched by suffix instead, so a missing value now just falls through to the
+  generic PATH-hint case instead of aborting the whole install.
+
+## [1.4.2] - 2026-08-28
+
+### Added
+- **`tools/install-macos.sh`** — a macOS-specific installer. Previously
+  `tools/install.sh` (Linux-only auto-download) simply refused to run on
+  macOS with no working alternative documented anywhere, leaving `HKM.app`
+  users to hand-discover that it needs the Gatekeeper quarantine flag cleared
+  and a `PATH` entry before `hkm` runs at all. The new installer downloads
+  (or accepts a local) `hkm-kernel-<version>-macos-universal.tar.gz`, swaps
+  `HKM.app` into `/Applications`, clears `com.apple.quarantine`, and wires
+  `hkm`/`hkm-config` onto `PATH` via a tiny `exec` wrapper script rather than
+  a symlink — `_NSGetExecutablePath` is not guaranteed to resolve through a
+  symlink the way Linux's `/proc/self/exe` does, and the launcher self-locates
+  its kernel relative to its own executable path, so a symlink risked it
+  silently finding the wrong kernel (or none). Shipped as its own release
+  asset (`install-macos.sh`) and bundled inside the macOS tarball itself,
+  mirroring how `install.sh` ships with the Linux one.
+
+## [1.4.1] - 2026-08-28
+
+### Fixed
+- **`hkm upgrade --user` / `--system` crashing on a self-upgrade** — the
+  tarball's `tools/install.sh` replaced `bin/hkm` and `bin/hkm-config` with a
+  plain `cp`, which truncates and writes INTO the existing file. Since the
+  process running the upgrade IS that exact binary, the kernel it's running
+  under refuses with `cp: cannot create regular file '.../hkm': Text file
+  busy` — the same failure `hkm upgrade --local` was fixed for previously, just
+  never carried over to this installer. Now stages each binary beside its
+  target and `mv`s it over, so the running process keeps its old (unlinked)
+  inode and the next invocation picks up the new build.
+
 ## [1.4.0] - 2026-08-28
 
 A project's `plugins/`, `var/*` and `userdata/storage/*` are gitignored on

@@ -6,6 +6,7 @@
 //! REAL process-environment values always win (a shell export overrides the file).
 
 const std = @import("std");
+const util = @import("util.zig");
 const Io = std.Io;
 const EnvMap = std.process.Environ.Map;
 const Dir = std.Io.Dir;
@@ -19,8 +20,8 @@ const Dir = std.Io.Dir;
 /// sees the same configuration as a normal run.
 pub fn path(allocator: std.mem.Allocator, env: *EnvMap) !?[]const u8 {
     if (env.get("SUDO_USER")) |user| {
-        if (user.len > 0 and !std.mem.eql(u8, user, "root")) {
-            return try std.fmt.allocPrint(allocator, "/home/{s}/.config/hkm/config.env", .{user});
+        if (util.sudoUserHome(allocator, user)) |h| {
+            return try std.fmt.allocPrint(allocator, "{s}/.config/hkm/config.env", .{h});
         }
     }
     if (env.get("XDG_CONFIG_HOME")) |x| {

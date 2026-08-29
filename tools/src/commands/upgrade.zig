@@ -170,6 +170,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         }
     }
 
+    const explicit_scope = scope != null;
     const target = scope orelse install_scope.defaultScope(env);
 
     banner.print(allocator, io, env);
@@ -177,7 +178,11 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // A system upgrade that is not root cannot write /opt, and every step after
     // this point would fail one at a time with a permission error. Say it once,
     // at the top, with the command that works.
-    if (target == .system and !install_scope.isRoot(env)) {
+    // On macOS the system scope is /Applications/HKM.app, which an admin can
+    // usually write without sudo — so the root check below, which is about
+    // /opt and dpkg, must not gate it. The real permission question is asked
+    // against the actual directory just before the download.
+    if (target == .system and !install_scope.bundles_apps and !install_scope.isRoot(env)) {
         prompt.warn("a system upgrade needs root — re-run it as:  sudo hkm upgrade --system");
         prompt.muted("  (or drop --system to update your own user install, which needs no root)");
         return 1;
@@ -185,7 +190,35 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
 
     if (from_local) return localUpgrade(allocator, io, env, target, dry_run, assume_yes, build_first);
 
-    const inst = install_scope.detect(allocator, io, env, target);
+    // Refuse a Homebrew-owned install before ANY plan is printed. The scope
+    // machinery below describes the .deb/tarball scopes, which have nothing to
+    // do with where a brew-installed launcher actually lives — so reaching the
+    // guard later meant first announcing "Target: user-local ~/.local/lib/…,
+    // this will be a fresh install" and only then refusing, naming a different
+    // path. One accurate sentence beats a plan the command will not carry out.
+    if (@import("builtin").os.tag == .macos) {
+        if (try kernel.resolveHome(allocator, io, env)) |root| {
+            if (homebrewManaged(root)) {
+                prompt.warn("this install is managed by Homebrew — hkm must not upgrade it.");
+                prompt.item("kernel", root);
+                prompt.item("update it", "brew upgrade hkm");
+                prompt.muted("  brew replaces the whole Cellar directory, so anything unpacked");
+                prompt.muted("  into it is undone by the next `brew upgrade`.");
+                return 1;
+            }
+        }
+    }
+
+    // Naming a scope names a LOCATION; naming none means "the install I am
+    // running". That distinction matters only where a bundle can legitimately
+    // live outside both canonical spots (a custom HKM_APPDIR): defaulting to
+    // the scope path there would install a second bundle beside the one in use
+    // rather than updating it.
+    const on_macos = install_scope.bundles_apps;
+    const inst = if (on_macos and !explicit_scope)
+        macInstall(allocator, io, env)
+    else
+        install_scope.detect(allocator, io, env, target);
     if (!inst.resolved) {
         prompt.err("cannot locate a user install directory (no HOME and no HKM_PREFIX).");
         prompt.muted("  set one:  HKM_PREFIX=/srv/hkm hkm upgrade --user");
@@ -193,7 +226,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     }
 
     prompt.section("Target");
-    prompt.item("scope", target.how());
+    prompt.item("scope", if (on_macos) macScopeLabel(allocator, env, inst.root) else target.how());
     prompt.item("kernel", inst.root);
     prompt.item("installed", if (inst.present) install_scope.versionLabel(inst.version) else "not installed");
 
@@ -223,7 +256,10 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         Ver{}; // absent or unstamped → treat as older than anything, so it installs
 
     if (!inst.present) {
-        prompt.warn("nothing installed in this scope yet — this will be a fresh install.");
+        prompt.warn(if (on_macos)
+            "no install here yet — this will be a fresh install."
+        else
+            "nothing installed in this scope yet — this will be a fresh install.");
     } else if (inst.version == null) {
         // A `--local` install carries the checkout's composer.json, which is
         // deliberately unstamped. There is nothing to compare, so proceed
@@ -231,13 +267,16 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         prompt.warn("the installed kernel carries no version — installing the latest release over it.");
     } else switch (current.order(latest_ver)) {
         .eq => {
-            prompt.ok("this scope is on the latest version.");
-            try reportOtherScope(allocator, io, env, target, latest_ver);
+            prompt.ok(if (on_macos) "already on the latest version." else "this scope is on the latest version.");
+            if (!on_macos) try reportOtherScope(allocator, io, env, target, latest_ver);
             return 0;
         },
         .gt => {
-            prompt.ok("this scope is newer than the latest release (dev build).");
-            try reportOtherScope(allocator, io, env, target, latest_ver);
+            prompt.ok(if (on_macos)
+                "newer than the latest release (dev build)."
+            else
+                "this scope is newer than the latest release (dev build).");
+            if (!on_macos) try reportOtherScope(allocator, io, env, target, latest_ver);
             return 0;
         },
         .lt => prompt.warn("an update is available."),
@@ -265,7 +304,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         return 0;
     }
 
-    const code = try performPackagedUpgrade(allocator, io, env, target, latest);
+    const code = try performPackagedUpgrade(allocator, io, env, target, latest, inst.root);
 
     // Say what was NOT updated, right after saying what was. This is the exact
     // moment the old behaviour misled: the command reported success, and the
@@ -307,6 +346,98 @@ fn reportOtherScope(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: 
     prompt.item("update it", if (other == .system) "sudo hkm upgrade --system" else "hkm upgrade --user");
 }
 
+/// Where a FRESH macOS install goes: `~/Applications`, never `/Applications`.
+///
+/// Same default as tools/install-macos.sh, and for the same reason — an install
+/// should need no administrator and write nothing outside $HOME. This used to
+/// fall back to /Applications, so `hkm upgrade --user` on a machine with no
+/// install yet asked for a user-local install and produced a system-wide one.
+fn defaultUserAppRoot(allocator: std.mem.Allocator, env: *EnvMap) []const u8 {
+    // install_scope owns the layout for both scopes; with no HOME there is no
+    // user location, and the machine-wide one is all that is left to name.
+    return install_scope.macAppRoot(allocator, env, .user) orelse
+        install_scope.macAppRoot(allocator, env, .system).?;
+}
+
+/// The install `hkm upgrade` acts on when the platform ships .app bundles.
+///
+/// install_scope models the Debian/tarball pair — /opt/hkm-kernel and
+/// ~/.local/lib/hkm-kernel — which on macOS describes nothing that exists.
+/// Reporting through it made `hkm upgrade --user` announce a kernel at
+/// ~/.local/lib/hkm-kernel and then write to /Applications: two different
+/// places, and neither the one the flag asked for. macOS has exactly one
+/// install to speak of — the bundle this launcher self-locates into, or the
+/// user-local one a fresh install would create.
+fn macInstall(allocator: std.mem.Allocator, io: Io, env: *EnvMap) install_scope.Install {
+    const root = (kernel.resolveHome(allocator, io, env) catch null) orelse
+        defaultUserAppRoot(allocator, env);
+
+    var out = install_scope.Install{
+        .scope = .user,
+        .resolved = true,
+        .root = root,
+        .bin_dir = null,
+        .present = false,
+        .version = null,
+        .launcher = null,
+        .vendor = false,
+    };
+    const manifest = std.fs.path.join(allocator, &.{ root, "composer.json" }) catch return out;
+    out.present = util.fileExists(io, manifest);
+    if (out.present) out.version = composer_version.ofKernel(allocator, io, root);
+    return out;
+}
+
+/// How to describe a macOS target: whose directory is it, and does writing
+/// there need anything the user has not already got?
+fn macScopeLabel(allocator: std.mem.Allocator, env: *EnvMap, root: []const u8) []const u8 {
+    if (install_scope.homeDir(allocator, env)) |home| {
+        if (util.isInside(root, home)) return "user-local (HKM.app in your home, no root)";
+    }
+    return "system-wide (/Applications — needs write access there)";
+}
+
+/// The directory that CONTAINS the `.app` bundle a kernel root lives inside,
+/// or null when this is not a bundle layout at all.
+///
+/// Walks up looking for the `.app` component rather than counting dirname()
+/// calls off the kernel root: the count is a silent trap the moment the layout
+/// or the install prefix changes, and getting it wrong does not fail — tar
+/// happily unpacks a nested bundle into whatever directory it was handed.
+/// Returning null is meaningful: a Homebrew Cellar or a portable extraction has
+/// no `.app`, and neither can be upgraded by unpacking a bundle over it.
+fn appContainerDir(root: []const u8) ?[]const u8 {
+    var dir: ?[]const u8 = root;
+    while (dir) |d| {
+        if (std.mem.endsWith(u8, d, ".app")) return std.fs.path.dirname(d);
+        dir = std.fs.path.dirname(d);
+    }
+    return null;
+}
+
+/// Is this kernel root inside a Homebrew Cellar?
+///
+/// `/Cellar/` is the marker for both prefixes — /opt/homebrew on Apple Silicon
+/// and /usr/local on Intel — and it is what a brew-installed formula always
+/// sits under, whatever the tap.
+fn homebrewManaged(root: []const u8) bool {
+    return std.mem.indexOf(u8, root, "/Cellar/") != null;
+}
+
+/// Scratch directory for a downloaded artifact: $TMPDIR, else /tmp.
+///
+/// macOS gives every user a private, auto-cleaned TMPDIR and only falls back to
+/// the world-writable /tmp. Since the artifact name is entirely predictable
+/// (hkm-kernel-<version>-<platform>.tar.gz), writing it to a shared /tmp on a
+/// multi-user machine is a file another user can pre-create and control.
+fn tmpDir(env: *EnvMap) []const u8 {
+    if (env.get("TMPDIR")) |t| {
+        const trimmed = util.trimSlash(std.mem.trim(u8, t, " \t\r\n"));
+        if (trimmed.len > 0) return trimmed;
+    }
+    return "/tmp";
+}
+
 /// Download the release artifact for THIS OS + scope and install it. The binary
 /// is built per-OS, so builtin.os.tag / cpu.arch are comptime — only this
 /// platform's path is compiled in.
@@ -316,11 +447,52 @@ fn performPackagedUpgrade(
     env: *EnvMap,
     target: Scope,
     latest: []const u8,
+    /// The kernel root run() decided on and already reported. Passed in rather
+    /// than re-resolved: self-locating again here would silently disagree with
+    /// the announced target whenever they differ — `--system` reporting
+    /// /Applications and then writing the bundle in your home.
+    root: []const u8,
 ) !u8 {
     const os = @import("builtin").os.tag;
     const ver = composer_version.normalize(latest); // "1.0.1"
 
     if (os == .linux) return linuxUpgrade(allocator, io, env, target, latest, ver);
+
+    // Decide WHERE this would land before spending a download on it. On macOS
+    // an install can be one another package manager owns, and the answer there
+    // is to say so rather than to unpack over the top of it.
+    const mac_root: ?[]const u8 = if (os == .macos) root else null;
+
+    // Homebrew was already refused in run(), before any plan was printed. What
+    // is left to reject here is a layout that is neither: a portable tree, or a
+    // kernel reached through an HKM_KERNEL_HOME pin. Unpacking a bundle over
+    // one of those has no correct destination, and picking a wrong one is
+    // exactly the silent corruption this check exists to prevent.
+    if (os == .macos) {
+        const container = appContainerDir(mac_root.?) orelse {
+            prompt.blank();
+            prompt.err("this is not an HKM.app install — hkm cannot upgrade it in place.");
+            prompt.item("kernel", mac_root.?);
+            prompt.item("update it", "re-run the installer: tools/install-macos.sh");
+            return 1;
+        };
+
+        // ~/Applications does not exist on a fresh account, and a fresh
+        // user-local install is the default path here.
+        Dir.cwd().createDirPath(io, container) catch {};
+
+        // Fail on the permission BEFORE spending a download on it, and name the
+        // no-root alternative. Discovering this halfway through tar leaves a
+        // partly-replaced bundle, which is the one outcome worse than refusing.
+        if (!util.canWrite(io, container)) {
+            prompt.blank();
+            prompt.err("cannot write the install directory.");
+            prompt.item("directory", container);
+            prompt.item("install without root", "tools/install-macos.sh --user");
+            prompt.item("or update in place as root", "sudo hkm upgrade");
+            return 1;
+        }
+    }
 
     const asset: []const u8 = switch (os) {
         .macos => try std.fmt.allocPrint(allocator, "hkm-kernel-{s}-macos-universal.tar.gz", .{ver}),
@@ -329,7 +501,7 @@ fn performPackagedUpgrade(
     };
 
     const url = try assetUrl(allocator, latest, asset);
-    const tmp = try std.fs.path.join(allocator, &.{ "/tmp", asset });
+    const tmp = try std.fs.path.join(allocator, &.{ tmpDir(env), asset });
 
     prompt.section("Downloading update");
     prompt.item("asset", asset);
@@ -342,11 +514,22 @@ fn performPackagedUpgrade(
     prompt.section("Installing");
     switch (os) {
         .macos => {
-            // Replace the kernel resources in place, then re-resolve composer.
-            const root = (try kernel.resolveHome(allocator, io, env)) orelse
-                "/Applications/HKM.app/Contents/Resources/opt/hkm-kernel";
-            const app_root = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(root) orelse root) orelse root) orelse root;
-            var untar = [_][]const u8{ "tar", "-xzf", tmp, "-C", app_root, "--strip-components=0" };
+            // Replace the whole .app, then re-resolve composer.
+            //
+            // The extraction target is the directory CONTAINING HKM.app, not
+            // anything inside it: the tarball's top-level entry is `HKM.app/`,
+            // so tar recreates the bundle by name. This used to be three
+            // dirname() calls off the kernel root, which lands on
+            // HKM.app/Contents and therefore unpacked a whole second bundle at
+            // HKM.app/Contents/HKM.app while leaving the real kernel untouched
+            // — install.sh then re-resolved the OLD tree and the command still
+            // printed "updated".
+            const app_root = appContainerDir(root).?;
+            // Name the member. The tarball also carries install-macos.sh at the
+            // top level (so the release asset is usable on its own), and an
+            // unrestricted extract drops that script beside the bundle — i.e.
+            // straight into /Applications on a default install.
+            var untar = [_][]const u8{ "tar", "-xzf", tmp, "-C", app_root, "HKM.app" };
             if ((run_cmd.spawnWait(io, env, &untar) catch 1) != 0) {
                 prompt.err("could not unpack the release — the previous kernel is still in place.");
                 prompt.muted(try std.fmt.allocPrint(allocator, "  the archive is at {s}", .{tmp}));
@@ -399,7 +582,7 @@ fn linuxUpgrade(
             }
             const asset = try std.fmt.allocPrint(allocator, "hkm-kernel-{s}-linux-{s}.tar.gz", .{ ver, arch });
             const url = try assetUrl(allocator, tag, asset);
-            const tmp = try std.fs.path.join(allocator, &.{ "/tmp", asset });
+            const tmp = try std.fs.path.join(allocator, &.{ tmpDir(env), asset });
 
             prompt.section("Downloading update");
             prompt.item("asset", asset);
@@ -417,7 +600,7 @@ fn linuxUpgrade(
             // Unpack into a directory cleared first. A leftover tree from an
             // interrupted run could otherwise supply an install.sh from a
             // different build than the archive just downloaded.
-            const work = try std.fmt.allocPrint(allocator, "/tmp/hkm-upgrade-{d}", .{std.Thread.getCurrentId()});
+            const work = try std.fmt.allocPrint(allocator, "{s}/hkm-upgrade-{d}", .{ tmpDir(env), std.Thread.getCurrentId() });
             var rm = [_][]const u8{ "rm", "-rf", work };
             _ = run_cmd.spawnWait(io, env, &rm) catch {};
             Dir.cwd().createDirPath(io, work) catch {};
@@ -457,7 +640,7 @@ fn linuxUpgrade(
             }
             const asset = try std.fmt.allocPrint(allocator, "hkm-kernel_{s}_amd64.deb", .{ver});
             const url = try assetUrl(allocator, tag, asset);
-            const tmp = try std.fs.path.join(allocator, &.{ "/tmp", asset });
+            const tmp = try std.fs.path.join(allocator, &.{ tmpDir(env), asset });
 
             prompt.section("Downloading update");
             prompt.item("asset", asset);
@@ -1112,4 +1295,55 @@ test "an unstamped install compares as older than any release" {
 test "a pre-release sorts below its release so a dev tag is opt-in" {
     try std.testing.expectEqual(std.math.Order.lt, parseVer("1.4.0-dev").order(parseVer("1.4.0")));
     try std.testing.expectEqual(std.math.Order.gt, parseVer("1.4.0").order(parseVer("1.3.1")));
+}
+
+test "the .app extraction target is the directory holding the bundle" {
+    // The tarball's top-level entry is `HKM.app/`, so tar must be pointed at the
+    // bundle's PARENT. The previous three-dirname arithmetic landed on
+    // HKM.app/Contents and quietly produced HKM.app/Contents/HKM.app, leaving
+    // the real kernel untouched while the command reported success.
+    try std.testing.expectEqualStrings(
+        "/Applications",
+        appContainerDir("/Applications/HKM.app/Contents/Resources/opt/hkm-kernel").?,
+    );
+
+    // Depth and prefix are not assumptions — a custom HKM_APPDIR works too.
+    try std.testing.expectEqualStrings(
+        "/opt/apps",
+        appContainerDir("/opt/apps/HKM.app/Contents/Resources/opt/hkm-kernel").?,
+    );
+}
+
+test "a layout with no .app bundle reports no extraction target" {
+    // Null is the signal that this install cannot be upgraded by unpacking a
+    // bundle over it — a Homebrew Cellar, or a portable tree.
+    try std.testing.expect(appContainerDir("/opt/homebrew/Cellar/hkm/1.4.4/libexec/lib/hkm-kernel") == null);
+    try std.testing.expect(appContainerDir("/opt/hkm-kernel") == null);
+}
+
+test "a Homebrew-managed kernel is recognised under either prefix" {
+    // Apple Silicon and Intel prefixes both contain /Cellar/.
+    try std.testing.expect(homebrewManaged("/opt/homebrew/Cellar/hkm/1.4.4/libexec/lib/hkm-kernel"));
+    try std.testing.expect(homebrewManaged("/usr/local/Cellar/hkm/1.4.4/libexec/lib/hkm-kernel"));
+
+    try std.testing.expect(!homebrewManaged("/Applications/HKM.app/Contents/Resources/opt/hkm-kernel"));
+    try std.testing.expect(!homebrewManaged("/opt/hkm-kernel"));
+}
+
+test "the scratch directory honours TMPDIR and falls back to /tmp" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var env = EnvMap.init(a);
+    defer env.deinit();
+    try std.testing.expectEqualStrings("/tmp", tmpDir(&env));
+
+    // macOS hands every user a private TMPDIR, with a trailing slash.
+    try env.put("TMPDIR", "/var/folders/ab/T/");
+    try std.testing.expectEqualStrings("/var/folders/ab/T", tmpDir(&env));
+
+    // An empty value is not a directory — fall back rather than build "/asset".
+    try env.put("TMPDIR", "");
+    try std.testing.expectEqualStrings("/tmp", tmpDir(&env));
 }

@@ -71,6 +71,28 @@ fn dirOnPath(env: *EnvMap, dir: []const u8) bool {
     return false;
 }
 
+/// Whether an `hkm` found on PATH is a WRAPPER SCRIPT that execs the launcher
+/// living in `own_dir` — i.e. this binary is reachable as `hkm` even though its
+/// own directory is not itself a PATH entry.
+///
+/// Two shipped installs are wrapper-based on purpose, because the launcher
+/// self-locates its kernel from its own executable path and must therefore stay
+/// where it was installed (see tools/install-macos.sh's header):
+///
+///   HKM.app          ~/.local/bin/hkm  ->  /Applications/HKM.app/Contents/MacOS/hkm
+///   Homebrew         <prefix>/bin/hkm  ->  <prefix>/Cellar/hkm/<ver>/libexec/bin/hkm
+///
+/// Judging those by `dirOnPath` alone reported "on PATH: NO" on an install that
+/// works perfectly, and then advised adding the REAL directory to PATH. For the
+/// Homebrew layout that advice is worse than useless: the Cellar path it names
+/// is version-scoped, so following it breaks at the next `brew upgrade`.
+fn wrapperOnPathTargets(allocator: std.mem.Allocator, io: Io, env: *EnvMap, own_dir: []const u8) bool {
+    const on_path = findOnPath(allocator, io, env, "hkm") orelse return false;
+    const own_exe = std.fs.path.join(allocator, &.{ own_dir, "hkm" }) catch return false;
+    return util.leadsTo(allocator, io, on_path, own_exe);
+}
+
+
 /// The PHP preflight. A single `-r` program so `hkm doctor` needs no files on
 /// disk. Prints a table and exits non-zero on a hard failure.
 const preflight =
@@ -131,6 +153,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         prompt.item("this binary", d);
         if (dirOnPath(env, d)) {
             prompt.item("on PATH", "yes");
+        } else if (wrapperOnPathTargets(allocator, io, env, d)) {
+            prompt.item("on PATH", "yes — via a wrapper script earlier on PATH");
         } else {
             prompt.item("on PATH", "NO — `hkm` will not be found in a new shell");
             rep.hint(try std.fmt.allocPrint(allocator, "add to PATH: export PATH=\"{s}:$PATH\"", .{d}));
@@ -147,7 +171,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         prompt.item("copies on PATH", try std.fmt.allocPrint(allocator, "{d} — first is {s}", .{ n_hkm, first }));
         if (own_dir) |d| {
             const own_exe = try std.fs.path.join(allocator, &.{ d, "hkm" });
-            if (!std.mem.eql(u8, own_exe, first)) {
+            if (!util.leadsTo(allocator, io, first, own_exe)) {
                 prompt.warn("another hkm earlier on PATH shadows this one.");
                 rep.hint("remove the system copy (sudo apt remove hkm-kernel) or reorder PATH");
             }
@@ -191,7 +215,18 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     }
     prompt.table(allocator, &.{ "", "scope", "kernel root", "version", "deps" }, install_rows.items);
     if (!any_install) {
-        rep.hint("no kernel installed in either scope — `hkm upgrade --user` installs one without root");
+        // A self-located kernel means a SELF-CONTAINED install — Homebrew's
+        // Cellar, /Applications/HKM.app, an extracted portable tarball. The
+        // launcher carries its own kernel and whatever installed it owns the
+        // upgrades, so the two managed scopes being empty is the normal,
+        // correct state rather than something missing. Advising `hkm upgrade
+        // --user` there tells a perfectly working install to build a SECOND,
+        // competing kernel that nothing but PATH order would arbitrate.
+        if (home_early.root != null and home_early.source == .self_located) {
+            prompt.item("scopes", "none — this launcher carries its own kernel");
+        } else {
+            rep.hint("no kernel installed in either scope — `hkm upgrade --user` installs one without root");
+        }
     }
 
     // ── Kernel ──────────────────────────────────────────────────────────────
@@ -275,9 +310,21 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         prompt.item("HKM_KERNEL_HOME", "not pinned (self-locating)");
     }
 
-    const userdata = try userconfig.get(allocator, io, env, "HKM_USERDATA_DIR");
+    // Ask the ENVIRONMENT, not the config file. registry.zig resolvePath()
+    // consults env first, and userconfig.load() has already folded
+    // ~/.config/hkm/config.env into that same env — so the env is the complete
+    // answer and the file is only part of it. Reading the file alone answered a
+    // different question than "where does the registry actually go": an
+    // exported HKM_USERDATA_DIR (a shell profile, a CI job, the wrapper script
+    // the Homebrew formula installs) was reported "not pinned", and doctor
+    // advised pinning what was already pinned and working.
+    const userdata = env.get("HKM_USERDATA_DIR");
     if (userdata) |ud| {
         prompt.item("userdata dir", ud);
+        prompt.item("pinned by", if (userconfig.isFileSourced(env, "HKM_USERDATA_DIR"))
+            "~/.config/hkm/config.env"
+        else
+            "the environment (HKM_USERDATA_DIR)");
         prompt.item("writable", if (util.canWrite(io, ud)) "yes" else "NO — the registry cannot be updated");
         if (!util.canWrite(io, ud)) rep.fail("userdata dir is not writable — check its ownership");
 
@@ -308,6 +355,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     prompt.item("git", findOnPath(allocator, io, env, "git") orelse "absent — needed by `hkm plugins` git sources");
     prompt.item("node", findOnPath(allocator, io, env, "node") orelse "absent — needed by `hkm ui` (frontend only)");
     prompt.item("npm", findOnPath(allocator, io, env, "npm") orelse "absent — needed by `hkm ui` (frontend only)");
+    prompt.item("vips", findOnPath(allocator, io, env, "vips") orelse "absent — needed by libvips-based image processing (e.g. the Vips image driver)");
 
     // ── PHP runtime & extensions ────────────────────────────────────────────
     prompt.section("PHP runtime & extensions");

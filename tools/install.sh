@@ -52,7 +52,7 @@ warn() { printf "${C_Y}!${C_0} %s\n" "$*" >&2; }
 die()  { printf "${C_R}✗${C_0} %s\n" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -158,13 +158,16 @@ if [ -n "$TARBALL" ]; then
   say "Using $TARBALL"
 else
   OS="$(uname -s)"
+  if [ "$OS" = "Darwin" ]; then
+    die "macOS uses a separate installer — tools/install-macos.sh (curl -fsSL https://github.com/$REPO/releases/latest/download/install-macos.sh | sh)"
+  fi
   [ "$OS" = "Linux" ] || die "auto-download supports Linux; on $OS use the .app/.zip bundle, or pass a tarball"
   ARCH="$(arch_slug)"
 
   if [ -n "$WANT_TAG" ]; then
     TAG="$WANT_TAG"
   else
-    say "Looking up the latest release of $REPO…"
+    say "Looking up the latest release of ${REPO}…"
     API="https://api.github.com/repos/$REPO/releases/latest"
     fetch "$API" "$TMP/rel.json" || die "could not reach GitHub. Download the tarball and pass its path."
     # Deliberately not jq — this script must run on a bare machine.
@@ -223,9 +226,17 @@ if [ -d "$DEST" ]; then mv "$DEST" "$OLD"; fi
 mv "$NEW" "$DEST"
 rm -rf "$OLD"
 
-cp "$SRC/bin/hkm"        "$BINDIR/hkm"
-cp "$SRC/bin/hkm-config" "$BINDIR/hkm-config"
-chmod +x "$BINDIR/hkm" "$BINDIR/hkm-config"
+# Stage beside the destination, then rename over it. A plain `cp` truncates
+# and writes INTO the existing file, which fails with "Text file busy" the
+# moment that exact binary is the one currently running this script — i.e.
+# every `hkm upgrade` that reaches this installer. rename() swaps the
+# directory entry instead: the running process keeps its old (now-unlinked)
+# inode and finishes normally, and the next invocation picks up the new build.
+cp "$SRC/bin/hkm"        "$BINDIR/.hkm.new.$$"
+cp "$SRC/bin/hkm-config" "$BINDIR/.hkm-config.new.$$"
+chmod +x "$BINDIR/.hkm.new.$$" "$BINDIR/.hkm-config.new.$$"
+mv "$BINDIR/.hkm.new.$$"        "$BINDIR/hkm"
+mv "$BINDIR/.hkm-config.new.$$" "$BINDIR/hkm-config"
 ok "Installed to $DEST"
 
 # ── drop a kernel pin this install makes redundant ──────────────────────────
@@ -293,10 +304,10 @@ case ":${PATH}:" in
   *)
     warn "$BINDIR is NOT on your PATH."
     printf '  Add it, then open a new terminal:\n'
-    case "${SHELL##*/}" in
-      zsh)  printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.zshrc\n' "$BINDIR" ;;
-      fish) printf '    fish_add_path %s\n' "$BINDIR" ;;
-      *)    printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.bashrc\n' "$BINDIR" ;;
+    case "${SHELL:-}" in
+      */zsh)  printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.zshrc\n' "$BINDIR" ;;
+      */fish) printf '    fish_add_path %s\n' "$BINDIR" ;;
+      *)      printf '    echo '\''export PATH="%s:$PATH"'\'' >> ~/.bashrc\n' "$BINDIR" ;;
     esac
     ;;
 esac

@@ -227,7 +227,19 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
     // global_single_threaded uses a `.failing` allocator, which makes
     // std.process.spawn OOM (it allocates argv/env before fork). Use a real
     // allocator-backed Threaded io so spawning child processes works.
-    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    //
+    // `environ` is NOT optional decoration: std.Io.Threaded resolves a bare
+    // command name (`php`, `composer`, `git`, `tar`) against the PATH held by
+    // the *Io instance*, not against the environ_map passed to each spawn. Left
+    // at `.empty` it falls back to Threaded.default_PATH —
+    // "/usr/local/bin:/bin/:/usr/bin". On Linux that accidentally works, since
+    // a distro php lands in /usr/bin, and so does Homebrew on Intel Macs
+    // (/usr/local/bin). Apple Silicon is where it breaks: Homebrew moved to
+    // /opt/homebrew/bin, which is on no version of that fallback list, so
+    // every bare-name spawn died with `error.FileNotFound` on a machine where
+    // `php` was plainly on PATH — `hkm doctor` even printed the path it had
+    // just found, one line above failing to execute it.
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{ .environ = init.environ });
     defer threaded.deinit();
     const io = threaded.io();
     var env_map = try init.environ.createMap(allocator);

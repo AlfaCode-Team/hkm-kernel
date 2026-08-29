@@ -25,6 +25,7 @@
 //! left absent, and each launcher resolves its own install independently.
 
 const std = @import("std");
+const install_scope = @import("lib/install_scope.zig");
 const kernel = @import("lib/kernel.zig");
 const userconfig = @import("lib/userconfig.zig");
 const prompt = @import("lib/prompt.zig");
@@ -37,7 +38,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    // See the note in main.zig: without `environ`, std.Io.Threaded searches
+    // Threaded.default_PATH for bare command names and mis-detects TTYs.
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{ .environ = init.environ });
     defer threaded.deinit();
     const io = threaded.io();
     var env = try init.environ.createMap(allocator);
@@ -74,15 +77,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (std.mem.eql(u8, action, "set-kernel-home")) {
         if (args.len < 3) return usage();
-        try userconfig.set(allocator, io, &env, "HKM_KERNEL_HOME", args[2]);
-        prompt.ok("HKM_KERNEL_HOME saved.");
-        return;
+        setKey(allocator, io, &env, "HKM_KERNEL_HOME", args[2]);
     }
     if (std.mem.eql(u8, action, "set-autoload")) {
         if (args.len < 3) return usage();
-        try userconfig.set(allocator, io, &env, "HKM_GLOBAL_AUTOLOAD", args[2]);
-        prompt.ok("HKM_GLOBAL_AUTOLOAD saved.");
-        return;
+        setKey(allocator, io, &env, "HKM_GLOBAL_AUTOLOAD", args[2]);
     }
     if (std.mem.eql(u8, action, "set-dev-home")) {
         if (args.len < 3) return usage();
@@ -94,8 +93,21 @@ pub fn main(init: std.process.Init.Minimal) !void {
             prompt.err("that path is not a kernel checkout (no composer.json).");
             std.process.exit(1);
         }
-        try userconfig.set(allocator, io, &env, "HKM_DEV_HOME", p);
-        prompt.ok("HKM_DEV_HOME saved. Use `hkm <command> --dev` to target it.");
+        prompt.muted("use `hkm <command> --dev` to target it.");
+        setKey(allocator, io, &env, "HKM_DEV_HOME", p);
+    }
+    if (std.mem.eql(u8, action, "unset") or std.mem.eql(u8, action, "clear")) {
+        if (args.len < 3) return usage();
+        const removed = userconfig.unset(allocator, io, &env, args[2]) catch |e| {
+            prompt.err(@errorName(e));
+            std.process.exit(1);
+        };
+        if (removed) {
+            prompt.ok(try std.fmt.allocPrint(allocator, "{s} removed.", .{args[2]}));
+            prompt.muted("verify what the launcher resolves now with: hkm version");
+        } else {
+            prompt.muted(try std.fmt.allocPrint(allocator, "{s} was not set — nothing to do.", .{args[2]}));
+        }
         return;
     }
     if (std.mem.eql(u8, action, "unset") or std.mem.eql(u8, action, "clear")) {
@@ -117,6 +129,26 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     usage();
+}
+
+/// Write one key, reporting a failure in terms the reader can act on.
+///
+/// These used to be a bare `try` straight out of main, so an unwritable config
+/// directory surfaced as `error: AccessDenied` with no path, no key and no
+/// suggestion — on macOS the SUDO_USER bug made that the ONLY thing a
+/// `sudo hkm-config set-…` ever printed. The path is the whole diagnosis here,
+/// so it is what gets shown.
+fn setKey(allocator: std.mem.Allocator, io: Io, env: *EnvMap, key: []const u8, value: []const u8) noreturn {
+    userconfig.set(allocator, io, env, key, value) catch |e| {
+        const where = (userconfig.path(allocator, env) catch null) orelse "the config file";
+        prompt.err(std.fmt.allocPrint(allocator, "could not save {s} ({t}).", .{ key, e }) catch
+            "could not save the setting.");
+        prompt.item("config file", where);
+        prompt.item("check", "that its directory exists and you can write to it");
+        std.process.exit(1);
+    };
+    prompt.ok(std.fmt.allocPrint(allocator, "{s} saved.", .{key}) catch "saved.");
+    std.process.exit(0);
 }
 
 fn usage() void {
@@ -239,7 +271,14 @@ fn ensureUserdata(allocator: std.mem.Allocator, io: Io, env: *EnvMap, home: []co
         if (env.get("XDG_DATA_HOME")) |x| {
             if (x.len > 0) break :blk try std.fs.path.join(allocator, &.{ x, "hkm" });
         }
-        if (env.get("HOME")) |h| {
+        // install_scope.homeDir, not env HOME: under `sudo` HOME is root's, so
+        // this pinned root's ~/.local/share/hkm into the INVOKING user's
+        // config.env — the file userconfig.path() already resolves through
+        // SUDO_USER. The two disagreed, and the half that wins is the one that
+        // gets written, so `sudo hkm-config check` left every later plain
+        // `hkm` run pointed at a registry under /root (or /var/root) it cannot
+        // even read.
+        if (install_scope.homeDir(allocator, env)) |h| {
             if (h.len > 0) break :blk try std.fs.path.join(allocator, &.{ h, ".local", "share", "hkm" });
         }
         return null;
