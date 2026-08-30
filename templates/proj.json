@@ -5,7 +5,8 @@
     "features": [],
     "views": "resources",
     "essentials": [],
-    "routePolicy": { "disable": [] },
+    "//routePolicy": "Your control over the routes your PLUGINS publish. only[] is an ALLOWLIST (expose nothing except these); disable[] SUBTRACTS. Spec forms: \"METHOD /path\", \"METHOD /path/*\" (prefix — keeps covering routes a plugin adds in a later release), or a bare module domain. Audit with: hkm route:list --unfiltered --plugin",
+    "routePolicy": { "only": [], "disable": [] },
     "routes": [
         { "method": "GET", "path": "/",     "handler": "{{STUDLY}}\\Infrastructure\\Http\\HomeController@index" },
         { "method": "GET", "path": "/ping", "handler": "{{STUDLY}}\\Infrastructure\\Http\\HomeController@ping"  }

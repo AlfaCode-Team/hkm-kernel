@@ -218,6 +218,20 @@ pub const ModuleMeta = struct {
     /// solves. A plugin whose routes require http.pageflow needs Pageflow
     /// installed and enabled exactly as much as one that requires it up top.
     route_requires: []const Requirement = &.{},
+    /// How many HTTP routes this plugin publishes, and how many of those run
+    /// NO filter at all — counted across top-level `routes[]` and every nested
+    /// group, exactly as the route compiler expands them.
+    ///
+    /// Enabling a plugin activates every one of its routes at once, and until
+    /// now the CLI reported none of them: a single install could publish thirty
+    /// endpoints a project never reviewed. You cannot veto what you were never
+    /// shown, so `enable` shows it.
+    ///
+    /// An unfiltered route is not automatically unsafe — a login form, a
+    /// robots.txt, or a page shell whose data sits behind a filtered endpoint
+    /// are all legitimately unfiltered. It is the set that has to be justified.
+    route_count: usize = 0,
+    unfiltered_routes: usize = 0,
     /// "documentation" — preferred enable-time doc (string, or array joined).
     doc: ?[]const u8 = null,
     /// "description" — fallback doc text.
@@ -256,6 +270,8 @@ pub fn readModuleMeta(allocator: std.mem.Allocator, io: Io, pluginsDir: []const 
         .version = strField(parsed.object, "version"),
         .requires = try requiresField(allocator, parsed.object),
         .route_requires = try routeRequiresField(allocator, parsed.object),
+        .route_count = routeStats(parsed.object).total,
+        .unfiltered_routes = routeStats(parsed.object).unfiltered,
         .doc = try docField(allocator, parsed.object, "documentation"),
         .description = strField(parsed.object, "description"),
         .kernel = strField(parsed.object, "kernel"),
@@ -304,6 +320,55 @@ fn routeRequiresField(allocator: std.mem.Allocator, obj: std.json.ObjectMap) ![]
 /// Matches CompileRouteManifestStage::MAX_GROUP_DEPTH — a self-referencing
 /// structure is rejected there, and must not spin here either.
 const max_group_depth: u8 = 16;
+
+pub const RouteStats = struct { total: usize = 0, unfiltered: usize = 0 };
+
+/// Count the routes a module.json publishes, and how many run no filter.
+///
+/// Mirrors the compiler's expansion: a module-wide `routeFilters` and each
+/// group's `filters` are inherited by everything inside them, so a route counts
+/// as filtered when ANY level put something in front of it.
+pub fn routeStats(obj: std.json.ObjectMap) RouteStats {
+    var stats: RouteStats = .{};
+    countRoutes(obj, false, &stats, 0);
+    return stats;
+}
+
+fn countRoutes(obj: std.json.ObjectMap, inherited: bool, stats: *RouteStats, depth: u8) void {
+    if (depth > max_group_depth) return;
+
+    var guarded = inherited;
+    if (nonEmptyArray(obj, "routeFilters")) guarded = true;
+    // "filters" is a GROUP key; at the top level the module-wide spelling is
+    // "routeFilters", and reading both there would misread an unrelated key.
+    if (depth > 0 and nonEmptyArray(obj, "filters")) guarded = true;
+
+    if (obj.get("routes")) |routes| {
+        if (routes == .array) {
+            for (routes.array.items) |route| {
+                if (route != .object) continue;
+                stats.total += 1;
+                if (!(guarded or nonEmptyArray(route.object, "filters"))) {
+                    stats.unfiltered += 1;
+                }
+            }
+        }
+    }
+
+    if (obj.get("groups")) |groups| {
+        if (groups == .array) {
+            for (groups.array.items) |group| {
+                if (group != .object) continue;
+                countRoutes(group.object, guarded, stats, depth + 1);
+            }
+        }
+    }
+}
+
+fn nonEmptyArray(obj: std.json.ObjectMap, key: []const u8) bool {
+    const v = obj.get(key) orelse return false;
+    return v == .array and v.array.items.len > 0;
+}
 
 /// Walk one route-declaration source: its module-wide `routeRequires`, each
 /// `routes[].requires[]`, and every nested group, recursively.
@@ -518,4 +583,66 @@ test "a self-referencing group structure terminates" {
 
     const got = try testRouteRequires(arena.allocator(), buf.items);
     _ = got; // reaching here at all is the assertion: it returned.
+}
+
+
+// ── tests ────────────────────────────────────────────────────────────────────
+
+/// Parse into an arena: parseFromSliceLeaky never frees, which the testing
+/// allocator correctly reports as a leak. The arena owns everything and is
+/// released when the test returns.
+fn statsFor(src: []const u8) !RouteStats {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), src, .{});
+    return routeStats(parsed.object);
+}
+
+test "counts top-level routes and spots the unfiltered ones" {
+    const s = try statsFor(
+        \\{"routes":[
+        \\ {"method":"GET","path":"/a"},
+        \\ {"method":"GET","path":"/b","filters":["auth"]}
+        \\]}
+    );
+    try std.testing.expectEqual(@as(usize, 2), s.total);
+    try std.testing.expectEqual(@as(usize, 1), s.unfiltered);
+}
+
+test "a module-wide routeFilters guards every route" {
+    const s = try statsFor(
+        \\{"routeFilters":["auth"],"routes":[
+        \\ {"method":"GET","path":"/a"},
+        \\ {"method":"GET","path":"/b"}
+        \\]}
+    );
+    try std.testing.expectEqual(@as(usize, 2), s.total);
+    try std.testing.expectEqual(@as(usize, 0), s.unfiltered);
+}
+
+test "group filters are inherited by nested groups" {
+    const s = try statsFor(
+        \\{"groups":[
+        \\ {"filters":["auth"],"routes":[{"method":"GET","path":"/x"}],
+        \\  "groups":[{"routes":[{"method":"GET","path":"/y"}]}]},
+        \\ {"routes":[{"method":"GET","path":"/z"}]}
+        \\]}
+    );
+    try std.testing.expectEqual(@as(usize, 3), s.total);
+    // /x and /y inherit auth; only /z is bare.
+    try std.testing.expectEqual(@as(usize, 1), s.unfiltered);
+}
+
+test "an empty filters array does not count as guarded" {
+    const s = try statsFor(
+        \\{"routes":[{"method":"GET","path":"/a","filters":[]}]}
+    );
+    try std.testing.expectEqual(@as(usize, 1), s.unfiltered);
+}
+
+test "a manifest with no routes counts nothing" {
+    const s = try statsFor("{\"solves\":\"x.y\"}");
+    try std.testing.expectEqual(@as(usize, 0), s.total);
+    try std.testing.expectEqual(@as(usize, 0), s.unfiltered);
 }

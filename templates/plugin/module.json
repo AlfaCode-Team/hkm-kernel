@@ -11,6 +11,9 @@
     "emits": [],
     "listens": [],
 
+    "//files": "Plain PHP files to require at boot — helper files defining GLOBAL FUNCTIONS, which no class autoloader can reach. Paths are relative to this directory. A declared file that does not exist fails the boot. Omit this key and the kernel falls back to your composer.json autoload.files.",
+    "files": [],
+
     "documentation": "The {{STUDLY}} plugin. Describe its single business domain here — this text is shown as a comment when the plugin is enabled into a project. Enabling publishes its config/, database/ (migrations, seeders, factories) and resources/ into the project; disabling can unpublish them and roll back its migrations.",
 
     "config": []

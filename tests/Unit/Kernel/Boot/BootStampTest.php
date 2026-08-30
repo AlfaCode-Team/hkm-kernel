@@ -36,8 +36,13 @@ final class BootStampTest extends TestCase
 
         $this->previousEnv = $_ENV['BOOT_CACHE'] ?? false;
 
-        // A compiled manifest must exist for a cached boot to be usable at all.
+        // EVERY sentinel manifest must exist for a cached boot to be usable at
+        // all — see BootStamp::SENTINELS. Writing them all here keeps this
+        // fixture honest about what a real compiled cache contains; a cache
+        // missing any one of them is the upgrade case, covered separately by
+        // test_a_missing_compiled_manifest_misses().
         ManifestWriter::write('route-manifest.php', ['GET /' => ['handler' => 'C@m']]);
+        ManifestWriter::write('files-manifest.php', []);
     }
 
     protected function tearDown(): void
@@ -190,6 +195,19 @@ final class BootStampTest extends TestCase
         // cleared by a deploy. Never serve from a cache with nothing behind it.
         BootStamp::write($this->hash(), [], []);
         unlink(Paths::cache('manifests/route-manifest.php'));
+
+        self::assertNull(BootStamp::read($this->hash()));
+    }
+
+    public function test_a_cache_from_a_kernel_that_predates_a_manifest_misses(): void
+    {
+        // The upgrade case. An older kernel wrote a perfectly valid stamp and
+        // every manifest IT knew about; this kernel added another. The builder
+        // inputs did not change, so the hash still matches and the stamp is
+        // accepted — while the stage reading the new manifest finds nothing and
+        // silently does no work. Only the manifest's own absence can catch it.
+        BootStamp::write($this->hash(), [], []);
+        unlink(Paths::cache('manifests/files-manifest.php'));
 
         self::assertNull(BootStamp::read($this->hash()));
     }

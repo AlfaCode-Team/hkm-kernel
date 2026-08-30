@@ -268,13 +268,51 @@ final class EntryHelpers
             return [];
         }
 
-        $disable = $data['routePolicy']['disable'] ?? $data['disable'] ?? null;
-        if (!is_array($disable)) {
+        return self::policySpecs($data['routePolicy']['disable'] ?? $data['disable'] ?? null);
+    }
+
+    /**
+     * Read the project's route ALLOWLIST from <projectPath>/proj.json under
+     * "routePolicy": { "only": [ ... ] }.
+     *
+     * The disable policy subtracts, so it only helps a project that already
+     * knows which routes a plugin publishes. This is the inverse — "expose
+     * nothing except these" — for a project that would rather state its HTTP
+     * surface than discover it. Passed to Kernel::withRouteAllowPolicy(); an
+     * empty/absent list means no allowlist, and every plugin route stays.
+     *
+     * @return list<string>
+     */
+    public static function projectRouteAllowPolicy(string $projectPath): array
+    {
+        $file = rtrim($projectPath, '/') . '/proj.json';
+        if (!is_file($file)) {
+            return [];
+        }
+
+        $data = json_decode((string) file_get_contents($file), true);
+        if (!is_array($data)) {
+            return [];
+        }
+
+        return self::policySpecs($data['routePolicy']['only'] ?? null);
+    }
+
+    /**
+     * Normalise a raw policy list: keep non-empty strings, trim them, drop
+     * anything malformed. Shared so "only" and "disable" cannot drift apart in
+     * what they accept.
+     *
+     * @return list<string>
+     */
+    private static function policySpecs(mixed $raw): array
+    {
+        if (!is_array($raw)) {
             return [];
         }
 
         $specs = [];
-        foreach ($disable as $spec) {
+        foreach ($raw as $spec) {
             if (is_string($spec) && trim($spec) !== '') {
                 $specs[] = trim($spec);
             }

@@ -52,8 +52,21 @@ final class BootStamp
 {
     private const FILE = 'boot-stamp.php';
 
-    /** A manifest that must exist for a cached boot to be usable at all. */
-    private const SENTINEL = 'manifests/route-manifest.php';
+    /**
+     * Manifests that must ALL exist for a cached boot to be usable at all.
+     *
+     * More than one because the list also guards KERNEL UPGRADES. A cache
+     * written by an older kernel carries a stamp whose hash still matches (the
+     * builder inputs did not change), so it would be accepted — while a
+     * manifest that version never compiled is simply absent, and the stage
+     * reading it would quietly do nothing. Naming each manifest here makes an
+     * older cache fail the check and recompile, instead of the new feature
+     * being silently inert until someone clears var/cache by hand.
+     */
+    private const SENTINELS = [
+        'manifests/route-manifest.php',
+        'manifests/files-manifest.php',
+    ];
 
     /** Whether the compile may be skipped — `BOOT_CACHE` truthy. */
     public static function enabled(): bool
@@ -86,8 +99,10 @@ final class BootStamp
      */
     public static function read(string $configHash): ?array
     {
-        if (!is_file(Paths::cache(self::SENTINEL))) {
-            return null;
+        foreach (self::SENTINELS as $sentinel) {
+            if (!is_file(Paths::cache($sentinel))) {
+                return null;
+            }
         }
 
         $stamp = ManifestReader::readCompiled(self::FILE);
