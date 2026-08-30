@@ -46,6 +46,14 @@ final class WorkerLoop
     private ?OnDemandLoader $loader = null;
 
     /**
+     * Solves domains of $essentialModules, mapped through the service manifest
+     * once (alongside the calculator) rather than per job.
+     *
+     * @var list<string>
+     */
+    private array $essentialDomains = [];
+
+    /**
      * Per-job retry strategies, built once from the compiled manifest.
      *
      * @var array<string, RetryStrategyContract>
@@ -73,6 +81,20 @@ final class WorkerLoop
         private readonly string $signingSecret = '',
         /** Backoff applied by release() when a job declares no retry of its own. */
         private readonly RetryStrategyContract $retry = new ExponentialRetryStrategy(),
+        /**
+         * Provider classes marked ESSENTIAL — registered into every job's
+         * container regardless of the job's own dependency graph, exactly as
+         * HttpPipeline does for every request.
+         *
+         * Without this the two surfaces disagreed about what "essential" means:
+         * a module declared essential in proj.json was app-wide for requests and
+         * absent from every job. For an essential that rebinds a port per scope
+         * (tenancy rebinding DatabasePort) the failure is silent rather than
+         * loud — the binding still resolves, just to the wrong connection.
+         *
+         * @var list<class-string<\AlfacodeTeam\PhpServicePlatform\Kernel\Contracts\ModuleContract>>
+         */
+        private readonly array $essentialModules = [],
     ) {
     }
 
@@ -401,28 +423,49 @@ final class WorkerLoop
     }
 
     /**
-     * Build a request-scoped ModuleContainer for the job's domain.
-     * Returns null if the job's domain cannot be resolved — falls back to CoreContainer.
+     * Build a request-scoped ModuleContainer for the job's domain, plus every
+     * essential module — the same world an HTTP request is given.
+     *
+     * Returns null only when there is nothing to build: no job domain AND no
+     * essentials. That preserves the historical CoreContainer fallback for an
+     * application that declares no essentials, while an application that does
+     * declare them gets them on a job whose class the manifest does not know —
+     * which is exactly the case "essential" is supposed to cover.
+     *
      * Worker jobs always receive a guest Identity (no HTTP request context).
      */
     private function resolveContainer(string $jobName): ?ModuleContainer
     {
         // First real job: load the manifests now (not at construction time).
         $this->jobManifest ??= $this->loadManifest('job-manifest.php', []);
-        $this->calculator  ??= new DependencyGraphCalculator(
-            $this->loadManifest('service-manifest.php', ['services' => []])
-        );
-        $this->loader ??= new OnDemandLoader($this->core);
+
+        if ($this->calculator === null) {
+            $manifest = $this->loadManifest('service-manifest.php', ['services' => []]);
+            $this->calculator      = new DependencyGraphCalculator($manifest);
+            // Essentials are configured as CLASSES and seeded as DOMAINS; the
+            // mapping needs the service manifest, so it is resolved once here
+            // rather than on every job.
+            $this->essentialDomains = DependencyGraphCalculator::domainsFor($manifest, $this->essentialModules);
+        }
+
+        // Passing the essentials to the LOADER registers them; seeding their
+        // DOMAINS into the graph below additionally brings their transitive
+        // requires[]. LoadStage does both, for the same reason.
+        $this->loader ??= new OnDemandLoader($this->core, $this->essentialModules);
 
         $entry  = $this->jobManifest[$jobName] ?? null;
         $domain = $entry['solves'] ?? null;
 
-        if ($domain === null) {
+        $targets = $domain !== null
+            ? [$domain, ...$this->essentialDomains]
+            : $this->essentialDomains;
+
+        if ($targets === []) {
             return null;
         }
 
         try {
-            $graph = $this->calculator->resolve($domain);
+            $graph = $this->calculator->resolve($targets[0], array_slice($targets, 1));
             return $this->loader->loadWithIdentity($graph, null); // guest Identity for worker context
         } catch (\Throwable) {
             return null; // fall back to CoreContainer if graph resolution fails

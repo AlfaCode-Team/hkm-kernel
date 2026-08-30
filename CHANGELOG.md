@@ -6,6 +6,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-08-30
+
+### Fixed
+- **Essential modules never reached a queued job.** `HttpPipeline` passed its
+  essentials into `OnDemandLoader`; `WorkerLoop` built its loader with none, and
+  `Kernel::materialize()` had no way to hand them over. So a module the project
+  declared app-wide in `proj.json` `"essentials"` was app-wide for requests and
+  **absent from every job** — and for an essential that rebinds a port per scope
+  (tenancy rebinding `DatabasePort`) the failure is silent rather than loud: the
+  binding still resolves, just to the wrong connection. The worker now registers
+  essentials into every job container and seeds their domains into the job's
+  graph, so their transitive `requires[]` come with them — the same two steps
+  `LoadStage` performs for a request. A job whose class the manifest does not
+  know now also gets a container rather than the bare `CoreContainer`, since
+  "essential" means every unit of work; an application that declares no
+  essentials keeps its exact previous behaviour, including that fallback.
+  The class→domain mapping both surfaces need moved to
+  `DependencyGraphCalculator::domainsFor()`; a private copy in each pipeline is
+  how they drifted apart in the first place.
+- **`APP_DEBUG` meant two different things in one file.** `ErrorStage::isDebug()`
+  parsed the value with `FILTER_VALIDATE_BOOL` while `publicError()` compared it
+  `=== 'true'`. With `APP_DEBUG=1` the HTML debug page — stack trace and source
+  excerpt — was served to anything sending `Accept: text/html`, while every JSON
+  response still masked its message as "An internal error occurred.". One flag,
+  two behaviours, and the more revealing of the two was the one that engaged.
+  There is now one `isDebug()`, used by both; `FILTER_VALIDATE_BOOL` is the
+  surviving parse because it is what every other kernel flag uses
+  (`HttpPipeline::flag()`), so `1`, `on`, `yes` and `true` mean the same thing
+  throughout. It also now reads through `env()` rather than `$_ENV`/`getenv()`:
+  the environment loader deliberately skips `putenv()`, so `getenv()` is not the
+  source of truth for a `.env` value. **Note the direction of the change** — with
+  `APP_DEBUG=1` the JSON path now reveals exception messages, which is what the
+  flag was asked for; `APP_DEBUG` unset or falsy masks them exactly as before.
+
 ## [1.6.0] - 2026-08-29
 
 ### Added

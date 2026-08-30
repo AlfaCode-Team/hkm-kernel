@@ -539,6 +539,11 @@ final class Kernel
             $errorPipeline,
             $this->workerPipe,
             $this->workerSecret ?? (string) (env('JOB_SIGNING_SECRET') ?: ''),
+            // Essentials reach the worker for the same reason they reach HTTP: a
+            // job is a request with no HTTP in front of it, and a module the
+            // project declared app-wide should not quietly stop existing at the
+            // queue boundary.
+            essentialModules: $this->essentialModules,
         );
 
         // Configuration compiled by CompileConfigManifestStage during build().
