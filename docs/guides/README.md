@@ -73,7 +73,7 @@ The other three (`phpshots/bind-it`, `phpshots/common-type-alias`,
 | Any plugin — behaviour, API, config | that plugin's own repository: `README.md`, `CLAUDE.md`, and `module.json` as the authority |
 | Which plugin claims a `solves` domain | `hkm plugins domains` — live, and never stale |
 | The `hkm` CLI, bundling, installers | [`tools/README.md`](../../tools/README.md), [`tools/docs/hkm-cli-usage.md`](../../tools/docs/hkm-cli-usage.md) |
-| Per-project frontend, `hkm ui`, surfaces | [`tools/src/templates/frontend/docs/HOW_IT_WORKS.md`](../../tools/src/templates/frontend/docs/HOW_IT_WORKS.md) |
+| Per-project frontend, `hkm ui`, surfaces | [`templates/frontend/docs/HOW_IT_WORKS.md`](../../templates/frontend/docs/HOW_IT_WORKS.md) |
 
 This is deliberate. A copy of someone else's documentation living in the kernel
 is the copy that goes stale, and it did: the catalogue this repo used to carry

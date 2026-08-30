@@ -381,8 +381,9 @@ silently falls back to the stable kernel.
   project `/plugins`.
 - **Kernel autoload:** `PSP_GLOBAL_AUTOLOAD` → `HKM_GLOBAL_AUTOLOAD` →
   `HKM_KERNEL_HOME/vendor` → registry-inferred kernel root.
-- **Templates:** `HKM_TEMPLATES_DIR` → `HKM_KERNEL_HOME/tools/src/templates` →
-  next to the binary → FHS `share/hkm/templates` → registry-inferred kernel root.
+- **Templates:** `HKM_TEMPLATES_DIR` → `HKM_KERNEL_HOME/templates` →
+  `<exe_dir>/templates` → FHS `<exe_dir>/../share/hkm/templates` →
+  registry-inferred `<kernel_root>/templates`.
 
 ---
 

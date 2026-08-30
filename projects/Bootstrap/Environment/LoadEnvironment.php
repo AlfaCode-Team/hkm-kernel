@@ -174,11 +174,60 @@ final class LoadEnvironment
         self::loadDomainTier($rootPath, $sld, $sub);
 
         // ── Tier 3: project overrides ───────────────────────────────────────
+        //
+        // CONFINED TO THE ROOT BEING SERVED — deliberately, and this is a
+        // security boundary, not tidiness.
+        //
+        // $domain comes from DomainResolver, which matches the request's Host
+        // header against the MACHINE-GLOBAL registry (HKM_USERDATA_DIR/
+        // projects.json) listing every project on the host by ABSOLUTE path. A
+        // Host owned by a DIFFERENT project therefore resolves to that
+        // project's directory — and loading its .env here would splice a
+        // foreign APP_KEY, DB_* and SESSION_* over ours, from a header the
+        // caller controls. With ENV_CACHE on, the merged result (our secrets
+        // included) is then written under that other project's var/cache.
+        //
+        // The test is containment rather than equality, because both layouts
+        // are legitimate: flat, where projectPath IS the root; and nested,
+        // where it is <root>/projects/<name>. Anything outside the root is a
+        // different application and its environment is none of our business.
         if ($domain !== null && !$domain->isPlatformOnly()) {
             $projectPath = rtrim($domain->projectPath, '/\\');
+
+            if (!self::isWithin($projectPath, $rootPath)) {
+                error_log(sprintf(
+                    "[hkm] Host '%s' is registered to project '%s' at %s, which is outside the "
+                    . 'application root %s. Its .env was NOT loaded. '
+                    . 'Check HKM_USERDATA_DIR/projects.json.',
+                    (string) $host,
+                    $domain->name,
+                    $projectPath,
+                    $rootPath,
+                ));
+
+                return;
+            }
+
             self::loadFile($projectPath . '/.env');
             self::loadDomainTier($projectPath, $sld, $sub);
         }
+    }
+
+    /**
+     * Is $path the same directory as $root, or somewhere beneath it?
+     *
+     * Compared after realpath() so symlinks and `..` cannot walk out, and with
+     * an explicit separator on the prefix test so a sibling directory sharing a
+     * name prefix (/srv/app-backup against /srv/app) is not treated as inside.
+     * A path that does not exist falls back to its normalised form: it can
+     * still be judged, and a non-existent directory has no .env to load anyway.
+     */
+    private static function isWithin(string $path, string $root): bool
+    {
+        $path = rtrim(realpath($path) ?: $path, '/\\');
+        $root = rtrim(realpath($root) ?: $root, '/\\');
+
+        return $path === $root || str_starts_with($path, $root . DIRECTORY_SEPARATOR);
     }
 
     /** Load the .env.{sld}, .env.{sub}, .env.{sub}.{sld} files under $path. */

@@ -60,6 +60,14 @@ final class CompileRouteManifestStage implements BootStageContract
          * @var list<string>
          */
         private readonly array $projectDomains = [],
+        /**
+         * ALLOWLIST of plugin routes — Kernel::withRouteAllowPolicy(). When
+         * non-empty, a plugin route must match a spec or it is dropped. Empty
+         * means "no allowlist", not "allow nothing".
+         *
+         * @var list<string>
+         */
+        private readonly array $allowedRoutes = [],
     ) {}
 
     public function run(): void
@@ -139,6 +147,9 @@ final class CompileRouteManifestStage implements BootStageContract
         // to add/remove). Dropping BEFORE project routes frees the "METHOD path"
         // key so a project may disable a plugin route AND declare its own on it
         // without a duplicate-route boot failure.
+        // Allowlist FIRST, then subtract. The two compose: allow a module's whole
+        // domain, then disable the handful of its routes you do not want.
+        $routes = $this->applyAllowPolicy($routes);
         $routes = $this->applyDisablePolicy($routes);
 
         // A disabled plugin route releases its name. Otherwise a project that
@@ -830,9 +841,9 @@ final class CompileRouteManifestStage implements BootStageContract
      * Drop plugin routes the project explicitly disabled, then verify every
      * disable spec matched at least one route — an unmatched spec is a typo or a
      * stale reference and fails the boot with a descriptive message (mirrors the
-     * unknown-requires-domain guard). Two spec forms, distinguished by shape:
-     *   - "METHOD /path"  → contains whitespace AND a "/path" part → exact route key
-     *   - "domain"        → anything else → every plugin route whose solves() matches
+     * unknown-requires-domain guard).
+     *
+     * Spec forms are shared with the allow policy — see {@see specMatches()}.
      *
      * @param array<string, array{module: ?class-string, solves: string, ...}> $routes
      * @return array<string, array<string, mixed>>
@@ -845,28 +856,12 @@ final class CompileRouteManifestStage implements BootStageContract
                 continue;
             }
 
-            $isRouteKey = str_contains($spec, ' ') && str_contains($spec, '/');
-            $matched    = 0;
+            $matched = 0;
 
-            if ($isRouteKey) {
-                // Normalize "get  /register" → "GET /register", and
-                // "get@organizer /x" → "GET@organizer /x" (the domain stays
-                // lower-case — only the HTTP method is upper-cased).
-                [$verb, $path] = preg_split('/\s+/', $spec, 2) ?: [$spec, ''];
-                $parsed = RouteIndex::parseKey($verb . ' ' . $path);
-                $key    = RouteIndex::key($parsed['method'], strtolower($parsed['domain']), $parsed['path']);
-
-                if (isset($routes[$key])) {
+            foreach ($routes as $key => $route) {
+                if ($this->specMatches($spec, $key, $route)) {
                     unset($routes[$key]);
-                    $matched = 1;
-                }
-            } else {
-                // Domain form — drop every plugin route that module solves().
-                foreach ($routes as $key => $route) {
-                    if (($route['solves'] ?? null) === $spec) {
-                        unset($routes[$key]);
-                        $matched++;
-                    }
+                    $matched++;
                 }
             }
 
@@ -881,6 +876,104 @@ final class CompileRouteManifestStage implements BootStageContract
         }
 
         return $routes;
+    }
+
+    /**
+     * Keep ONLY the plugin routes an allowlist names — "expose nothing except
+     * these" (Kernel::withRouteAllowPolicy / proj.json routePolicy.only).
+     *
+     * The disable policy subtracts, which requires the project to already know a
+     * route exists before it can refuse it. That is the wrong default when one
+     * `hkm plugins install` publishes thirty routes nobody reviewed. This is the
+     * inverse, for a project that would rather state its surface than chase it.
+     *
+     * An EMPTY allowlist means "no allowlist" and keeps every route. Treating it
+     * as "allow nothing" would turn a project that never opted in into an empty
+     * application on upgrade.
+     *
+     * Unmatched specs do NOT fail the boot here, unlike a disable spec. An
+     * allowlist that names routes from a plugin this deployment has not enabled
+     * is normal for shared/base configuration, and failing on it would make the
+     * safer posture the harder one to adopt.
+     *
+     * @param array<string, array{module: ?class-string, solves: string, ...}> $routes
+     * @return array<string, array<string, mixed>>
+     */
+    private function applyAllowPolicy(array $routes): array
+    {
+        if ($this->allowedRoutes === []) {
+            return $routes;
+        }
+
+        foreach ($routes as $key => $route) {
+            foreach ($this->allowedRoutes as $spec) {
+                if ($this->specMatches(trim($spec), $key, $route)) {
+                    continue 2;
+                }
+            }
+
+            unset($routes[$key]);
+        }
+
+        return $routes;
+    }
+
+    /**
+     * Does one policy spec match one compiled route? Three forms:
+     *
+     *   "METHOD /path"    exact route key
+     *   "METHOD /path/*"  every route under that path prefix, same method
+     *   "domain"          every route whose owning module solves() that domain
+     *
+     * The PREFIX form is what makes a policy survive a dependency bump. Listing
+     * five routes by exact key stays green when the plugin's next release adds a
+     * sixth: the five still match, so the anti-typo guard is satisfied, and the
+     * surface grew with nothing to announce it. A prefix keeps covering whatever
+     * arrives later.
+     *
+     * The method is compared too, so "GET /admin/*" does not silently also cover
+     * the POST that mutates. Use one spec per method when both are meant.
+     *
+     * @param array<string, mixed> $route
+     */
+    private function specMatches(string $spec, string $key, array $route): bool
+    {
+        // Domain form: no whitespace + no path part.
+        if (!str_contains($spec, ' ') || !str_contains($spec, '/')) {
+            return ($route['solves'] ?? null) === $spec;
+        }
+
+        // Normalize "get  /register" → "GET /register", and "get@organizer /x"
+        // → "GET@organizer /x" (the domain stays lower-case; only the HTTP
+        // method is upper-cased).
+        [$verb, $path] = preg_split('/\s+/', $spec, 2) ?: [$spec, ''];
+
+        if (!str_ends_with($path, '*')) {
+            $parsed = RouteIndex::parseKey($verb . ' ' . $path);
+
+            return $key === RouteIndex::key(
+                $parsed['method'],
+                strtolower($parsed['domain']),
+                $parsed['path'],
+            );
+        }
+
+        // Prefix form. Parse the wildcard away first so the method/domain are
+        // normalised exactly as the exact form does, then compare paths.
+        $stem   = rtrim(substr($path, 0, -1), '/');
+        $parsed = RouteIndex::parseKey($verb . ' ' . ($stem === '' ? '/' : $stem));
+        $actual = RouteIndex::parseKey($key);
+
+        if ($actual['method'] !== $parsed['method']
+            || strtolower($actual['domain']) !== strtolower($parsed['domain'])
+        ) {
+            return false;
+        }
+
+        // "/mail/demo/*" covers /mail/demo and everything beneath it, but never
+        // a sibling that merely shares the prefix as a substring (/mail/demos).
+        return $actual['path'] === $parsed['path']
+            || str_starts_with($actual['path'], $parsed['path'] . '/');
     }
 
     /**

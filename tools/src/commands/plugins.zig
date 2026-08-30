@@ -1018,6 +1018,28 @@ fn enableOne(
 
     if (meta) |m| {
         if (m.solves) |s| prompt.muted(try std.fmt.allocPrint(allocator, "    solves: {s}", .{s}));
+        // Enabling a plugin activates EVERY route it declares, at once. Saying
+        // so is the difference between a project that chose its HTTP surface
+        // and one that inherited it: you cannot review, or veto, what you were
+        // never shown.
+        if (m.route_count > 0) {
+            prompt.muted(try std.fmt.allocPrint(
+                allocator,
+                "    publishes {d} HTTP route(s) — audit with `hkm route:list --plugin`",
+                .{m.route_count},
+            ));
+            // Not an error. A login form, robots.txt, or a page shell whose data
+            // sits behind a filtered endpoint are all legitimately unfiltered —
+            // this is the subset that has to be justified one by one.
+            if (m.unfiltered_routes > 0) {
+                prompt.note(try std.fmt.allocPrint(
+                    allocator,
+                    "{d} of them run NO route filter — review with `hkm route:list --unfiltered --plugin`, " ++
+                        "and veto what you will not expose via proj.json routePolicy.",
+                    .{m.unfiltered_routes},
+                ));
+            }
+        }
         if (m.doc != null or m.description != null) prompt.muted("    documentation comment added above the entry");
     }
     if (support_expr) |expr|

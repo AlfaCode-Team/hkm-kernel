@@ -6,6 +6,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-30
+
+### Security
+- **A `Host:` header could make one project load another project's `.env`.**
+  `DomainResolver` matches the request host against the MACHINE-GLOBAL registry
+  (`HKM_USERDATA_DIR/projects.json`), which lists every project on the box by
+  absolute path — so a host owned by a *different* project resolved to that
+  project's directory, and tier 3 of the cascade read its `.env` with no check
+  that it was the application being served. The result was a foreign `APP_KEY`,
+  `DB_*` and `SESSION_*` spliced over ours, selected by a header the caller
+  controls; with `ENV_CACHE=1` the merged result — our secrets included — was
+  then written under *that* project's `var/cache`. Tier 3 is now confined to the
+  application root, and a refusal is announced via `error_log` rather than
+  silently skipped. The test is CONTAINMENT, not equality, because both layouts
+  are legitimate: flat, where the project path *is* the root, and nested, where
+  it is `<root>/projects/<name>`. Comparison is done after `realpath()` and with
+  an explicit separator on the prefix test, so a sibling sharing a name prefix
+  (`/srv/app-backup` against `/srv/app`) is not treated as inside. **When the
+  environment loads is unchanged** — still before `Kernel::build()`; only which
+  directory tier 3 will read has changed.
+
+### Added
+- **`routePolicy.only` — an allowlist for the routes your plugins publish.**
+  A plugin owns and declares its routes, and one `hkm plugins install` can add
+  thirty of them at once; the only existing control, `routePolicy.disable`,
+  SUBTRACTS, so it helps only once you already know a route exists. You cannot
+  veto what you were never shown. `Kernel::withRouteAllowPolicy()` (and
+  `proj.json` `"routePolicy": {"only": [...]}`) inverts it: when the list is
+  non-empty, a plugin route must match a spec or it is never exposed. Two
+  asymmetries are deliberate, both so the safer posture is not the harder one to
+  adopt — an EMPTY list means "no allowlist" rather than "allow nothing" (which
+  would empty an application on upgrade), and an allow spec matching nothing
+  does NOT fail the boot (naming routes from a plugin this deployment has not
+  enabled is normal in shared configuration), unlike a disable spec. Allow is
+  applied before disable, so the two compose: allow a module's whole domain,
+  then subtract the handful of its routes you do not want.
+- **Route-policy PREFIX specs — `"GET /mail/demo/*"`.** The exact form fails
+  OPEN on upgrade: veto five demo routes by exact key and the plugin's next
+  release adds a sixth, the five still match, the anti-typo guard is satisfied,
+  and the surface grows with nothing to announce it. A prefix keeps covering
+  what arrives later, which is the only form that survives a dependency bump.
+  Prefixes are method-specific (`GET /admin/*` does not silently also drop the
+  POST that mutates) and segment-bounded (`/mail/demo/*` never swallows
+  `/mail/demos`). Available to both `disable` and `only`; the exact and
+  module-domain forms are unchanged, and a prefix matching nothing still fails
+  the boot.
+- **`module.json` `"files"` — plain PHP files a module needs loaded.** A plugin
+  is loaded by the KERNEL, not by Composer: plugins are symlinked into
+  `plugins/` and reached through the PSR-4 `Plugins\` map, so no plugin's own
+  `composer.json` is ever read. That is fine for classes and fatal for
+  FUNCTIONS — a plugin declaring `"autoload": {"files": [...]}` has declared it
+  in the one place nothing looks, and nothing complains until something calls
+  one and dies with "Call to undefined function". Projects were hand-patching
+  this with a `require_once` in `bootstrap/app.php`, which works exactly once,
+  in the one project that noticed. Declared files are compiled into
+  `files-manifest.php` and required at boot; a declared file that does not exist
+  now FAILS THE BOOT instead of becoming a runtime fatal inside a plugin. When
+  `module.json` declares none, the module's own `composer.json`
+  `autoload.files` is honoured as a fallback — so existing plugins work with no
+  plugin change at all.
+
+### Fixed
+- **Plugin event listeners with dependencies were silently dropped.** The
+  `EventBus` is constructed once, at materialize, with the `CoreContainer`,
+  while listener DEPENDENCIES are bound per request by `Provider::register()`
+  into the `ModuleContainer`. Dispatch also gated resolution on `has()`, which
+  reports only what is EXPLICITLY BOUND — so an ordinary listener class was
+  reported absent and built with `new $listenerClass()`, which throws
+  `ArgumentCountError` for anything with constructor arguments, which the catch
+  logged as a failed listener. The event was dropped, the cause read like a bug
+  in the listener, and projects worked around it by hand-assembling listeners
+  (and four levels of a plugin's internals) into `withPorts()` so they would be
+  in the core container after all. `EventBus::forContainer()` now gives each
+  request and job a view that resolves against its own container, and dispatch
+  asks the container before falling back to `new`. Resolution is a strict
+  SUPERSET: a listener already bound in core resolves exactly as it did.
+- **`BOOT_CACHE` could silently skip a manifest a newer kernel added.** The
+  cached-boot check gated on one sentinel manifest, so a cache written by an
+  OLDER kernel — whose stamp still matches, because the builder inputs did not
+  change — was accepted while a manifest that version never compiled was simply
+  absent, and the stage reading it did nothing. The sentinel is now a list, so
+  an older cache invalidates and recompiles instead of leaving a new feature
+  inert until someone clears `var/cache` by hand. The route allowlist is also
+  part of the stamp key: without it, TIGHTENING the allowlist would leave the
+  previous, wider route manifest cached — the worst way for a security control
+  to fail.
+- **`route:list` gained `--unfiltered` and `--plugin`** (in the Commands
+  plugin): the inverse of `--filter`, and the one question an audit actually
+  asks — what did enabling these plugins expose with no filter in front of it?
+  An unfiltered route is not automatically unsafe (a login form, `robots.txt`,
+  or a page shell whose data sits behind a filtered endpoint are all
+  legitimately unfiltered); it is the set that has to be justified one by one.
+- **`hkm plugins enable` now reports the HTTP surface it activates** — how many
+  routes the plugin publishes and how many of those run no filter — instead of
+  reporting none of them.
+
+### Templates
+- Removed a duplicate `HashingPort` binding (the second silently overwrote the
+  first) and a dead `PdoDatabase` import.
+- The connection pool is no longer built and `warmup()`-ed at bootstrap. Under
+  PHP-FPM the bootstrap re-runs on EVERY request, so a pool there opened its
+  connections, served one request and was thrown away — strictly more expensive
+  than not pooling. It is now a lazy factory, gated on the CLI SAPI (which is
+  what OpenSwoole and the queue worker run under).
+- `app/worker/run.php` read `WORKER_QUEUE` and `WORKER_MAX_ITERATIONS` with
+  `getenv()`, which cannot see a `.env` value because the environment loader
+  deliberately skips `putenv()` — so both were silently ignored and every worker
+  drained `default`. Now `env()`.
+- `app/public/index.php` resolves the domain EXPLICITLY instead of reading the
+  `$domain` the bootstrap happened to leave in scope. `require` shares scope, so
+  the old form worked until the bootstrap returned early or renamed the
+  variable — at which point `ResolveStage` falls back to the RAW `Host` header
+  for `route_host`, the value the client controls. This matches what the
+  OpenSwoole entry point already had to do per request.
+- The process timezone is pinned explicitly (`APP_TIMEZONE`, default `UTC`).
+
 ## [1.6.1] - 2026-08-30
 
 ### Fixed
