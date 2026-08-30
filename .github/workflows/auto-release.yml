@@ -19,6 +19,7 @@ name: Auto Release
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 concurrency:
   group: auto-release
@@ -86,8 +87,13 @@ jobs:
     #
     # pull-requests: write is for release.yml's `homebrew` job, which opens a PR
     # carrying the formula's sha256 when it cannot push to main directly.
+    # issues: write is that job's LAST resort — when even the PR is refused (an
+    # org can withhold PR creation from Actions across every repo), it files a
+    # tracked issue instead, because a warning on a run page is not a signal
+    # anyone sees. Issue creation is not covered by the pull-request policy.
     permissions:
       contents: write
       pull-requests: write
+      issues: write
     with:
       version: ${{ needs.detect.outputs.version }}
