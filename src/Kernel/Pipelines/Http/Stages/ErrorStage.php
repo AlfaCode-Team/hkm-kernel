@@ -58,9 +58,32 @@ final class ErrorStage implements HttpStageContract
         return Response::json(['error' => $body], $status);
     }
 
+    /**
+     * Whether the application is in debug mode — the ONE place this is decided.
+     *
+     * It used to be decided twice, and differently: this method parsed the value
+     * with FILTER_VALIDATE_BOOL while publicError() compared it `=== 'true'`. So
+     * APP_DEBUG=1 enabled the HTML debug page — stack trace and source excerpt —
+     * for anything sending `Accept: text/html`, while every JSON response still
+     * masked its message as "An internal error occurred.". One flag, two
+     * behaviours, and the more revealing of the two was the one that turned on.
+     *
+     * FILTER_VALIDATE_BOOL is the surviving parse because it is what every other
+     * kernel flag uses (see HttpPipeline::flag()), so `1`, `on`, `yes` and `true`
+     * all mean the same thing across the kernel.
+     *
+     * Read through env(), not $_ENV/getenv(): the environment loader deliberately
+     * skips putenv(), so getenv() is not the source of truth for a .env value.
+     */
     private function isDebug(): bool
     {
-        return filter_var($_ENV['APP_DEBUG'] ?? getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOL);
+        $value = \function_exists('env') ? env('APP_DEBUG') : ($_ENV['APP_DEBUG'] ?? null);
+
+        if ($value === null || $value === '') {
+            return false;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? false;
     }
 
     /** API surface convention — same prefix the CSRF layer exempts. */
@@ -101,7 +124,7 @@ final class ErrorStage implements HttpStageContract
     /** @return array<string, mixed> */
     private function publicError(\Throwable $e): array
     {
-        $debug = ($_ENV['APP_DEBUG'] ?? getenv('APP_DEBUG') ?? 'false') === 'true';
+        $debug = $this->isDebug();
 
         if ($e instanceof ValidationException) {
             return ['code' => 'validation_failed', 'message' => $e->getMessage(), 'fields' => $e->errors];
