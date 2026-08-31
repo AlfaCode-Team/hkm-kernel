@@ -17,6 +17,8 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages\{
     CompileJobManifestStage,
     CompileCommandManifestStage,
     CompileConfigManifestStage,
+    CompileModuleFilesStage,
+    LoadModuleFilesStage,
     RegisterPortsStage,
     BindSecurityStage
 };
@@ -38,6 +40,20 @@ final class BootPipeline
      * @var list<BootStageContract>
      */
     private array $compileStages;
+
+    /**
+     * Stages that affect the PROCESS rather than a manifest, and so must run on
+     * every build even when the compilation is skipped. Loading a module's
+     * helper FILES defines global functions, which live in the process and not
+     * on disk: a cached boot that skipped them would leave BOOT_CACHE silently
+     * changing behaviour, surfacing as an undefined function deep inside a
+     * plugin. They run after the compilation that produces their manifest and
+     * before the validate stages, which are the first to touch live module
+     * objects; on a cached boot they run first of all.
+     *
+     * @var list<BootStageContract>
+     */
+    private array $alwaysStages;
 
     /**
      * Stages that VALIDATE live objects (port bindings, security layers). They
@@ -75,6 +91,14 @@ final class BootPipeline
         array $projectGroups = [],
         array $projectDomains = [],
         ?ManifestReader $reader = null,
+        /**
+         * Plugin-route ALLOWLIST (Kernel::withRouteAllowPolicy / proj.json
+         * routePolicy.only). Non-empty means a plugin route must match a spec or
+         * it is dropped; empty means no allowlist.
+         *
+         * @var list<string>
+         */
+        array $allowedRoutes = [],
     ) {
         // Single reader shared across every manifest-reading stage: each module.json
         // (the single source of truth) is read + JSON-decoded ONCE and cached, instead
@@ -88,17 +112,22 @@ final class BootPipeline
             new DetectConflictsStage($moduleClasses, reader: $reader),        // 2. no two modules share solves()
             new DetectCyclesStage($moduleClasses, reader: $reader),           // 3. no circular requires[] chains
             new CompileServiceManifestStage($moduleClasses, projectRoutes: $projectRoutes, reader: $reader, projectGroups: $projectGroups), // 4. dep graph → service-manifest.php
-            new CompileRouteManifestStage($moduleClasses, projectRoutes: $projectRoutes, disabledRoutes: $disabledRoutes, reader: $reader, projectGroups: $projectGroups, projectDomains: $projectDomains),   // 5. routes[] → route-manifest.php
+            new CompileRouteManifestStage($moduleClasses, projectRoutes: $projectRoutes, disabledRoutes: $disabledRoutes, reader: $reader, projectGroups: $projectGroups, projectDomains: $projectDomains, allowedRoutes: $allowedRoutes),   // 5. routes[] → route-manifest.php
             new CompileViewManifestStage($moduleClasses, reader: $reader),    // 6. views[] → view-manifest.php (project-first cascade)
             new CompileLangManifestStage($moduleClasses, reader: $reader),    // 7. lang[] → lang-manifest.php (project-first cascade)
             new CompileJobManifestStage($moduleClasses, reader: $reader),     // 8. jobs[] → job-manifest.php
             new CompileCommandManifestStage($moduleClasses, reader: $reader), // 9. commands[] → command-manifest.php
             new CompileConfigManifestStage($moduleClasses),                   // 10. config/*.php → config-manifest.php (project over plugin)
+            new CompileModuleFilesStage($moduleClasses, reader: $reader),     // 11. files[] / composer autoload.files → files-manifest.php
+        ];
+
+        $this->alwaysStages = [
+            new LoadModuleFilesStage(),                      // require_once module helper files
         ];
 
         $this->validateStages = [
-            new RegisterPortsStage($core),                   // 11. Port → Adapter bindings validated
-            new BindSecurityStage($securityLayers),          // 12. SecurityGateway layers validated
+            new RegisterPortsStage($core),                   // 12. Port → Adapter bindings validated
+            new BindSecurityStage($securityLayers),          // 13. SecurityGateway layers validated
         ];
     }
 
@@ -115,7 +144,9 @@ final class BootPipeline
      */
     public function run(): void
     {
-        $this->runStages([...$this->compileStages, ...$this->validateStages]);
+        // Compile first (it writes the manifest the always-stages read), then
+        // the process-level stages, then validation of the live objects.
+        $this->runStages([...$this->compileStages, ...$this->alwaysStages, ...$this->validateStages]);
     }
 
     /**
@@ -124,10 +155,14 @@ final class BootPipeline
      * Used when BootStamp reports the compiled manifests are already current: the
      * compilation is skipped, but a missing port binding or an unusable security
      * layer must still fail the boot.
+     *
+     * The always-stages run here too. Skipping them would mean BOOT_CACHE=1
+     * quietly stopped loading module helper files, so a flag documented as a
+     * pure optimisation would change what functions exist at runtime.
      */
     public function runValidationOnly(): void
     {
-        $this->runStages($this->validateStages);
+        $this->runStages([...$this->alwaysStages, ...$this->validateStages]);
     }
 
     /** @param list<BootStageContract> $stages */

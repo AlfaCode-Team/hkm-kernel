@@ -1,0 +1,75 @@
+{
+    "name": "ground-sample",
+    "version": "1.0.0",
+    "solves": "ground.sample",
+    "type": "module",
+    "requires": [],
+    "exposes": [
+        "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\SampleServiceContract"
+    ],
+    "routePrefix": "/samples",
+    "routes": [
+        {
+            "method": "GET",
+            "path": "",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\Http\\SampleController@index",
+            "name": "sample.index"
+        },
+        {
+            "method": "POST",
+            "path": "",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\Http\\SampleController@create"
+        },
+        {
+            "method": "GET",
+            "path": "/{id:num}",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\Http\\SampleController@show"
+        },
+        {
+            "method": "GET",
+            "path": "/page",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\Http\\SampleController@page"
+        },
+        {
+            "method": "GET",
+            "path": "/shell",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\Http\\SampleController@pageShell"
+        },
+        {
+            "method": "GET",
+            "path": "/guarded",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\Http\\SampleController@show",
+            "filters": [
+                "auth",
+                "throttle:60,1"
+            ]
+        }
+    ],
+    "emits": [
+        "ground.sample.created"
+    ],
+    "config": [
+        {
+            "key": "GROUND_SAMPLE_LIMIT",
+            "type": "int",
+            "required": false,
+            "default": 25
+        },
+        {
+            "key": "GROUND_SAMPLE_SECRET",
+            "required": true
+        }
+    ],
+    "jobs": [
+        {
+            "name": "ground.sample.failing",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\FailingJob",
+            "queue": "sample-retry"
+        },
+        {
+            "name": "ground.sample.signed",
+            "handler": "AlfacodeTeam\\Ground\\Tests\\Fixtures\\Sample\\SignedJob",
+            "queue": "sample-signed"
+        }
+    ]
+}

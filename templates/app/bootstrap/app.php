@@ -50,10 +50,10 @@ declare(strict_types=1);
 // PSR-4 roots. The guard keeps this safe even when an entry point already loaded
 // the helper.
 // -----------------------------------------------------------------------------
-if (!function_exists('psp_require_kernel_autoload') || !function_exists('psp_kernel_home')) {
+if (!function_exists('hkm_require_kernel_autoload') || !function_exists('hkm_kernel_home')) {
     require_once __DIR__ . '/kernel-autoload.php';
 }
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Kernel;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
@@ -68,7 +68,6 @@ use Project\Bootstrap\Environment\ErrorGuard;
 use Project\Bootstrap\Environment\LoadEnvironment;
 use Project\Infrastructure\FileQueue;
 use Project\Infrastructure\InMemoryCache;
-use Project\Infrastructure\PdoDatabase;
 
 // Plugins — port adapters / infrastructure.
 use Plugins\Crypto\Infrastructure\AesEncrypter;
@@ -134,6 +133,16 @@ $env = static fn(string $key, ?string $default = null): ?string =>
     (($v = env($key)) !== null ? (string) $v : $default);
 
 // -----------------------------------------------------------------------------
+// TIMEZONE — pin the process to ONE basis, explicitly.
+// With date.timezone unset in php.ini, date() and DateTime fall back to UTC
+// while your database session may not, so a value written by PHP and a value
+// written by the DB can disagree by hours with nothing in the code to show it.
+// Pinning here makes date()/DateTime/gmdate() and the DB agree. Store UTC and
+// convert for display at the edge; override per deployment with APP_TIMEZONE.
+// -----------------------------------------------------------------------------
+date_default_timezone_set($env('APP_TIMEZONE', 'UTC') ?? 'UTC');
+
+// -----------------------------------------------------------------------------
 // STEP 5 — ENCRYPTION KEY (FAIL-FAST)
 // Collect the active key plus an optional previous key (kept during rotation so
 // data encrypted with the old key still decrypts). Order matters: the first key
@@ -170,11 +179,18 @@ if ($appKeys === [] && !in_array($appEnv, ['local', 'testing'], true)) {
 $ports = [
     CachePort::class => static fn(): InMemoryCache => new InMemoryCache(),
 
-     DatabasePort::class => static fn(): MultiDriverDatabaseAdapter =>
+    // Central/default connection. The Database PLUGIN binds its own, better
+    // configured DatabasePort (logger + query log + pool) into the request
+    // container when a route pulls database.management into its graph — and a
+    // module binding WINS over this one (ModuleContainer::make consults its own
+    // bindings before delegating to the core container). This binding therefore
+    // serves the paths the graph does not reach: CLI commands, the worker, and
+    // anything resolving from the CoreContainer (EventBus listeners, the outbox
+    // relay). Keep the two configured the same way, or those paths will quietly
+    // behave differently from HTTP.
+    DatabasePort::class => static fn(): MultiDriverDatabaseAdapter =>
         new MultiDriverDatabaseAdapter((new DatabaseConfigurationFactory())->fromEnvironment()),
-    HashingPort::class => static fn(): PasswordHasher => new PasswordHasher(
-        cost: (int) ($env('HASH_BCRYPT_COST', '12') ?? '12'),
-    ),
+
     HashingPort::class => static fn(): PasswordHasher => new PasswordHasher(
         cost: (int) ($env('HASH_BCRYPT_COST', '12') ?? '12'),
     ),
@@ -199,19 +215,40 @@ $ports = [
     //       ),
 ];
 
-if (filter_var($env('DB_POOL_ENABLED', 'false'), FILTER_VALIDATE_BOOL)) {
-    $dbConfig = (new DatabaseConfigurationFactory())->fromEnvironment();
+// -----------------------------------------------------------------------------
+// CONNECTION POOL (long-lived runtimes only)
+// A pool is only ever a win in a process that serves MANY requests: OpenSwoole
+// workers, and the queue worker. Under PHP-FPM this whole file re-executes on
+// EVERY request, so a pool built here would open its connections, serve one
+// request and be thrown away — strictly more expensive than not pooling at all.
+//
+// `php_sapi_name()` is the honest test: 'cli' covers the worker and console,
+// and OpenSwoole servers also run under the CLI SAPI. PHP-FPM ('fpm-fcgi') and
+// mod_php ('apache2handler') are excluded, which is the point.
+//
+// Note the pool is registered as a LAZY factory, not a pre-built object: even
+// in a long-lived process nothing connects until something first resolves it,
+// and warmup() then happens once, inside that process, rather than at boot.
+// -----------------------------------------------------------------------------
+if (filter_var($env('DB_POOL_ENABLED', 'false'), FILTER_VALIDATE_BOOL)
+    && PHP_SAPI === 'cli'
+) {
     $logQueries = filter_var($env('DB_ENABLE_QUERY_LOG', 'false'), FILTER_VALIDATE_BOOL);
 
-    $pool = new ConnectionPool(
-        factory: static fn(): MultiDriverDatabaseAdapter =>
-        new MultiDriverDatabaseAdapter($dbConfig, null, $logQueries),
-        config: PoolConfiguration::fromEnvironment(),
-        driver: $dbConfig->driver(),
-    );
-    $pool->warmup();
+    $ports[ConnectionPool::class] = static function () use ($logQueries): ConnectionPool {
+        // Built inside the factory so an unused pool never even reads the env.
+        $dbConfig = (new DatabaseConfigurationFactory())->fromEnvironment();
 
-    $ports[ConnectionPool::class] = $pool;
+        $pool = new ConnectionPool(
+            factory: static fn(): MultiDriverDatabaseAdapter =>
+                new MultiDriverDatabaseAdapter($dbConfig, null, $logQueries),
+            config: PoolConfiguration::fromEnvironment(),
+            driver: $dbConfig->driver(),
+        );
+        $pool->warmup();
+
+        return $pool;
+    };
 }
 
 
@@ -250,6 +287,14 @@ return Kernel::configure()
     // module domain) without forking the plugin. Applied to plugin routes before
     // project routes compile — an unmatched spec fails the boot.
     ->withRoutePolicy(EntryHelpers::projectRoutePolicy($projectRoot))
+
+    // Project ROUTE ALLOWLIST from proj.json ("routePolicy": {"only": [...]}).
+    // The disable policy above SUBTRACTS, which only helps once you already know
+    // a route exists — and one `hkm plugins install` can publish thirty. This is
+    // the inverse: when the list is non-empty, a plugin route must match a spec
+    // or it is never exposed. Empty means "no allowlist" (everything stays).
+    // See what your plugins publish: `hkm route:list --unfiltered --plugin`.
+    ->withRouteAllowPolicy(EntryHelpers::projectRouteAllowPolicy($projectRoot))
 
     // Security layers run BEFORE any module loads — a denied request costs zero
     // module work. CsrfTokenLayer here is a stateless, HMAC-signed token

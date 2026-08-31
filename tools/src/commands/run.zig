@@ -50,12 +50,25 @@ const Options = struct {
 };
 
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
-    // Bare `hkm run` (no arguments) prints help rather than serving silently.
-    if (args.len <= 2) {
-        printHelp();
-        return 2;
-    }
-
+    // NO ARG-COUNT GUARD HERE.
+    //
+    // There used to be `if (args.len <= 2) { printHelp(); return 2; }`, which
+    // contradicted this file's own contract three ways: the module docblock
+    // above ("with no argument the current directory is used", `hkm run` as the
+    // first example), the help text ("serve a project (defaults to ./)"), and
+    // the resolver below, which already handles an empty target by resolving
+    // ".". The default-to-cwd path was fully implemented and simply unreachable.
+    //
+    // It also made `hkm run --dev` fail in a way nobody could reason about.
+    // --dev is stripped BEFORE command parsing, so that invocation arrives here
+    // as exactly ["hkm", "run"] — length 2 — and printed usage. Adding any
+    // unrelated flag (`hkm run --dev --port=8000`) got past the count and then
+    // worked perfectly, which makes the failure look like it is about --dev, or
+    // about the directory, rather than about how many words were typed.
+    //
+    // Resolution now belongs entirely to resolveRoot(): in a project directory
+    // `hkm run` serves it, and anywhere else the error below names the actual
+    // problem instead of dumping a usage screen that does not mention it.
     var opts = (try parse(allocator, args)) orelse {
         // parse() returned null: the arguments were invalid.
         printHelp();
@@ -90,6 +103,18 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
             "'{s}' is neither a project folder (with proj.json) nor a registered name.",
             .{if (opts.target.len == 0) "." else opts.target},
         ));
+
+        // A bare `hkm run` outside a project is the one case where the user
+        // named nothing at all, so there is no spelling to check — point at the
+        // ways to name one instead. This is what the old arg-count guard was
+        // really reaching for, except it fired even INSIDE a project.
+        if (opts.target.len == 0) {
+            prompt.hintLine("run it from a project folder, or name one:");
+            prompt.hint("hkm run <path|name>", "serve a specific project");
+            prompt.hint("hkm run --pick", "choose from the registered projects");
+            prompt.hint("hkm list", "show what is registered");
+        }
+
         return 1;
     };
 
@@ -101,8 +126,9 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     else
         null;
     if (autoload) |a| {
-        try env.put("PSP_GLOBAL_AUTOLOAD", a);
-    } else if (env.get("PSP_GLOBAL_AUTOLOAD") == null) {
+        try env.put("HKM_GLOBAL_AUTOLOAD", a);
+        try env.put("PSP_GLOBAL_AUTOLOAD", a); // pre-rename projects
+    } else if (env.get("HKM_GLOBAL_AUTOLOAD") == null and env.get("PSP_GLOBAL_AUTOLOAD") == null) {
         prompt.warn("No kernel autoload found — relying on the project's own resolver.");
         prompt.muted("Set HKM_KERNEL_HOME or PSP_GLOBAL_AUTOLOAD if PHP cannot find the kernel.");
     }
@@ -120,7 +146,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // Export the resolved project-registry dir so the kernel + plugins (Edge)
     // read the SAME registry the launcher uses, without re-deriving it.
     if (try services.resolveProjectsDir(allocator, io, env)) |projects_dir| {
-        try env.put("PSP_PROJECTS_DIR", projects_dir);
+        try env.put("HKM_PROJECTS_DIR", projects_dir);
+        try env.put("PSP_PROJECTS_DIR", projects_dir); // pre-rename projects
     }
 
     const php = env.get("HKM_PHP_BIN") orelse "php";

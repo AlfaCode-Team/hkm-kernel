@@ -6,7 +6,7 @@ namespace AlfacodeTeam\PhpServicePlatform\Kernel\Loading;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Container\{CoreContainer, ModuleContainer};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Contracts\ModuleContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Database\TransactionManager;
-use AlfacodeTeam\PhpServicePlatform\Kernel\Events\DomainEventCollector;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Events\{DomainEventCollector, EventBus};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\{CircularDependencyException, KernelException};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
@@ -85,6 +85,21 @@ final class OnDemandLoader
         $resolvedIdentity = $identity ?? Identity::guest();
         $container->singleton(Identity::class, static fn() => $resolvedIdentity);
         $container->singleton(DomainEventCollector::class, static fn() => new DomainEventCollector());
+
+        // The EventBus, rebound so listeners resolve against THIS request's
+        // container. The core instance owns the subscriptions; this view owns
+        // the lookup. Without it, a listener whose dependencies a plugin binds
+        // in register() can never be constructed, and the event is dropped with
+        // only a log line to show for it. Guarded because the bus is bound
+        // during materialize: a container built before that (or in a test that
+        // never materialized) simply keeps the core behaviour.
+        if ($this->core->has(EventBus::class)) {
+            $coreBus = $this->core->make(EventBus::class);
+            $container->singleton(
+                EventBus::class,
+                static fn($c): EventBus => $coreBus->forContainer($c),
+            );
+        }
         $container->singleton(
             TransactionManager::class,
             fn() => new TransactionManager($this->core->make(DatabasePort::class)),

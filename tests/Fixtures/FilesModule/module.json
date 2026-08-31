@@ -1,0 +1,10 @@
+{
+    "name": "files",
+    "version": "1.0.0",
+    "solves": "files.fixture",
+    "type": "module",
+    "requires": [],
+    "exposes": [],
+    "files": ["helpers.php"],
+    "config": []
+}

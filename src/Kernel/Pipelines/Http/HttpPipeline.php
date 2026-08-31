@@ -129,7 +129,11 @@ final class HttpPipeline
             new SecurityStage($this->gateway),
             ...$this->resolveHook('after.security'),
             new ResolveStage($this->matcher, self::flag('ROUTE_METHOD_NOT_ALLOWED', false)),
-            new LoadStage($this->calculator, $this->loader, self::essentialDomains($manifest, $this->essentialModules)),
+            new LoadStage(
+                $this->calculator,
+                $this->loader,
+                DependencyGraphCalculator::domainsFor($manifest, $this->essentialModules),
+            ),
             ...$this->resolveHook('after.load'),
             new RouteFilterStage($this->filters, $this->core),
             new ExecuteStage(),
@@ -263,31 +267,4 @@ final class HttpPipeline
         };
     }
 
-    /**
-     * Map the essential module classes to their solves domains via the compiled
-     * service manifest, so LoadStage can seed them (and thus their transitive
-     * requires) into every request's dependency graph. An essential not present
-     * in the manifest (not in withModules) is skipped — OnDemandLoader still
-     * registers it standalone, preserving the previous behaviour.
-     *
-     * @param array{services?: array<string, array<string, mixed>>} $manifest
-     * @param list<class-string> $essentialModules
-     * @return list<string>
-     */
-    private static function essentialDomains(array $manifest, array $essentialModules): array
-    {
-        if ($essentialModules === []) {
-            return [];
-        }
-
-        $wanted = array_flip($essentialModules);
-        $domains = [];
-        foreach ($manifest['services'] ?? [] as $domain => $entry) {
-            if (isset($wanted[$entry['module'] ?? ''])) {
-                $domains[] = $domain;
-            }
-        }
-
-        return $domains;
-    }
 }

@@ -6,6 +6,369 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-08-31
+
+### Fixed
+- **`ground serve` handed its router an autoloader path that exists in no
+  layout**, so every request died before reaching the kernel:
+  `Failed opening required '.../modules/ground/src/vendor/autoload.php'`. The
+  router `php -S` executes runs in a fresh process per request and so has to
+  `require` a composer autoloader itself; the path was built by counting
+  directories up from the command's own source file, which named a `vendor/`
+  inside `src/`. The command still started and printed `Listening` — the fatal
+  was in a different process, on the first request, which is why nothing caught
+  it. It now asks where the autoloader ALREADY IN EFFECT lives (two levels above
+  the loaded `Composer\Autoload\ClassLoader`), correct by construction in a
+  kernel checkout, an installed bundle and a plugin's own `vendor/` alike.
+  `ServeTest` now reads the emitted router and asserts the paths it names are
+  real — a generated file is executed by something other than the test runner,
+  so nothing about it is checked unless it is checked deliberately.
+
+## [1.8.0] - 2026-08-31
+
+### Added
+- **`hkm ground` — the plugin developer's bench, as a kernel module.** Developing
+  a plugin previously required a project to test it from, which is backwards:
+  the plugin is the thing being written and the project does not exist yet.
+  `modules/ground` boots ONE plugin on the real kernel — real BootPipeline, real
+  route compiler, real dependency graph, real scope isolation — with every port
+  bound to a fake and the compiled manifests written to a throwaway workspace.
+  Six verbs, no arguments: the plugin is the one you are standing in (`.` says
+  so explicitly; a name reaches a different one), resolved by walking up from
+  the working directory so it works from `ui/` and `tests/` too.
+
+  - `ground init` — everything a plugin needs to be testable, once: `.gitignore`
+    entries first, `phpunit.xml`, a CI workflow, dependencies, a scaffolded
+    test, the UI setup, and the database harness. Idempotent, and it reports
+    whether each file was WRITTEN or KEPT rather than overwriting an author's.
+  - `ground check` — static conformance: manifest drift, undeclared `env()`,
+    unbound contracts, access-rule violations. Exits 1 on any error.
+  - `ground probe` — boot it and report what compiled.
+  - `ground serve` — the real `HttpPipeline` behind `php -S`, against fakes.
+  - `ground test` — phpunit, then vitest when the plugin ships page tests.
+  - `ground migrate` — see below.
+
+  It is a MODULE, not a plugin: it owns no business domain and extends no
+  project. Because every plugin already requires the kernel, every plugin now
+  gets `PluginGroundTestCase` with no dev dependency at all, and
+  `vendor/bin/ground` without `hkm` on PATH.
+
+- **`ground migrate` — migrations against every database, for real.** A
+  migration is the one thing in a plugin that cannot be tested against a fake:
+  a fake records SQL without parsing it, and `--pretend` compiles without
+  executing, so a statement MySQL accepts and PostgreSQL rejects passes both.
+  This connects to actual servers, CREATES its own scratch database per run,
+  applies every migration, inspects the schema, then `reset()`s to exercise
+  every `down()` — the half that `hkm plugins disable` depends on — and drops
+  the scratch database afterwards. It never touches a database anyone
+  configured. Drivers that are unconfigured or unreachable are reported as
+  SKIPPED with the reason and never counted as passes; `--strict` fails the run
+  when any supported database went untested, which is what CI should use.
+
+  Connections come from `ground.databases.json` — written by `--init` straight
+  into `.gitignore`, because it holds credentials for servers that exist on one
+  machine — or from `GROUND_DB_MYSQL` / `GROUND_DB_PGSQL` / `GROUND_DB_SQLSRV`,
+  which override the file so CI needs no file at all.
+
+### Changed
+- **`psp` is gone from every name a user sees.** `bin/psp` is now `bin/hkm-cli`;
+  the bundler and the upgrade path still install it as `bin/hkm`, so installed
+  layouts are unchanged. `[psp]` output prefixes are `[hkm]`, and the global CLI
+  calls itself "HKM Kernel CLI".
+- **`PSP_GLOBAL_AUTOLOAD` / `PSP_PROJECTS_DIR` are now `HKM_*`.** The old names
+  are still READ as a fallback everywhere, and the launcher EXPORTS both — a
+  project generated before this release reads `PSP_`, one generated after reads
+  `HKM_`, and nothing can tell which it is about to run.
+- **Generated project glue is `hkm_*`.** `psp_require_kernel_autoload()`,
+  `psp_kernel_home()` and `psp_register_project_autoload()` become `hkm_*` in
+  new projects; the managed marker is `[hkm-support:<Folder>]`. The tooling
+  reads BOTH spellings, and `hkm plugins` emits whichever name the target
+  project actually defines — writing the new name into a project generated
+  before this release would produce a config that fatals on an undefined
+  function.
+
+### Fixed
+- **`hkm --dev` handed PHP the launcher binary.** The CLI path was hardcoded to
+  `<root>/bin/hkm`, which in a BUNDLE is the PHP CLI but in the dev monorepo is
+  this launcher's own compiled executable — so every `--dev` passthrough died
+  with a parse error thousands of lines into a Mach-O file. Resolution now takes
+  `bin/hkm` when it IS a PHP script and falls back to `bin/hkm-cli`, reading the
+  first bytes rather than trusting the name.
+- **`ALTER TABLE` compiled MySQL syntax for every driver** (`modules/let-migrate`).
+  Additions were batched into one statement and indexes added with `ADD KEY`,
+  neither of which SQLite, PostgreSQL or SQL Server accept; and drops ran
+  columns BEFORE the indexes over them, which only MySQL tolerates. A rollback
+  written in the correct order was reordered by the compiler into one that could
+  not work anywhere but MySQL. Found by `ground migrate` on its first run.
+
+## [1.7.0] - 2026-08-30
+
+### Security
+- **A `Host:` header could make one project load another project's `.env`.**
+  `DomainResolver` matches the request host against the MACHINE-GLOBAL registry
+  (`HKM_USERDATA_DIR/projects.json`), which lists every project on the box by
+  absolute path — so a host owned by a *different* project resolved to that
+  project's directory, and tier 3 of the cascade read its `.env` with no check
+  that it was the application being served. The result was a foreign `APP_KEY`,
+  `DB_*` and `SESSION_*` spliced over ours, selected by a header the caller
+  controls; with `ENV_CACHE=1` the merged result — our secrets included — was
+  then written under *that* project's `var/cache`. Tier 3 is now confined to the
+  application root, and a refusal is announced via `error_log` rather than
+  silently skipped. The test is CONTAINMENT, not equality, because both layouts
+  are legitimate: flat, where the project path *is* the root, and nested, where
+  it is `<root>/projects/<name>`. Comparison is done after `realpath()` and with
+  an explicit separator on the prefix test, so a sibling sharing a name prefix
+  (`/srv/app-backup` against `/srv/app`) is not treated as inside. **When the
+  environment loads is unchanged** — still before `Kernel::build()`; only which
+  directory tier 3 will read has changed.
+
+### Added
+- **`routePolicy.only` — an allowlist for the routes your plugins publish.**
+  A plugin owns and declares its routes, and one `hkm plugins install` can add
+  thirty of them at once; the only existing control, `routePolicy.disable`,
+  SUBTRACTS, so it helps only once you already know a route exists. You cannot
+  veto what you were never shown. `Kernel::withRouteAllowPolicy()` (and
+  `proj.json` `"routePolicy": {"only": [...]}`) inverts it: when the list is
+  non-empty, a plugin route must match a spec or it is never exposed. Two
+  asymmetries are deliberate, both so the safer posture is not the harder one to
+  adopt — an EMPTY list means "no allowlist" rather than "allow nothing" (which
+  would empty an application on upgrade), and an allow spec matching nothing
+  does NOT fail the boot (naming routes from a plugin this deployment has not
+  enabled is normal in shared configuration), unlike a disable spec. Allow is
+  applied before disable, so the two compose: allow a module's whole domain,
+  then subtract the handful of its routes you do not want.
+- **Route-policy PREFIX specs — `"GET /mail/demo/*"`.** The exact form fails
+  OPEN on upgrade: veto five demo routes by exact key and the plugin's next
+  release adds a sixth, the five still match, the anti-typo guard is satisfied,
+  and the surface grows with nothing to announce it. A prefix keeps covering
+  what arrives later, which is the only form that survives a dependency bump.
+  Prefixes are method-specific (`GET /admin/*` does not silently also drop the
+  POST that mutates) and segment-bounded (`/mail/demo/*` never swallows
+  `/mail/demos`). Available to both `disable` and `only`; the exact and
+  module-domain forms are unchanged, and a prefix matching nothing still fails
+  the boot.
+- **`module.json` `"files"` — plain PHP files a module needs loaded.** A plugin
+  is loaded by the KERNEL, not by Composer: plugins are symlinked into
+  `plugins/` and reached through the PSR-4 `Plugins\` map, so no plugin's own
+  `composer.json` is ever read. That is fine for classes and fatal for
+  FUNCTIONS — a plugin declaring `"autoload": {"files": [...]}` has declared it
+  in the one place nothing looks, and nothing complains until something calls
+  one and dies with "Call to undefined function". Projects were hand-patching
+  this with a `require_once` in `bootstrap/app.php`, which works exactly once,
+  in the one project that noticed. Declared files are compiled into
+  `files-manifest.php` and required at boot; a declared file that does not exist
+  now FAILS THE BOOT instead of becoming a runtime fatal inside a plugin. When
+  `module.json` declares none, the module's own `composer.json`
+  `autoload.files` is honoured as a fallback — so existing plugins work with no
+  plugin change at all.
+
+### Fixed
+- **Plugin event listeners with dependencies were silently dropped.** The
+  `EventBus` is constructed once, at materialize, with the `CoreContainer`,
+  while listener DEPENDENCIES are bound per request by `Provider::register()`
+  into the `ModuleContainer`. Dispatch also gated resolution on `has()`, which
+  reports only what is EXPLICITLY BOUND — so an ordinary listener class was
+  reported absent and built with `new $listenerClass()`, which throws
+  `ArgumentCountError` for anything with constructor arguments, which the catch
+  logged as a failed listener. The event was dropped, the cause read like a bug
+  in the listener, and projects worked around it by hand-assembling listeners
+  (and four levels of a plugin's internals) into `withPorts()` so they would be
+  in the core container after all. `EventBus::forContainer()` now gives each
+  request and job a view that resolves against its own container, and dispatch
+  asks the container before falling back to `new`. Resolution is a strict
+  SUPERSET: a listener already bound in core resolves exactly as it did.
+- **`BOOT_CACHE` could silently skip a manifest a newer kernel added.** The
+  cached-boot check gated on one sentinel manifest, so a cache written by an
+  OLDER kernel — whose stamp still matches, because the builder inputs did not
+  change — was accepted while a manifest that version never compiled was simply
+  absent, and the stage reading it did nothing. The sentinel is now a list, so
+  an older cache invalidates and recompiles instead of leaving a new feature
+  inert until someone clears `var/cache` by hand. The route allowlist is also
+  part of the stamp key: without it, TIGHTENING the allowlist would leave the
+  previous, wider route manifest cached — the worst way for a security control
+  to fail.
+- **`route:list` gained `--unfiltered` and `--plugin`** (in the Commands
+  plugin): the inverse of `--filter`, and the one question an audit actually
+  asks — what did enabling these plugins expose with no filter in front of it?
+  An unfiltered route is not automatically unsafe (a login form, `robots.txt`,
+  or a page shell whose data sits behind a filtered endpoint are all
+  legitimately unfiltered); it is the set that has to be justified one by one.
+- **`hkm plugins enable` now reports the HTTP surface it activates** — how many
+  routes the plugin publishes and how many of those run no filter — instead of
+  reporting none of them.
+
+### Templates
+- Removed a duplicate `HashingPort` binding (the second silently overwrote the
+  first) and a dead `PdoDatabase` import.
+- The connection pool is no longer built and `warmup()`-ed at bootstrap. Under
+  PHP-FPM the bootstrap re-runs on EVERY request, so a pool there opened its
+  connections, served one request and was thrown away — strictly more expensive
+  than not pooling. It is now a lazy factory, gated on the CLI SAPI (which is
+  what OpenSwoole and the queue worker run under).
+- `app/worker/run.php` read `WORKER_QUEUE` and `WORKER_MAX_ITERATIONS` with
+  `getenv()`, which cannot see a `.env` value because the environment loader
+  deliberately skips `putenv()` — so both were silently ignored and every worker
+  drained `default`. Now `env()`.
+- `app/public/index.php` resolves the domain EXPLICITLY instead of reading the
+  `$domain` the bootstrap happened to leave in scope. `require` shares scope, so
+  the old form worked until the bootstrap returned early or renamed the
+  variable — at which point `ResolveStage` falls back to the RAW `Host` header
+  for `route_host`, the value the client controls. This matches what the
+  OpenSwoole entry point already had to do per request.
+- The process timezone is pinned explicitly (`APP_TIMEZONE`, default `UTC`).
+
+## [1.6.1] - 2026-08-30
+
+### Fixed
+- **Essential modules never reached a queued job.** `HttpPipeline` passed its
+  essentials into `OnDemandLoader`; `WorkerLoop` built its loader with none, and
+  `Kernel::materialize()` had no way to hand them over. So a module the project
+  declared app-wide in `proj.json` `"essentials"` was app-wide for requests and
+  **absent from every job** — and for an essential that rebinds a port per scope
+  (tenancy rebinding `DatabasePort`) the failure is silent rather than loud: the
+  binding still resolves, just to the wrong connection. The worker now registers
+  essentials into every job container and seeds their domains into the job's
+  graph, so their transitive `requires[]` come with them — the same two steps
+  `LoadStage` performs for a request. A job whose class the manifest does not
+  know now also gets a container rather than the bare `CoreContainer`, since
+  "essential" means every unit of work; an application that declares no
+  essentials keeps its exact previous behaviour, including that fallback.
+  The class→domain mapping both surfaces need moved to
+  `DependencyGraphCalculator::domainsFor()`; a private copy in each pipeline is
+  how they drifted apart in the first place.
+- **`APP_DEBUG` meant two different things in one file.** `ErrorStage::isDebug()`
+  parsed the value with `FILTER_VALIDATE_BOOL` while `publicError()` compared it
+  `=== 'true'`. With `APP_DEBUG=1` the HTML debug page — stack trace and source
+  excerpt — was served to anything sending `Accept: text/html`, while every JSON
+  response still masked its message as "An internal error occurred.". One flag,
+  two behaviours, and the more revealing of the two was the one that engaged.
+  There is now one `isDebug()`, used by both; `FILTER_VALIDATE_BOOL` is the
+  surviving parse because it is what every other kernel flag uses
+  (`HttpPipeline::flag()`), so `1`, `on`, `yes` and `true` mean the same thing
+  throughout. It also now reads through `env()` rather than `$_ENV`/`getenv()`:
+  the environment loader deliberately skips `putenv()`, so `getenv()` is not the
+  source of truth for a `.env` value. **Note the direction of the change** — with
+  `APP_DEBUG=1` the JSON path now reveals exception messages, which is what the
+  flag was asked for; `APP_DEBUG` unset or falsy masks them exactly as before.
+
+## [1.6.0] - 2026-08-29
+
+### Added
+- **`Kernel::withWorkerSecret()` — the queue can finally be an authenticated
+  channel.** `WorkerLoop` has always carried a signature check, but the kernel
+  had no way to give it a key: `$signingSecret` defaulted to `''`, was never
+  passed at construction, and there was no builder method. In every deployment
+  that has ever run, the check was dead code and the worker executed whatever it
+  was handed. A queue is an input channel — whoever can write to it is calling
+  into the application — so this closes a hole, not a nicety. Defaults to
+  `JOB_SIGNING_SECRET` and stays OFF when that is unset, preserving today's
+  behaviour. It deliberately does **not** fall back to `APP_KEY`: that would
+  switch verification on for every existing application at once and reject every
+  job already in flight, since no `QueuePort` adapter signs by default. Turning
+  it on is a two-sided change — roll it out producer-first, teaching the adapter
+  to stamp `JobPayload::signatureFor()` at `push()` time.
+- **Graceful worker shutdown, a memory ceiling, and per-job timeouts.** There
+  was no `pcntl` anywhere in the kernel, so SIGTERM — what every process
+  supervisor and container runtime sends to stop a worker — killed PHP outright,
+  including in the window between `handle()` returning and `ack()` removing the
+  message. A job that had already run its side effects came back on the next
+  boot and ran them **again**. The loop now traps SIGTERM/SIGINT/SIGQUIT,
+  finishes the job it is on, resolves its ack/release/fail, and exits.
+  `run()` takes a `memoryLimitMb` so a supervised worker exits between jobs
+  rather than being OOM-killed inside one, and a job's declared `timeout` is
+  enforced with `pcntl_alarm` — best effort, since SIGALRM is dispatched between
+  opcodes and cannot preempt a job blocked inside one long query.
+- **`Request::withAttributes()`** — set several attributes in a single new
+  instance. Every `with*()` deep-clones all seven parameter bags, so a chain of
+  them pays that price once per link. `ResolveStage` attaching `route_entry`,
+  `route_params` and `target_service` is one logical step that cost three full
+  clones of a request nothing had read yet: **10.02 µs → 3.57 µs, 64% less**.
+- **`SecurityVerdict::allowWithIdentity()`** — allow while carrying an identity
+  that is not yet attached to a request. `allow()` reads the identity back *off*
+  a request, forcing a layer that has just resolved one to clone the entire
+  request so the constructor can read a single property.
+
+### Fixed
+- **`BOOT_CACHE` never hit for the essentials shape the docs recommend.**
+  `Kernel::build()` computed `buildHash()` twice — before and after
+  `resolveEssentialModules()`, which rewrites `essentials` from proj.json's
+  DOMAINS (`tenancy.routing`) into provider CLASSES. So the stamp was written
+  under one hash and read under another, and every request recompiled all ten
+  manifests **and** rewrote the stamp on top of the recompile it had failed to
+  skip — measurably *worse* than leaving the flag off. Measured on a three-route
+  application: **2604 µs → 39 µs per request under PHP-FPM.** The hash is now
+  taken once, from the raw builder inputs; the derived class list rides in the
+  stamp's payload, never its key. `BootStampTest` tests the stamp in isolation
+  and could not see this, so `KernelBootCacheTest` builds twice through the real
+  `Kernel::build()` and watches the manifest inode.
+- **A job payload that failed verification was silently deleted.** The check
+  returned `skipped()`, which `processWithPort` then **acked** — removing the one
+  piece of evidence that something is writing to your queue. A misconfigured
+  producer and an active attacker were indistinguishable, and both looked like
+  nothing happening at all. An unverifiable payload now raises
+  `RejectedJobException`, goes through the `ErrorPipeline`, and is dead-lettered
+  via `fail()`. It is never retried: a signature that does not verify will not
+  verify on the second attempt.
+- **`retry` and `timeout` in `module.json` compiled to nothing.**
+  `CompileJobManifestStage` read `handler`, `queue`, `module` and `solves` and
+  dropped the other two, so every job in every application shared one hardcoded
+  exponential strategy and ran unbounded — while its manifest said otherwise. A
+  declaration that compiles to nothing is worse than no declaration: it reads as
+  a guarantee. Both are compiled through now and honoured per job, including the
+  `"retry": 5` shorthand; an unknown strategy falls back rather than failing the
+  boot, and `"max": 0` is raised to 1 (a job that can never run is never what it
+  meant).
+- **`hkm run` ignored its own documented default of `./`.** An `args.len <= 2`
+  guard printed usage and exited 2 before the resolver ever ran, contradicting
+  the command's module docblock, its help text, and the `resolveRoot()` call
+  below it — which already handled an empty target. It bit `hkm run --dev`
+  hardest: `--dev` is stripped before command parsing, so that invocation
+  arrived as exactly `["hkm", "run"]` and failed, while adding any unrelated flag
+  (`--port=8000`) got past the count and worked perfectly — making the failure
+  look like it was about `--dev`, or about the directory, rather than about how
+  many words were typed. Resolution now belongs entirely to `resolveRoot()`, and
+  a bare `hkm run` outside a project names the actual problem instead of dumping
+  a usage screen that does not mention it.
+- **The Homebrew bump job failed a release that had already published.** Its PR
+  fallback pushed the bump branch, then called `gh pr create` — which the API
+  refuses unless *Settings → Actions → General → "Allow GitHub Actions to create
+  and approve pull requests"* is on, and it is off by default. The step exited
+  non-zero, so v1.5.0 shipped correctly with every asset in place while the run
+  was marked failed. Both blocked paths now degrade to warnings that name the
+  branch, a ready-made compare link, and the two settings that make the bump
+  fully automatic. The release itself was never at risk; only the report was.
+- **The documented Homebrew install did not work as written.** Homebrew 6
+  refuses to load a formula from a third-party tap until it is trusted, and it
+  refuses at `brew install` rather than at `brew tap` — so the two-line
+  instruction appeared to succeed and then failed with "Refusing to load formula
+  … from untrusted tap". `brew trust alfacode-team/hkm` is now part of the
+  documented sequence, in the README and in the formula's own header.
+
+### Changed
+- **A job signature now covers the whole envelope, not just `data`.** Signing
+  `data` alone left `jobClass` — the field that decides WHICH CODE RUNS —
+  unauthenticated. Capturing one legitimately signed envelope and swapping its
+  class for any other `JobContract` was enough; nothing about that required
+  forging a signature, only reusing one. The material is now
+  `jobId | jobClass | queue | maxAttempts | canonical(data)`. `attempts` is
+  deliberately excluded: the driver increments it on every `release()`, so
+  covering it would invalidate a job on its first retry — `maxAttempts` is signed
+  instead, so the retry budget cannot be widened in transit. The payload is
+  canonicalised (associative keys sorted at every depth, list order preserved)
+  because a driver round-tripping the envelope through JSON is under no
+  obligation to keep key order, and an unstable input makes an HMAC reject its
+  own legitimate messages. **No migration is required**: verification was
+  unreachable before this release, so no deployment has signed payloads in
+  flight. `JobPayload::signatureFor()` is the one implementation both producer
+  and verifier use.
+- **`SecurityGateway` no longer clones the request on its final layer.** The
+  clone existed so `SecurityVerdict::allow()` could read the identity back off
+  it, and `SecurityStage` then cloned a second time to put that identity on the
+  request the pipeline actually carries — so for the documented CSRF-then-Auth
+  stack, where the last layer is the one that authenticates, a whole request copy
+  was built and read once. A later layer still sees an earlier layer's identity;
+  only the final layer takes the shortcut. **4.17 µs → 0.87 µs, 79% less.**
+
 ## [1.5.0] - 2026-08-28
 
 ### Added

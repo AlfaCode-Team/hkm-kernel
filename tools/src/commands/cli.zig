@@ -72,13 +72,15 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
 
     // Export the kernel autoload so the project's PHP can find the framework.
     if (try services.resolveAutoload(allocator, io, env)) |autoload| {
-        try env.put("PSP_GLOBAL_AUTOLOAD", autoload);
+        try env.put("HKM_GLOBAL_AUTOLOAD", autoload);
+        try env.put("PSP_GLOBAL_AUTOLOAD", autoload); // pre-rename projects
     }
 
     // Export the resolved project-registry dir so the kernel + plugins (Edge)
     // read the SAME registry the launcher uses, without re-deriving it.
     if (try services.resolveProjectsDir(allocator, io, env)) |projects_dir| {
-        try env.put("PSP_PROJECTS_DIR", projects_dir);
+        try env.put("HKM_PROJECTS_DIR", projects_dir);
+        try env.put("PSP_PROJECTS_DIR", projects_dir); // pre-rename projects
     }
 
     const rel = if (is_worker) "app/worker/run.php" else "app/cli/run.php";

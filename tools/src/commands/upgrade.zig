@@ -113,7 +113,7 @@ fn latestTag(allocator: std.mem.Allocator, io: Io, env: *EnvMap, include_pre: bo
 /// of what testing a local build is for.
 const shipped_paths = [_][]const u8{
     "src",           "plugins",       "projects", "templates",
-    "composer.json", "composer.lock", "bin/psp",  "README.md",
+    "composer.json", "composer.lock", "bin/hkm-cli",  "README.md",
     "LICENSE",       "modules",
 };
 
@@ -837,7 +837,7 @@ fn localUpgrade(
     // and local scratch never leak into the install — the same guarantee
     // bundle.sh relies on.
     const listing = std.process.run(allocator, io, .{
-        .argv = &.{ "git", "-C", src, "ls-files", "--recurse-submodules", "--", "src", "plugins", "projects", "templates", "composer.json", "composer.lock", "bin/psp", "README.md", "LICENSE", "modules" },
+        .argv = &.{ "git", "-C", src, "ls-files", "--recurse-submodules", "--", "src", "plugins", "projects", "templates", "composer.json", "composer.lock", "bin/hkm-cli", "README.md", "LICENSE", "modules" },
         .environ_map = env,
     }) catch {
         prompt.err("could not list the checkout's tracked files (is git installed?).");
@@ -863,9 +863,9 @@ fn localUpgrade(
         if (rel.len == 0) continue;
 
         const from = try std.fs.path.join(allocator, &.{ src, rel });
-        // bin/psp is installed under the name the launcher's passthrough
+        // bin/hkm-cli is installed under the name the launcher's passthrough
         // expects; bundle.sh does the same rename.
-        const rel_dest = if (std.mem.eql(u8, rel, "bin/psp")) "bin/hkm" else rel;
+        const rel_dest = if (std.mem.eql(u8, rel, "bin/hkm-cli")) "bin/hkm" else rel;
         const to = try std.fs.path.join(allocator, &.{ dest, rel_dest });
 
         copyOne(allocator, io, env, from, to, needs_root) catch |e| {

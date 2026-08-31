@@ -332,8 +332,13 @@ pub fn spawnCli(allocator: std.mem.Allocator, io: Io, env: *EnvMap, projectRoot:
     // use-after-free that corrupts the value for later spawns (the first plugin
     // works, subsequent ones get garbage and fail to load the kernel).
     if (autoload) |a| {
-        const existing = env.get("PSP_GLOBAL_AUTOLOAD");
-        if (existing == null or existing.?.len == 0) try env.put("PSP_GLOBAL_AUTOLOAD", a);
+        const existing = env.get("HKM_GLOBAL_AUTOLOAD") orelse env.get("PSP_GLOBAL_AUTOLOAD");
+        if (existing == null or existing.?.len == 0) {
+            // Both names: a project generated before the rename reads PSP_, one
+            // generated after reads HKM_, and this cannot tell them apart.
+            try env.put("HKM_GLOBAL_AUTOLOAD", a);
+            try env.put("PSP_GLOBAL_AUTOLOAD", a);
+        }
     }
     const php = env.get("HKM_PHP_BIN") orelse "php";
 
@@ -376,8 +381,11 @@ fn spawnCliCaptureBatch(allocator: std.mem.Allocator, io: Io, env: *EnvMap, proj
     if (!util.fileExists(io, entry)) return .{};
 
     if (autoload) |a| {
-        const existing = env.get("PSP_GLOBAL_AUTOLOAD");
-        if (existing == null or existing.?.len == 0) try env.put("PSP_GLOBAL_AUTOLOAD", a);
+        const existing = env.get("HKM_GLOBAL_AUTOLOAD") orelse env.get("PSP_GLOBAL_AUTOLOAD");
+        if (existing == null or existing.?.len == 0) {
+            try env.put("HKM_GLOBAL_AUTOLOAD", a);
+            try env.put("PSP_GLOBAL_AUTOLOAD", a); // pre-rename projects
+        }
     }
     const php = env.get("HKM_PHP_BIN") orelse "php";
 

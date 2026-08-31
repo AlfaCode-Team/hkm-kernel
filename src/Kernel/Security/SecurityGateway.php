@@ -31,16 +31,33 @@ final class SecurityGateway
 
     public function inspect(Request $request): SecurityVerdict
     {
-        foreach ($this->layers as $layer) {
+        $last = \count($this->layers) - 1;
+
+        foreach ($this->layers as $i => $layer) {
             $verdict = $layer->check($request);
 
             if ($verdict->isDenied()) {
                 return $verdict;  // Short-circuit — nothing else runs
             }
 
-            // If this layer resolved an identity, attach it to the request
-            if ($verdict->identity() !== null) {
-                $request = $request->withIdentity($verdict->identity());
+            // If this layer resolved an identity, attach it so LATER layers can
+            // see it (a role check after authentication).
+            //
+            // Only when there IS a later layer. withIdentity() deep-clones all
+            // seven parameter bags, and on the last layer that clone exists for
+            // exactly one statement: the allow() below, which reads the identity
+            // straight off it. SecurityStage then clones a second time to put the
+            // identity on the request the pipeline actually carries. The typical
+            // stack — CSRF, then an Auth layer that resolves the identity last —
+            // therefore paid for a whole request copy nothing ever read.
+            $identity = $verdict->identity();
+
+            if ($identity !== null) {
+                if ($i === $last) {
+                    return SecurityVerdict::allowWithIdentity($identity);
+                }
+
+                $request = $request->withIdentity($identity);
             }
         }
 

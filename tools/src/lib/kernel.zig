@@ -41,6 +41,7 @@ const util = @import("util.zig");
 
 const Io = std.Io;
 const EnvMap = std.process.Environ.Map;
+const Dir = std.Io.Dir;
 
 /// How the kernel CLI path was determined — surfaced by `hkm doctor`.
 pub const Source = enum {
@@ -63,6 +64,58 @@ pub const Resolved = struct {
 fn envGet(allocator: std.mem.Allocator, map: *EnvMap, key: []const u8) !?[]const u8 {
     const v = map.get(key) orelse return null;
     return try allocator.dupe(u8, v);
+}
+
+/// The PHP CLI inside a kernel root.
+///
+/// A BUNDLE installs the PHP CLI as `bin/hkm`, because that is what this
+/// launcher's passthrough invokes. The DEV MONOREPO cannot: `bin/hkm` there is
+/// this launcher's own compiled binary, and the PHP CLI keeps its source name,
+/// `bin/hkm-cli`. Handing the Mach-O/ELF launcher to `php` is what produced
+///
+///     PHP Parse error: syntax error, unexpected token "/" … bin/hkm line 16855
+///
+/// on every `hkm --dev <passthrough>` — a fatal for `--dev` as a whole, not
+/// just for one command.
+///
+/// So: take `bin/hkm` when it is a PHP script, otherwise `bin/hkm-cli`. The
+/// check reads the first bytes rather than trusting the layout, because "is
+/// this the interpreter's input or the interpreter" is exactly the question,
+/// and a name cannot answer it.
+pub fn cliPathIn(allocator: std.mem.Allocator, io: Io, root: []const u8) ![]const u8 {
+    const installed = try std.fs.path.join(allocator, &.{ root, "bin", "hkm" });
+
+    if (util.fileExists(io, installed) and isPhpScript(allocator, io, installed)) {
+        return installed;
+    }
+
+    const source = try std.fs.path.join(allocator, &.{ root, "bin", "hkm-cli" });
+
+    if (util.fileExists(io, source)) {
+        return source;
+    }
+
+    // Neither is usable. Return the installed name so the caller's `exists`
+    // check and its diagnostics still describe the layout that was expected.
+    return installed;
+}
+
+/// Does this file begin like a PHP script (`#!` line or `<?php`)?
+fn isPhpScript(allocator: std.mem.Allocator, io: Io, path: []const u8) bool {
+    // Capped hard: the alternative candidate is a multi-megabyte native
+    // executable, and reading it to decide it is not a script would be absurd.
+    const head = Dir.cwd().readFileAlloc(io, path, allocator, .limited(64)) catch |e| switch (e) {
+        // A file LONGER than the limit is the normal case for the launcher
+        // binary, and the error says nothing about the first bytes — but a
+        // native executable never begins with `#!` or `<?php`, so treating an
+        // over-long read as "not a script" is only wrong for a PHP CLI whose
+        // first 64 bytes we could not get, which cannot happen.
+        error.StreamTooLong => return false,
+        else => return false,
+    };
+    defer allocator.free(head);
+
+    return std.mem.startsWith(u8, head, "#!") or std.mem.startsWith(u8, head, "<?php");
 }
 
 /// HKM_KERNEL_HOME, split by where it came from.
@@ -91,25 +144,25 @@ pub fn resolve(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !Resolved {
     // 2. A REAL exported HKM_KERNEL_HOME outranks everything below it.
     if (pin) |p| {
         if (!p.from_config) {
-            const path = try std.fs.path.join(allocator, &.{ p.value, "bin", "hkm" });
+            const path = try cliPathIn(allocator, io, p.value);
             return .{ .path = path, .source = .kernel_home_env, .exists = util.fileExists(io, path) };
         }
     }
 
     // 3. Self-locate relative to this launcher's own executable.
     if (try selfLocateRoot(allocator, io)) |root| {
-        const path = try std.fs.path.join(allocator, &.{ root, "bin", "hkm" });
+        const path = try cliPathIn(allocator, io, root);
         return .{ .path = path, .source = .self_located, .exists = util.fileExists(io, path) };
     }
 
     // 4. A config-file pin — the fallback for a custom install layout.
     if (pin) |p| {
-        const path = try std.fs.path.join(allocator, &.{ p.value, "bin", "hkm" });
+        const path = try cliPathIn(allocator, io, p.value);
         return .{ .path = path, .source = .kernel_home_config, .exists = util.fileExists(io, path) };
     }
 
     // 5. Default for a system package install (Linux .deb → /opt/hkm-kernel).
-    const def = try std.fs.path.join(allocator, &.{ install_scope.system_root, "bin", "hkm" });
+    const def = try cliPathIn(allocator, io, install_scope.system_root);
     return .{ .path = def, .source = .default, .exists = util.fileExists(io, def) };
 }
 

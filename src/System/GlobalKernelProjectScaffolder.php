@@ -179,7 +179,7 @@ Then register the plugin's Provider in
 
 `app/bootstrap/kernel-autoload.php` loads the local `vendor/` first (plugins +
 project `src/`), then the global kernel. Override the global path with
-`PSP_GLOBAL_AUTOLOAD=/abs/path/to/vendor/autoload.php`.
+`HKM_GLOBAL_AUTOLOAD=/abs/path/to/vendor/autoload.php`.
 MD;
     }
 
@@ -302,15 +302,16 @@ declare(strict_types=1);
  * Load the globally installed kernel package autoloader.
  *
  * Resolution order:
- *  1. PSP_GLOBAL_AUTOLOAD env var (explicit path to vendor/autoload.php)
+ *  1. HKM_GLOBAL_AUTOLOAD env var (explicit path to vendor/autoload.php),
+ *     or the pre-rename PSP_GLOBAL_AUTOLOAD
  *  2. Local project vendor/autoload.php (if project also has local deps)
  *  3. COMPOSER_HOME/vendor/autoload.php
  *  4. Linux/macOS defaults (~/.config/composer, ~/.composer)
  *  5. Windows defaults (%APPDATA%/Composer, %USERPROFILE%/.composer)
  */
 
-if (!function_exists('psp_require_kernel_autoload')) {
-    function psp_require_kernel_autoload(): void
+if (!function_exists('hkm_require_kernel_autoload')) {
+    function hkm_require_kernel_autoload(): void
     {
         // HYBRID MODEL: the kernel is installed GLOBALLY, but this project owns
         // its plugins (and its src/) via a LOCAL composer.json + vendor/. Always
@@ -329,7 +330,9 @@ if (!function_exists('psp_require_kernel_autoload')) {
 
         $candidates = [];
 
-        $explicit = getenv('PSP_GLOBAL_AUTOLOAD');
+        // HKM_ first; PSP_ is the pre-rename name, still honoured so a shell
+        // profile or CI job exporting it keeps working.
+        $explicit = getenv('HKM_GLOBAL_AUTOLOAD') ?: getenv('PSP_GLOBAL_AUTOLOAD');
         if (is_string($explicit) && $explicit !== '') {
             $candidates[] = $explicit;
         }
@@ -367,7 +370,7 @@ if (!function_exists('psp_require_kernel_autoload')) {
 
         $msg = "[HKM] Could not load the global kernel autoload.\n"
             . "Install globally: composer global require alfacode-team/php-service-platform\n"
-            . "Or set PSP_GLOBAL_AUTOLOAD=/absolute/path/to/vendor/autoload.php\n";
+            . "Or set HKM_GLOBAL_AUTOLOAD=/absolute/path/to/vendor/autoload.php\n";
 
         // STDERR only exists under the CLI SAPI; the built-in/web server has no
         // such constant, so guard it to avoid masking the real error.
@@ -384,12 +387,12 @@ if (!function_exists('psp_require_kernel_autoload')) {
     }
 }
 
-if (!function_exists('psp_register_project_autoload')) {
+if (!function_exists('hkm_register_project_autoload')) {
     /**
      * Minimal local autoloader for scaffolded projects that do not have
      * their own composer.json/vendor yet. Currently maps App\\* to /app/*.
      */
-    function psp_register_project_autoload(): void
+    function hkm_register_project_autoload(): void
     {
         spl_autoload_register(static function (string $class): void {
             $prefix = 'App\\';
@@ -415,8 +418,8 @@ PHP;
 declare(strict_types=1);
 
 require_once __DIR__ . '/kernel-autoload.php';
-psp_require_kernel_autoload();
-psp_register_project_autoload();
+hkm_require_kernel_autoload();
+hkm_register_project_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Kernel;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
@@ -477,7 +480,7 @@ PHP;
 declare(strict_types=1);
 
 require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
@@ -532,7 +535,7 @@ PHP;
 declare(strict_types=1);
 
 require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use App\Bootstrap\Environment\ErrorGuard;
 use App\Bootstrap\Environment\LoadEnvironment;

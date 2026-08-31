@@ -1,0 +1,28 @@
+{
+    "name": "ground",
+    "version": "1.0.0",
+    "kernel": "^1.0",
+    "solves": "dev.ground",
+    "type": "module",
+
+    "requires": [],
+    "exposes": [],
+
+    "routes": [],
+    "emits": [],
+    "listens": [],
+
+    "config": [
+        {
+            "key": "GROUND_WORKSPACE_DIR",
+            "type": "string",
+            "required": false
+        },
+        {
+            "key": "GROUND_KEEP_WORKSPACE",
+            "type": "bool",
+            "required": false,
+            "default": false
+        }
+    ]
+}

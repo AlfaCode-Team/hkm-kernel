@@ -43,14 +43,14 @@
     #
     # LIVE — the installed kernel (values from `hkm-config print`):
     # SetEnv HKM_KERNEL_HOME     /opt/hkm-kernel
-    # SetEnv PSP_PROJECTS_DIR    /opt/hkm-kernel/projects
-    # SetEnv PSP_GLOBAL_AUTOLOAD /opt/hkm-kernel/vendor/autoload.php
+    # SetEnv HKM_PROJECTS_DIR    /opt/hkm-kernel/projects
+    # SetEnv HKM_GLOBAL_AUTOLOAD /opt/hkm-kernel/vendor/autoload.php
     #
     # DEV — against a checkout instead (HKM_DEV_HOME from config.env):
     # SetEnv HKM_DEV_HOME        /path/to/checkout
     # SetEnv HKM_KERNEL_HOME     /path/to/checkout
-    # SetEnv PSP_GLOBAL_AUTOLOAD /path/to/checkout/vendor/autoload.php
-    # SetEnv PSP_PROJECTS_DIR    /path/to/checkout/projects
+    # SetEnv HKM_GLOBAL_AUTOLOAD /path/to/checkout/vendor/autoload.php
+    # SetEnv HKM_PROJECTS_DIR    /path/to/checkout/projects
 
     # Baseline security headers (SecurityFilters plugin also sets these at runtime).
     <IfModule mod_headers.c>

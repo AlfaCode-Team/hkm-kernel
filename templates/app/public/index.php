@@ -30,22 +30,37 @@ declare(strict_types=1);
 // 1. Autoloaders. The bootstrap also requires these, but the front controller
 //    loads them first so the use-statements below resolve.
 require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Request;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\Response;
+use Project\Bootstrap\EntryHelpers;
 
-// 2. Build the application. $domain (the resolved DomainContext, possibly null)
-//    is defined inside the bootstrap and is in scope after this require.
+// 2. Build the application.
 /** @var \AlfacodeTeam\PhpServicePlatform\Kernel\Kernel $kernel */
 $kernel = require __DIR__ . '/../bootstrap/app.php';
 
+// 3. Resolve the domain EXPLICITLY, rather than reading the $domain that the
+//    bootstrap happens to leave behind in this scope.
+//
+//    `require` shares variable scope, so the old version worked — right up
+//    until the bootstrap returned early, renamed the variable, or wrapped its
+//    body in a function. Then `isset($domain)` is simply false, the attributes
+//    below are never attached, and ResolveStage falls back to the RAW Host
+//    header for route_host. That fallback is the one the client controls, so a
+//    refactor two files away could silently hand route-table selection to the
+//    caller. An explicit call cannot fail that way.
+//
+//    It costs nothing: DomainResolver caches the parsed registry statically per
+//    process, so this second call reads no files.
+$domain = EntryHelpers::resolveDomain(dirname(__DIR__, 2), $_SERVER['HTTP_HOST'] ?? null);
+
 try {
-    // 3. Build an immutable Request from the SAPI globals ($_SERVER, $_GET,
+    // 4. Build an immutable Request from the SAPI globals ($_SERVER, $_GET,
     //    $_POST, php://input, ...) and ride the resolved domain on it as an
     //    attribute (never via a global — coroutine/Swoole safe).
     $request = Request::capture();
-    if (isset($domain) && $domain !== null) {
+    if ($domain !== null) {
         $request = $request
             ->withAttribute('domain', $domain)
             // The FACE (admin/api/project/public) and the HOST let a route declare

@@ -50,12 +50,14 @@ final class ResolveStage implements HttpStageContract
             return Response::notFound();
         }
 
-        $request = $request
-            ->withAttribute('route_entry', $match['entry'])
-            ->withAttribute('route_params', $match['params'])
-            ->withAttribute('target_service', $match['entry']['solves']);
-
-        return $next($request);
+        // One clone, not three: chaining withAttribute() would build two
+        // intermediate requests — each a deep clone of all seven parameter bags
+        // — that nothing ever reads.
+        return $next($request->withAttributes([
+            'route_entry'    => $match['entry'],
+            'route_params'   => $match['params'],
+            'target_service' => $match['entry']['solves'],
+        ]));
     }
 
     /**

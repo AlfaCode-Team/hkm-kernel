@@ -1,0 +1,7 @@
+{
+    "name": "fixture/composer-files",
+    "autoload": {
+        "psr-4": { "Tests\\Fixtures\\ComposerFilesModule\\": "" },
+        "files": ["Engine/functions.php", "Engine/does-not-exist.php"]
+    }
+}

@@ -188,9 +188,14 @@ hkm doctor        # verify PHP + extensions
 **macOS (Homebrew)** — the shortest path; `php` and `composer` come with it.
 ```bash
 brew tap alfacode-team/hkm https://github.com/AlfaCode-Team/hkm-kernel
+brew trust alfacode-team/hkm
 brew install hkm
 hkm doctor
 ```
+`brew trust` is not optional. Homebrew 6 refuses to load a formula from a
+third-party tap until you say you trust it, and it refuses at `brew install`
+rather than at `brew tap` — so without that line the tap appears to succeed and
+the install then fails with *"Refusing to load formula … from untrusted tap"*.
 
 **macOS (installer)** — no root, like the Linux installer: `HKM.app` goes to
 `~/Applications`, the Gatekeeper quarantine flag is cleared, and `hkm` /

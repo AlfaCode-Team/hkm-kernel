@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 /**
  * =============================================================================

@@ -48,10 +48,14 @@ final class Kernel
     private array $projectRoutes = [];
     /** @var array<string, string> disable-spec => spec (de-duplicated, insertion order) */
     private array $disabledRoutes = [];
+    /** @var array<string, string> allow-spec => spec (empty = no allowlist) */
+    private array $allowedRoutes = [];
     /** @var array<string, mixed> project route groups + source-wide route defaults */
     private array $projectGroups = [];
     /** @var list<string> hosts this project serves (proj.json "domains") */
     private array $projectDomains = [];
+    /** HMAC key every dequeued job payload must carry; null = read the env. */
+    private ?string $workerSecret = null;
     private ?ErrorPipeline $errorPipeline = null;
     private ?\Closure $errorPipelineFun = null;
     private ?string $basePath = null;
@@ -119,6 +123,32 @@ final class Kernel
     {
         // Append so inherited projects keep base layers and add their own.
         $this->securityLayers = array_merge($this->securityLayers, $layers);
+        return $this;
+    }
+
+    /**
+     * Require every dequeued job payload to be HMAC-signed with this key.
+     *
+     * A queue is an input channel: whoever can write to it is calling into the
+     * application. WorkerLoop has always had the check — but the kernel never
+     * had a way to give it a key, so in every deployment it was dead code and
+     * the worker ran whatever it was handed.
+     *
+     * Defaults to `JOB_SIGNING_SECRET`, and stays OFF when that is unset, which
+     * is the historical behaviour. It deliberately does NOT fall back to
+     * APP_KEY: that would switch verification on for every existing application
+     * at once and reject every job already in flight, since no QueuePort adapter
+     * signs by default.
+     *
+     * TURNING IT ON IS A TWO-SIDED CHANGE. The producing adapter must stamp
+     * {@see \AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\JobPayload::signatureFor()}
+     * onto the envelope at push() time. Until it does, every payload is rejected
+     * as unsigned and dead-lettered — correct, but not a discovery to make in
+     * production. Roll it out producer-first.
+     */
+    public function withWorkerSecret(string $secret): self
+    {
+        $this->workerSecret = $secret;
         return $this;
     }
 
@@ -294,6 +324,16 @@ final class Kernel
      * matching nothing FAILS the build (no silent typos). Project routes declared
      * via withRoutes() are the project's own and are not affected.
      *
+     * A "METHOD /path" spec may end in `*` to disable a whole PREFIX:
+     *
+     *   ->withRoutePolicy(['GET /mail/demo/*'])   // every demo route, present and future
+     *
+     * The wildcard exists because the exact form fails OPEN on upgrade. Vetoing
+     * five demo routes by exact key stays green when the plugin's next release
+     * adds a sixth — the five still match, nothing errors, and the surface grew
+     * without anyone deciding to grow it. A prefix keeps covering what arrives
+     * later, which is the only form that survives a dependency bump.
+     *
      * Appends + de-duplicates; a base builder's disables carry into child projects.
      *
      * @param list<string> $disable
@@ -304,6 +344,50 @@ final class Kernel
             $spec = trim((string) $spec);
             if ($spec !== '') {
                 $this->disabledRoutes[$spec] = $spec;
+            }
+        }
+        return $this;
+    }
+
+    /**
+     * Declare an ALLOWLIST of plugin routes — "expose nothing except these".
+     *
+     * `withRoutePolicy()` subtracts, which means the project must already know a
+     * route exists in order to refuse it. That is the wrong default when a single
+     * `hkm plugins install` can publish thirty routes a project never reviewed:
+     * you cannot veto what you were never shown. This inverts it. When the list
+     * is non-empty, EVERY plugin route must match a spec or it is dropped.
+     *
+     *   ->withRouteAllowPolicy([
+     *       'POST /oauth/token',   // exact
+     *       'GET /oauth/jwks',
+     *       'auth.identity',       // an entire module domain
+     *       'GET /account/*',      // a prefix
+     *   ])
+     *
+     * Spec forms are identical to the disable policy: "METHOD /path", the same
+     * with a trailing `*`, or a bare module domain. An EMPTY list means "no
+     * allowlist" (every plugin route stays) rather than "allow nothing" — the
+     * silent alternative would be an empty application, and a project that wants
+     * no plugin HTTP surface says so by not enabling the plugins.
+     *
+     * Applied BEFORE the disable policy, so the two compose: allow a module's
+     * domain, then subtract the handful of its routes you do not want. Project
+     * routes from withRoutes() are the project's own and are never filtered.
+     *
+     * Unlike a disable spec, an allow spec that matches nothing does NOT fail the
+     * boot: an allowlist naming routes from a plugin this project has not enabled
+     * yet is a normal state for shared/base configuration, and failing there
+     * would make the safer posture the harder one to adopt.
+     *
+     * @param list<string> $only
+     */
+    public function withRouteAllowPolicy(array $only): self
+    {
+        foreach ($only as $spec) {
+            $spec = trim((string) $spec);
+            if ($spec !== '') {
+                $this->allowedRoutes[$spec] = $spec;
             }
         }
         return $this;
@@ -350,6 +434,7 @@ final class Kernel
             $this->projectGroups,
             $this->projectDomains,
             $reader,
+            array_values($this->allowedRoutes),
         );
 
         // BOOT CACHE (opt-in). Under PHP-FPM every request re-runs this method,
@@ -357,7 +442,16 @@ final class Kernel
         // When BOOT_CACHE is on and nothing the compile read has changed, skip
         // the compilation and keep only the validation stages, which touch no
         // disk and must still catch a missing port or an unusable layer.
-        $cached = BootStamp::enabled() ? BootStamp::read($this->buildHash()) : null;
+        // Computed ONCE, from the RAW builder inputs, and reused for the write
+        // below. It must NOT be recomputed after resolveEssentialModules():
+        // that turns proj.json's "essentials" domains into provider classes, so
+        // a hash taken afterwards would never equal the one the next build looks
+        // the stamp up with — the cache would miss on every request, and pay for
+        // a stamp rewrite on top of the recompile it failed to skip.
+        $cacheEnabled = BootStamp::enabled();
+        $stampHash    = $cacheEnabled ? $this->buildHash() : '';
+
+        $cached = $cacheEnabled ? BootStamp::read($stampHash) : null;
 
         if ($cached !== null) {
             $pipeline->runValidationOnly();
@@ -377,8 +471,9 @@ final class Kernel
         // pipeline's reader, whose module.json cache is already warm.
         $this->essentialModules = $this->resolveEssentialModules($reader);
 
-        if (BootStamp::enabled()) {
-            BootStamp::write($this->buildHash(), $reader->files(), $this->essentialModules);
+        if ($cacheEnabled) {
+            // $stampHash, not a fresh buildHash() — see the note above.
+            BootStamp::write($stampHash, $reader->files(), $this->essentialModules);
         }
 
         $this->built = true;
@@ -392,6 +487,13 @@ final class Kernel
      * essentials, disable policy), so hashing these covers a proj.json edit
      * without stat'ing it — and covers an edit to bootstrap/app.php itself,
      * which no file-mtime check would catch.
+     *
+     * CALL THIS BEFORE resolveEssentialModules(), AND ONLY ONCE PER BUILD.
+     * `essentials` here is a BUILDER INPUT — the raw list the project passed,
+     * which for proj.json is domains ('tenancy.routing'). resolveEssentialModules()
+     * replaces it with the DERIVED provider classes, so a hash taken afterwards
+     * describes a different array and can never match the one the next build
+     * reads with. The derived list belongs in the stamp's payload, not its key.
      */
     private function buildHash(): string
     {
@@ -401,6 +503,11 @@ final class Kernel
             'routes'     => $this->projectRoutes,
             'groups'     => $this->projectGroups,
             'disabled'   => $this->disabledRoutes,
+            // Without this, tightening the allowlist would leave the previous,
+            // WIDER route manifest cached — the surface would stay exposed while
+            // the config said otherwise, which is the worst way for a security
+            // control to fail.
+            'allowed'    => $this->allowedRoutes,
             'domains'    => $this->projectDomains,
             'base'       => $this->basePath,
             'project'    => $this->projectPath,
@@ -489,7 +596,17 @@ final class Kernel
             essentialModules: $this->essentialModules,
         );
         $this->cli        = new CliPipeline($this->core, $errorPipeline);
-        $this->workerLoop = new WorkerLoop($this->core, $errorPipeline, $this->workerPipe);
+        $this->workerLoop = new WorkerLoop(
+            $this->core,
+            $errorPipeline,
+            $this->workerPipe,
+            $this->workerSecret ?? (string) (env('JOB_SIGNING_SECRET') ?: ''),
+            // Essentials reach the worker for the same reason they reach HTTP: a
+            // job is a request with no HTTP in front of it, and a module the
+            // project declared app-wide should not quietly stop existing at the
+            // queue boundary.
+            essentialModules: $this->essentialModules,
+        );
 
         // Configuration compiled by CompileConfigManifestStage during build().
         // Bound BEFORE module boot() so a Provider can read config while wiring.

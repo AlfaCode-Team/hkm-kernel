@@ -42,7 +42,7 @@ declare(strict_types=1);
 
 // 1. Autoloaders. The bootstrap (required below) loads .env + installs ErrorGuard.
 require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Kernel;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\QueuePort;
@@ -52,8 +52,13 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\QueuePort;
 $kernel = require __DIR__ . '/../bootstrap/app.php';
 
 // 3. Read which queue to drain and how many jobs to process before exiting.
-$queue         = (string) (getenv('WORKER_QUEUE') ?: 'default');
-$maxIterations = (int) (getenv('WORKER_MAX_ITERATIONS') ?: 0);
+//    env(), NOT getenv(): LoadEnvironment injects .env into $_ENV/$_SERVER and
+//    deliberately does not call putenv() (it is the injection bottleneck and is
+//    coroutine-unsafe), so getenv() cannot see a .env value. Using it here meant
+//    WORKER_QUEUE in .env was silently ignored and every worker drained
+//    'default' — the wrong queue, with no error to say so.
+$queue         = (string) (env('WORKER_QUEUE') ?: 'default');
+$maxIterations = (int) (env('WORKER_MAX_ITERATIONS') ?: 0);
 
 // 4. The kernel's worker loop — materialises the Worker pipeline on first call.
 //

@@ -1,0 +1,21 @@
+{
+  "name":    "jobs",
+  "version": "1.0.0",
+  "solves":  "jobs.demo",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "jobs": [
+    { "name": "jobs.send-invoice", "handler": "App\\Jobs\\SendInvoice", "queue": "emails",
+      "timeout": 30,
+      "retry": { "max": 5, "strategy": "linear", "base": 30 } },
+
+    { "name": "jobs.rebuild-index", "handler": "App\\Jobs\\RebuildIndex" },
+
+    { "name": "jobs.prune", "handler": "App\\Jobs\\Prune", "retry": 5 },
+
+    { "name": "jobs.report", "handler": "App\\Jobs\\Report",
+      "timeout": 0,
+      "retry": { "max": 0, "strategy": "quantum" } }
+  ]
+}

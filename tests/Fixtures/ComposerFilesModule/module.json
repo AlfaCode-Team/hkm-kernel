@@ -1,0 +1,9 @@
+{
+    "name": "composerfiles",
+    "version": "1.0.0",
+    "solves": "composerfiles.fixture",
+    "type": "module",
+    "requires": [],
+    "exposes": [],
+    "config": []
+}

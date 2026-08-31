@@ -56,10 +56,10 @@ declare(strict_types=1);
 // call leaves every framework class undefined, and the failure surfaces on the
 // first one used rather than here.
 // -----------------------------------------------------------------------------
-if (!function_exists('psp_require_kernel_autoload') || !function_exists('psp_kernel_home')) {
+if (!function_exists('hkm_require_kernel_autoload') || !function_exists('hkm_kernel_home')) {
     require_once __DIR__ . '/kernel-autoload.php';
 }
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Kernel;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;
@@ -127,7 +127,10 @@ return Kernel::configure()
     //     hkm plugins install database     // pooled multi-driver adapter
     //     hkm plugins install redis-cache  // Redis CachePort + QueuePort
     //
-    // Installing either one rewrites the binding below to use it.
+    // Installing one wires its Provider into withModules()/withEssentialModules()
+    // below, but it does NOT touch this array: `hkm plugins` never edits port
+    // bindings. Replacing the binding below is a manual step, and the plugin's
+    // own README says which adapter and constructor to use.
     ->withPorts([
         // Lazy: the closure runs on FIRST USE, not at boot. A project with no
         // database configured therefore boots and serves normally, and only a
@@ -163,6 +166,14 @@ return Kernel::configure()
     // A project can also switch OFF a route a plugin declares, without forking
     // the plugin: proj.json "routePolicy": { "disable": ["GET /register"] }.
     ->withRoutePolicy(EntryHelpers::projectRoutePolicy($projectRoot))
+
+    // Project ROUTE ALLOWLIST from proj.json ("routePolicy": {"only": [...]}).
+    // The disable policy above SUBTRACTS, which only helps once you already know
+    // a route exists — and one `hkm plugins install` can publish thirty. This is
+    // the inverse: when the list is non-empty, a plugin route must match a spec
+    // or it is never exposed. Empty means "no allowlist" (everything stays).
+    // See what your plugins publish: `hkm route:list --unfiltered --plugin`.
+    ->withRouteAllowPolicy(EntryHelpers::projectRouteAllowPolicy($projectRoot))
 
     ->withSecurity([
         // The only security layer the kernel ships: stateless HMAC-signed CSRF
