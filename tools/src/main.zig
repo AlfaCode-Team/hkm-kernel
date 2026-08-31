@@ -306,7 +306,13 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
 
         if (dev_home) |home| {
             try env_map.put("HKM_KERNEL_HOME", home);
-            const cli = try std.fs.path.join(allocator, &.{ home, "bin", "hkm" });
+            // kernel.cliIn, not a hardcoded `bin/hkm`. In the DEV MONOREPO that
+            // filename is this launcher's own compiled binary — `zig build`
+            // writes it there — and the PHP CLI keeps its source name,
+            // `bin/hkm-cli`. Pinning HKM_CLI_PATH to `bin/hkm` handed the
+            // native executable to `php`, so EVERY `--dev` passthrough died on
+            // a parse error thousands of lines into a Mach-O file.
+            const cli = try kernel.cliPathIn(allocator, io, home);
             try env_map.put("HKM_CLI_PATH", cli);
             // Explicit marker so commands can REQUIRE dev mode (e.g. anything that
             // touches the developer's machine, like edge:hosts writing /etc/hosts).

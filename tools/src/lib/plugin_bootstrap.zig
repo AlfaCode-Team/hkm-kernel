@@ -237,11 +237,16 @@ pub fn insertIntoArray(allocator: std.mem.Allocator, source: []const u8, marker:
 // A plugin may ship a `Support/helpers.php` full of global functions. Those are
 // NOT PSR-4 autoloaded (composer only autoloads classes), so enabling the plugin
 // also wires a managed `require_once` into the bootstrap. Each require is tagged
-// with `[psp-support:<Folder>]` so disable can find and remove exactly its line.
+// with `[hkm-support:<Folder>]` so disable can find and remove exactly its line.
+// `[psp-support:` is the pre-rename spelling, still recognised: the marker is
+// written INTO a project and every project wired before the rename carries it.
 
-pub const support_tag_open = "[psp-support:";
+pub const support_tag_open = "[hkm-support:";
 
-/// The exact managed comment tag for `folder`, e.g. `[psp-support:Cookie]`.
+/// The pre-rename marker. Read, never written.
+pub const support_tag_open_legacy = "[psp-support:";
+
+/// The exact managed comment tag for `folder`, e.g. `[hkm-support:Cookie]`.
 pub fn supportTag(allocator: std.mem.Allocator, folder: []const u8) ![]const u8 {
     return std.fmt.allocPrint(allocator, "{s}{s}]", .{ support_tag_open, folder });
 }
@@ -256,7 +261,10 @@ pub fn supportTag(allocator: std.mem.Allocator, folder: []const u8) ![]const u8 
 /// it claims to say.
 pub fn supportRequireWired(allocator: std.mem.Allocator, source: []const u8, folder: []const u8, expr: []const u8) bool {
     const tag = supportTag(allocator, folder) catch return false;
-    if (std.mem.indexOf(u8, source, tag) == null) return false;
+    if (std.mem.indexOf(u8, source, tag) == null) {
+        const legacy = std.fmt.allocPrint(allocator, "{s}{s}]", .{ support_tag_open_legacy, folder }) catch return false;
+        if (std.mem.indexOf(u8, source, legacy) == null) return false;
+    }
 
     // The expression identifies the file; a require_once naming it is the wiring.
     if (expr.len > 0) {
@@ -286,7 +294,15 @@ pub fn insertSupportRequire(allocator: std.mem.Allocator, source: []const u8, fo
 
     // Anchor after the autoload call; fall back to the strict_types declaration,
     // else the very top of the file.
-    const anchor = if (std.mem.indexOf(u8, source, "psp_require_kernel_autoload();")) |p|
+    // Both spellings. Projects generated after the rename call
+    // hkm_require_kernel_autoload(); everything generated before calls the psp_
+    // name, and those bootstraps are on disk in every existing project. Looking
+    // for one name only would silently miss the anchor in half of them and
+    // splice the require at the top of the file instead — before the autoload
+    // it depends on.
+    const anchor = if (std.mem.indexOf(u8, source, "hkm_require_kernel_autoload();")) |p|
+        p
+    else if (std.mem.indexOf(u8, source, "psp_require_kernel_autoload();")) |p|
         p
     else if (std.mem.indexOf(u8, source, "declare(strict_types=1);")) |p|
         p

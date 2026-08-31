@@ -6,7 +6,7 @@ use AlfacodeTeam\PhpServicePlatform\System\GlobalKernelProjectScaffolder;
 
 $autoload = __DIR__ . '/../vendor/autoload.php';
 if (!is_file($autoload)) {
-    fwrite(STDERR, "[psp] vendor/autoload.php not found. Run composer install.\n");
+    fwrite(STDERR, "[hkm] vendor/autoload.php not found. Run composer install.\n");
     exit(1);
 }
 require_once $autoload;
@@ -16,27 +16,32 @@ array_shift($args);
 $command = $args[0] ?? 'help';
 
 $printHelp = static function (): void {
-    echo "PhpServicePlatform Global CLI\n";
+    echo "HKM Kernel CLI\n";
     echo "\n";
     echo "Usage:\n";
-    echo "  psp new <path> [options]   Create a project anywhere using the system kernel\n";
+    echo "  hkm new <path> [options]   Create a project anywhere using the system kernel\n";
     echo "      --project=<name>         Project name (default: admin)\n";
     echo "      --domains=a.com,b.com    Domains the project answers to (also written to proj.json)\n";
     echo "      --admin-sub=app,admin    Subdomain labels mapped to the 'admin' face (platform.json)\n";
     echo "      --api-sub=api            Subdomain labels mapped to the 'api' face (platform.json)\n";
     echo "      --no-register            Do NOT register in the kernel projects.json/platform.json\n";
-    echo "  psp doctor                 Show global autoload detection info\n";
-    echo "  psp help                   Show this help\n";
+    echo "  hkm ground [check|probe|serve|test|new]   Develop and test a plugin, with no project\n";
+    echo "  hkm doctor                 Show global autoload detection info\n";
+    echo "  hkm help                   Show this help\n";
     echo "\n";
-    echo "Registry dir: PSP_PROJECTS_DIR (default: <kernel-root>/projects)\n";
+    echo "Registry dir: HKM_PROJECTS_DIR (default: <kernel-root>/projects)\n";
 };
 
 $resolveGlobalAutoloadCandidates = static function (): array {
     $candidates = [];
 
-    $explicit = getenv('PSP_GLOBAL_AUTOLOAD');
-    if (is_string($explicit) && $explicit !== '') {
-        $candidates[] = $explicit;
+    // HKM_ first; PSP_ is the pre-rename name, still honoured so a shell
+    // profile or CI job that exports it keeps working.
+    foreach (['HKM_GLOBAL_AUTOLOAD', 'PSP_GLOBAL_AUTOLOAD'] as $var) {
+        $explicit = getenv($var);
+        if (is_string($explicit) && $explicit !== '') {
+            $candidates[] = $explicit;
+        }
     }
 
     $composerHome = getenv('COMPOSER_HOME');
@@ -65,6 +70,23 @@ $resolveGlobalAutoloadCandidates = static function (): array {
 };
 
 switch ($command) {
+    case 'ground':
+        /**
+         * `hkm ground <verb>` — the plugin developer's bench.
+         *
+         * Reached with no project and no per-plugin install, which is the whole
+         * point: a plugin under development has no project around it, and
+         * requiring one to check the plugin is backwards. `hkm` passes any verb
+         * it does not own straight to this file, so nothing in the Zig launcher
+         * had to learn the word "ground".
+         *
+         * The harness itself is a kernel MODULE (modules/ground) rather than a
+         * plugin. It is not a business capability and it extends no project —
+         * it is developer tooling that happens to need the kernel's autoloader,
+         * so it ships with the kernel the way php-io-cli and let-migrate do.
+         */
+        exit(\AlfacodeTeam\Ground\Cli::run(\array_slice($args, 1)));
+
     case 'help':
     case '--help':
     case '-h':
@@ -72,7 +94,7 @@ switch ($command) {
         exit(0);
 
     case 'doctor':
-        echo "[psp] Doctor\n\n";
+        echo "[hkm] Doctor\n\n";
         echo "Kernel class loaded (current package): "
             . (class_exists(\AlfacodeTeam\PhpServicePlatform\Kernel\Kernel::class) ? 'yes' : 'no') . "\n\n";
 
@@ -82,13 +104,13 @@ switch ($command) {
             echo " - {$candidate} [{$ok}]\n";
         }
 
-        echo "\nTip: set PSP_GLOBAL_AUTOLOAD to force a path.\n";
+        echo "\nTip: set HKM_GLOBAL_AUTOLOAD to force a path.\n";
         exit(0);
 
     case 'new':
         $target = $args[1] ?? null;
         if ($target === null || trim($target) === '') {
-            fwrite(STDERR, "[psp] Missing target path. Example: psp new /path/to/project\n");
+            fwrite(STDERR, "[hkm] Missing target path. Example: hkm new /path/to/project\n");
             exit(2);
         }
 
@@ -117,9 +139,9 @@ switch ($command) {
         }
 
         // Kernel registry directory: where projects.json / platform.json live.
-        // Override with PSP_PROJECTS_DIR; otherwise the kernel package's own
-        // projects/ folder (this script lives in <kernel-root>/bin/psp).
-        $kernelProjectsDir = getenv('PSP_PROJECTS_DIR');
+        // Override with HKM_PROJECTS_DIR; otherwise the kernel package's own
+        // projects/ folder (this script lives in <kernel-root>/bin/hkm-cli).
+        $kernelProjectsDir = getenv('HKM_PROJECTS_DIR');
         if (!is_string($kernelProjectsDir) || $kernelProjectsDir === '') {
             $kernelProjectsDir = dirname(__DIR__) . '/projects';
         }
@@ -141,23 +163,23 @@ switch ($command) {
                 );
             }
         } catch (Throwable $e) {
-            fwrite(STDERR, "[psp] " . $e->getMessage() . "\n");
+            fwrite(STDERR, "[hkm] " . $e->getMessage() . "\n");
             exit(1);
         }
 
-        echo "[psp] Project created at: {$target}\n";
-        echo "[psp] Project bootstrap: app/bootstrap/app.php\n";
+        echo "[hkm] Project created at: {$target}\n";
+        echo "[hkm] Project bootstrap: app/bootstrap/app.php\n";
         if (!$noRegister) {
-            echo "[psp] Registered '{$projectName}' in kernel registry: {$kernelProjectsDir}\n";
-            echo "[psp]   projects.json: " . ($written['projects'] ?? '') . "\n";
-            echo "[psp]   platform.json: " . ($written['platform'] ?? '') . "\n";
-            echo "[psp]   domains: " . ($domains === [] ? '(none — add with --domains=a.com,b.com)' : implode(', ', $domains)) . "\n";
+            echo "[hkm] Registered '{$projectName}' in kernel registry: {$kernelProjectsDir}\n";
+            echo "[hkm]   projects.json: " . ($written['projects'] ?? '') . "\n";
+            echo "[hkm]   platform.json: " . ($written['platform'] ?? '') . "\n";
+            echo "[hkm]   domains: " . ($domains === [] ? '(none — add with --domains=a.com,b.com)' : implode(', ', $domains)) . "\n";
         }
-        echo "[psp] Next: php {$target}/app/cli/run.php list\n";
+        echo "[hkm] Next: php {$target}/app/cli/run.php list\n";
         exit(0);
 
     default:
-        fwrite(STDERR, "[psp] Unknown command: {$command}\n\n");
+        fwrite(STDERR, "[hkm] Unknown command: {$command}\n\n");
         $printHelp();
         exit(2);
 }

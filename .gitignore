@@ -1,7 +1,7 @@
 
 
 # ── NATIVE LAUNCHER (compiled by `zig build` into bin/) ───────
-# bin/psp (the PHP CLI) IS tracked; the arch-specific Zig binaries are not.
+# bin/hkm-cli (the PHP CLI) IS tracked; the arch-specific Zig binaries are not.
 /bin/hkm
 /bin/hkm-config
 # zig build output — rebuilt by `zig build` / tools/bundle.sh; never shipped from git.
@@ -87,3 +87,4 @@ ehthumbs.db
 **/.zig-cache
 
 /userdata/
+dist/

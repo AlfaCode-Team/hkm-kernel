@@ -34,7 +34,7 @@ final class EntryHelpers
      * Resolve the bootstrap path honouring a resolved DomainContext.
      *
      * When the host matched a project REGISTERED with an external absolute path
-     * (a flat standalone project created with `psp new`), boot that project's
+     * (a flat standalone project created with `hkm new`), boot that project's
      * own bootstrap:
      *   - flat layout:   <projectPath>/app/bootstrap/app.php
      *   - nested layout: <projectPath>/bootstrap/app.php

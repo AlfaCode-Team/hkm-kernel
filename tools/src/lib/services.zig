@@ -43,10 +43,12 @@ pub fn resolveRoot(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: [
 /// Order: PSP_GLOBAL_AUTOLOAD (kept) → HKM_GLOBAL_AUTOLOAD → HKM_KERNEL_HOME →
 /// the kernel root inferred from the registry path (<kernel>/projects/...).
 pub fn resolveAutoload(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !?[]const u8 {
-    if (env.get("PSP_GLOBAL_AUTOLOAD")) |v| {
+    // HKM_ first; PSP_ is the pre-rename name, still read so a shell profile
+    // or CI job that exports it keeps working.
+    if (env.get("HKM_GLOBAL_AUTOLOAD")) |v| {
         if (v.len > 0) return v;
     }
-    if (env.get("HKM_GLOBAL_AUTOLOAD")) |v| {
+    if (env.get("PSP_GLOBAL_AUTOLOAD")) |v| {
         if (v.len > 0) return v;
     }
     // Self-locate the kernel (HKM_KERNEL_HOME, then relative to this executable,
@@ -95,6 +97,9 @@ pub fn resolveKernelHome(allocator: std.mem.Allocator, io: Io, env: *EnvMap, aut
 /// an explicit PSP_PROJECTS_DIR, else takes the parent of the resolved
 /// registry file (which itself prefers HKM_USERDATA_DIR, then HKM_KERNEL_HOME).
 pub fn resolveProjectsDir(allocator: std.mem.Allocator, io: Io, env: *EnvMap) !?[]const u8 {
+    if (env.get("HKM_PROJECTS_DIR")) |d| {
+        if (d.len > 0) return try allocator.dupe(u8, d);
+    }
     if (env.get("PSP_PROJECTS_DIR")) |d| {
         if (d.len > 0) return try allocator.dupe(u8, util.trimSlash(d));
     }

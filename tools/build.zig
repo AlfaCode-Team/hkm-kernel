@@ -37,7 +37,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(config_tool);
 
     // Also drop the native launcher + config tool into the repo-level bin/ (next
-    // to bin/psp) so `zig build` makes `bin/hkm` and `bin/hkm-config` runnable
+    // to bin/hkm-cli) so `zig build` makes `bin/hkm` and `bin/hkm-config` runnable
     // locally. build.zig lives in tools/, so "../bin" is the repo bin/.
     //
     // Guarded to NATIVE builds only: the cross-compiled bundle builds
