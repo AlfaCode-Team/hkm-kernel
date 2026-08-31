@@ -6,6 +6,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-08-31
+
+### Added
+- **`ground migrate` runs the whole dependency CHAIN, seeds it, and separates
+  the CENTRAL and TENANT databases.** Three related gaps, all of which let a
+  green tick stand for a schema that could not deploy:
+
+  - *The chain.* Only the target plugin's migrations ran. A plugin's schema does
+    not stop at its own tables — tenancy's `user_tenants` has a foreign key onto
+    `users`, which the User plugin owns — so running one plugin alone rehearsed
+    something no project ever does. The chain is the same transitive `requires[]`
+    walk that decides what a REQUEST loads, so it cannot disagree with what
+    `ground serve` boots. `--with` names an undeclared dependency, `--alone`
+    restores the old behaviour.
+  - *Seeding.* Seeders now run against the freshly built schema, before the
+    rollback. A seeder is the first thing to notice a column a migration renamed,
+    and it exercises the schema the way the application will — real INSERTs, real
+    constraints, real defaults.
+  - *Central vs tenant.* `database/migrations` builds the central database and
+    `database/tenant-template` builds ONE tenant's. Running both into a single
+    scratch database made ground the only place those tables coexist: a
+    tenant-template migration declaring `foreign('user_id')->on('users')` applied
+    happily, while in production `users` lives in a different database where no
+    engine can point a key. Each layer now gets its own database, created and
+    dropped independently, with its own seeders (`database/seeders`,
+    `database/tenant-seeders`).
+
+  Because SQLite records a foreign key to a missing table without complaint —
+  and `PRAGMA foreign_key_check` returns nothing on empty tables — the harness
+  reads the declared keys and fails a layer whose parent table it did not build.
+  That caught `social_identities.user_id → users` in a tenant schema.
+
+- **Ground reads the plugin's own `.env`, and `ground init` writes it.**
+  Ground already synthesised an environment — `APP_KEY`, `APP_ENV=testing`, and
+  each `config[]` var's default or a type-correct placeholder — which is what
+  lets a plugin boot with no configuration at all. What it could not know was a
+  REAL value: a sandbox API key, a local MailHog host, `APP_DEBUG=false` for an
+  afternoon. Those are properties of one machine.
+
+  `init` now writes a `.env` seeded from the `config[]` declarations of the
+  plugin AND every plugin it depends on, grouped by which one declared each var,
+  and merges on re-run so a key someone pasted in survives. Precedence is
+  `config[] default/placeholder` → `.env` → `PluginGround::env()`: a test naming
+  a value still wins, because that value is a precondition of the test and must
+  not depend on a file the test never mentions.
+
+  Vars WITHOUT a default are written commented out — deliberately unlike
+  `hkm plugins enable`, which writes them as an active empty `KEY=` so a project
+  boot fails until the secret is supplied. That is right for a project and
+  exactly wrong here: an empty string is a value, it would override ground's
+  placeholder, and the bench would stop booting. The `.env` is gitignored.
+
+- **Seeding a second database in one run died with "Cannot redeclare class".**
+  LetMigrate's `SeederRunner` `require`d every seeder file unconditionally, and
+  `require` EXECUTES it — so a seeder declaring a named class could be loaded
+  only once per process. Nothing hit that until `ground migrate` began seeding
+  once per driver in a single run; with SQLite alone there was one target and
+  one load. It now skips the require when the class is already in memory and
+  instantiates it directly, while `return new class {...}` files — which declare
+  no named class — are still required every time, as they must be.
+
+- **`ground init --ignore` — refresh a plugin's .gitignore and nothing else.**
+  The ignore list grows as ground learns to generate more (a dev workspace, a
+  lockfile from a different package manager), and an existing plugin then needs
+  only that one step. Running the whole of `init` to get it would also scaffold
+  a CI workflow and reinstall dependencies the plugin never asked for.
+
+  The list itself now covers everything ground or its toolchain writes:
+  `/vendor/`, `/node_modules/`, `/ui/node_modules/`, the generated
+  `ui/package.json` and all three lockfiles, `ui/vitest.config.ts`,
+  `ui/tsconfig.plugins.json`, `ui/.ground/`, `ui/dist/`, `ui/.vite/`,
+  `composer.local.*`, `ground.databases.json`, `docker-compose.ground.yml` and
+  the phpunit caches. Tests, fixtures, `phpunit.xml` and migrations stay source
+  and are deliberately NOT ignored.
+
+- **`ground drop` — remove scratch databases a killed run left behind.**
+  `migrate` drops its own in a `finally`, so normally there is nothing to do;
+  `GROUND_KEEP_DATABASE=1`, a hard kill, or a crash inside the drop itself each
+  leave a whole database sitting on a server under an unrecognisable name. It
+  only ever touches the `ground_` prefix, refuses anything else by name, and
+  `--list` shows what it would do.
+
+- **`hkm ground dev` — `yarn dev` inside a plugin, with HMR, against the real
+  kernel.** A plugin's pages import `@pageflow/react`, `@ui/button`,
+  `@providers/theme` — aliases that only existed after `hkm ui sync` had
+  mirrored the plugin into a PROJECT. So "let me see this page in a browser"
+  answered "first build a project", which is the wrong answer while the plugin
+  is the thing being written.
+
+  The command generates a gitignored Vite workspace at `ui/.ground/` (config,
+  one entry per surface declared in `ui.json`, a `dev` script in
+  `ui/package.json`), reusing the alias map `UiWorkspace` already derives for
+  vitest. `ground serve` then sets `VITE_PUBLIC_PATH` so ViteManifest finds the
+  dev server's hot file, and `PAGEFLOW_ROOT_VIEW` so the responder renders
+  Pageflow's real layout instead of its minimal fallback shell.
+
+  There is **no proxy**: PHP renders the page and points the browser straight at
+  Vite for the modules, which is what the hot file has always been for. Run
+  `hkm ground serve .` and `yarn dev` side by side, browse the PHP port, and a
+  saved `.tsx` hot-updates.
+
+  Two details are load-bearing. The entries are generated at exactly
+  `src/surfaces/{surface}/index.tsx` — the path the Pageflow layout requests by
+  default — so nothing has to inject a `viteEntry` prop. And EVERY surface's
+  pages are registered in EVERY entry, because the server may render a component
+  authored under `site/Pages` onto the admin surface, and the component key
+  carries no surface in it.
+
+### Fixed
+- **`ground serve` alone 500'd every Pageflow page once the layout was wired.**
+  The real layout calls `vite()`, which THROWS when there is neither a hot file
+  nor a production manifest — so choosing that layout at startup turned "no
+  `yarn dev` running" from a bare-but-valid shell into
+  `ViteManifestNotFoundException`. The layout is now chosen PER REQUEST, from
+  whether a hot file exists at that moment. Starting or stopping `yarn dev`
+  therefore needs no restart of the PHP server either: the next reload just
+  takes the other path.
+- **The generated vitest setup left `localStorage` undefined on Node 24+.** Node
+  ships its own, which shadows the one jsdom provides and is `undefined` unless
+  the process was started with `--localstorage-file`. Any component reading a
+  stored preference then died on `getItem` of undefined — the shared
+  `ThemeProvider` does exactly that, so a page wrapped in it failed to render
+  for a reason having nothing to do with the page. The setup now installs a
+  working in-memory stand-in, because in a browser localStorage always exists.
+- **`ground serve` rendered Pageflow pages with no assets at all.** Pageflow's
+  Provider resolves a relative `PAGEFLOW_ROOT_VIEW` against the active project
+  root, which under ground is a throwaway workspace containing no layout — so
+  the responder fell back to its minimal built-in shell: correct page object,
+  correct root element, and not one script tag. The page rendered, the React
+  never booted, and nothing reported an error, because an empty shell is a
+  legitimate thing to render.
+
 ## [1.8.1] - 2026-08-31
 
 ### Fixed

@@ -6,6 +6,7 @@ namespace AlfacodeTeam\Ground\Commands;
 
 use AlfacodeTeam\PhpIoCli\AbstractCommand;
 use AlfacodeTeam\Ground\Inspection\PluginLocator;
+use AlfacodeTeam\Ground\Ui\DevWorkspace;
 
 /**
  * plugin:serve <name> — browse a plugin, alone, with no project around it.
@@ -101,6 +102,7 @@ final class PluginServeCommand extends AbstractCommand
             array_values(array_unique($providers)),
             $root,
             !$this->hasOption('here'),
+            $target->directory(),
         );
 
         $this->section("Serving {$name}");
@@ -182,12 +184,15 @@ final class PluginServeCommand extends AbstractCommand
      *
      * @param list<class-string> $providers
      */
-    private function writeRouter(string $provider, array $providers, string $root, bool $siblings): string
+    private function writeRouter(string $provider, array $providers, string $root, bool $siblings, string $pluginDirectory = ''): string
     {
         $file = sys_get_temp_dir() . '/hkm-ground-router-' . bin2hex(random_bytes(6)) . '.php';
 
         $autoload = $this->autoloaderPath();
         $export   = var_export([$provider, ...$providers], true);
+        $vite     = $this->routerEnv($pluginDirectory);
+        $public   = $this->export((string) ($vite['public'] ?? ''));
+        $layout   = $this->export((string) ($vite['layout'] ?? ''));
 
         file_put_contents($file, <<<PHP
         <?php
@@ -213,8 +218,30 @@ final class PluginServeCommand extends AbstractCommand
 
         \$providers = {$export};
 
+        \$env = ['APP_URL' => 'http://' . (\$_SERVER['HTTP_HOST'] ?? 'localhost')];
+
+        // The Pageflow layout is used only while a Vite dev server is actually
+        // running — decided HERE, per request, not when the server started.
+        //
+        // That layout calls vite(), which THROWS when there is neither a hot
+        // file nor a production manifest. Choosing it up front therefore turned
+        // `ground serve` on its own — no `yarn dev` — from "renders a bare shell"
+        // into a 500 on every Pageflow page. Deciding per request also means
+        // starting or stopping `yarn dev` needs no restart of this server: the
+        // next reload simply picks the other path.
+        \$public = {$public};
+        \$layout = {$layout};
+
+        if (\$public !== '') {
+            \$env['VITE_PUBLIC_PATH'] = \$public;
+
+            if (\$layout !== '' && glob(\$public . '/*-hot')) {
+                \$env['PAGEFLOW_ROOT_VIEW'] = \$layout;
+            }
+        }
+
         \$ground = \\AlfacodeTeam\\Ground\\PluginGround::for(...\$providers)
-            ->env(['APP_URL' => 'http://' . (\$_SERVER['HTTP_HOST'] ?? 'localhost')])
+            ->env(\$env)
             ->boot();
 
         try {
@@ -235,6 +262,66 @@ final class PluginServeCommand extends AbstractCommand
         PHP);
 
         return $file;
+    }
+
+    /**
+     * Extra environment the served kernel needs.
+     *
+     * `VITE_PUBLIC_PATH` is where ViteManifest looks for `{surface}-hot`, the
+     * file `yarn dev` writes to announce a running dev server. Pointing it at
+     * the generated dev workspace is the entire handshake: while that file
+     * exists the Pageflow layout emits dev-server module URLs and @vite/client
+     * instead of hashed production assets, so editing a .tsx hot-reloads in a
+     * page PHP rendered.
+     *
+     * It is set whenever the plugin ships a `ui/`, not only when the workspace
+     * already exists — PHP re-reads the hot file per request, so a dev server
+     * started AFTER this command does not need it restarted.
+     *
+     * @return array<string, string>
+     */
+    private function routerEnv(string $pluginDirectory): array
+    {
+        if ($pluginDirectory === '' || !is_dir($pluginDirectory . '/ui')) {
+            return [];
+        }
+
+        $public = $pluginDirectory . '/' . DevWorkspace::DIRECTORY . '/public';
+
+        return [
+            'public' => $public,
+            'layout' => $this->pageflowLayout(),
+        ];
+    }
+
+    /**
+     * Pageflow's own HTML shell, by ABSOLUTE path — or '' to keep the fallback.
+     *
+     * Pageflow's Provider resolves a RELATIVE `PAGEFLOW_ROOT_VIEW` against the
+     * active project root, which under ground is a throwaway workspace holding
+     * no layout. The responder therefore fell back to its minimal built-in
+     * shell: correct page object, correct root element, and not one asset tag.
+     * The page rendered, the React never booted, and nothing reported an error —
+     * an empty shell is a legitimate thing to render.
+     *
+     * Returns '' when the operator already chose a layout: a plugin testing its
+     * own custom shell must keep it.
+     */
+    private function pageflowLayout(): string
+    {
+        if (($_ENV['PAGEFLOW_ROOT_VIEW'] ?? '') !== '') {
+            return '';
+        }
+
+        $pageflow = $this->locator()->find('pageflow');
+
+        if ($pageflow === null) {
+            return '';
+        }
+
+        $layout = $pageflow->directory() . '/resources/layouts/app.php';
+
+        return is_file($layout) ? $layout : '';
     }
 
     /**
