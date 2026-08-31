@@ -48,6 +48,7 @@ final class Cli
             'check'                       => self::kernel(['plugin:check', ...$rest]),
             'probe'                       => self::kernel(['plugin:probe', ...$rest]),
             'serve'                       => self::kernel(['plugin:serve', ...$rest]),
+            'dev', 'ui'                   => self::kernel(['plugin:dev', ...$rest]),
             'migrate', 'db'               => self::kernel(['plugin:migrate', ...$rest]),
             'new'                         => self::scaffold($rest),
             'test', 't'                   => self::test($rest),

@@ -6,6 +6,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-08-31
+
+### Added
+- **`hkm ground dev` — `yarn dev` inside a plugin, with HMR, against the real
+  kernel.** A plugin's pages import `@pageflow/react`, `@ui/button`,
+  `@providers/theme` — aliases that only existed after `hkm ui sync` had
+  mirrored the plugin into a PROJECT. So "let me see this page in a browser"
+  answered "first build a project", which is the wrong answer while the plugin
+  is the thing being written.
+
+  The command generates a gitignored Vite workspace at `ui/.ground/` (config,
+  one entry per surface declared in `ui.json`, a `dev` script in
+  `ui/package.json`), reusing the alias map `UiWorkspace` already derives for
+  vitest. `ground serve` then sets `VITE_PUBLIC_PATH` so ViteManifest finds the
+  dev server's hot file, and `PAGEFLOW_ROOT_VIEW` so the responder renders
+  Pageflow's real layout instead of its minimal fallback shell.
+
+  There is **no proxy**: PHP renders the page and points the browser straight at
+  Vite for the modules, which is what the hot file has always been for. Run
+  `hkm ground serve .` and `yarn dev` side by side, browse the PHP port, and a
+  saved `.tsx` hot-updates.
+
+  Two details are load-bearing. The entries are generated at exactly
+  `src/surfaces/{surface}/index.tsx` — the path the Pageflow layout requests by
+  default — so nothing has to inject a `viteEntry` prop. And EVERY surface's
+  pages are registered in EVERY entry, because the server may render a component
+  authored under `site/Pages` onto the admin surface, and the component key
+  carries no surface in it.
+
+### Fixed
+- **`ground serve` alone 500'd every Pageflow page once the layout was wired.**
+  The real layout calls `vite()`, which THROWS when there is neither a hot file
+  nor a production manifest — so choosing that layout at startup turned "no
+  `yarn dev` running" from a bare-but-valid shell into
+  `ViteManifestNotFoundException`. The layout is now chosen PER REQUEST, from
+  whether a hot file exists at that moment. Starting or stopping `yarn dev`
+  therefore needs no restart of the PHP server either: the next reload just
+  takes the other path.
+- **The generated vitest setup left `localStorage` undefined on Node 24+.** Node
+  ships its own, which shadows the one jsdom provides and is `undefined` unless
+  the process was started with `--localstorage-file`. Any component reading a
+  stored preference then died on `getItem` of undefined — the shared
+  `ThemeProvider` does exactly that, so a page wrapped in it failed to render
+  for a reason having nothing to do with the page. The setup now installs a
+  working in-memory stand-in, because in a browser localStorage always exists.
+- **`ground serve` rendered Pageflow pages with no assets at all.** Pageflow's
+  Provider resolves a relative `PAGEFLOW_ROOT_VIEW` against the active project
+  root, which under ground is a throwaway workspace containing no layout — so
+  the responder fell back to its minimal built-in shell: correct page object,
+  correct root element, and not one script tag. The page rendered, the React
+  never booted, and nothing reported an error, because an empty shell is a
+  legitimate thing to render.
+
 ## [1.8.1] - 2026-08-31
 
 ### Fixed
