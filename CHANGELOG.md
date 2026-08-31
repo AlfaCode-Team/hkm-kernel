@@ -6,16 +6,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **The Homebrew bump job failed a release that had already published.** Its PR
-  fallback pushed the bump branch, then called `gh pr create` — which the API
-  refuses unless *Settings → Actions → General → "Allow GitHub Actions to create
-  and approve pull requests"* is on, and it is off by default. The step exited
-  non-zero, so v1.5.0 shipped correctly with every asset in place while the run
-  was marked failed. Both blocked paths now degrade to warnings that name the
-  branch, a ready-made compare link, and the two settings that make the bump
-  fully automatic. The release itself was never at risk; only the report was.
-
 ## [1.5.0] - 2026-08-28
 
 ### Added
@@ -45,10 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     reviews, and without the fallback the bump would simply be dropped. It
     never fails the workflow: the release is already out by then, and failing
     would only misreport a good release as broken.
-  - `auto-release.yml` grants that job's `pull-requests: write` through to
-    `release.yml`. A called workflow cannot hold more than its caller, and the
-    shortfall is not a warning — GitHub rejects the whole file at startup, so
-    the release does not run at all and no tag is created.
 
 ### Changed
 - **The macOS install is user-local by default — no root.** `install-macos.sh`

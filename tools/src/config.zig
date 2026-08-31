@@ -110,20 +110,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         return;
     }
-    if (std.mem.eql(u8, action, "unset") or std.mem.eql(u8, action, "clear")) {
-        if (args.len < 3) return usage();
-        const removed = userconfig.unset(allocator, io, &env, args[2]) catch |e| {
-            prompt.err(@errorName(e));
-            std.process.exit(1);
-        };
-        if (removed) {
-            prompt.ok(try std.fmt.allocPrint(allocator, "{s} removed.", .{args[2]}));
-            prompt.muted("verify what the launcher resolves now with: hkm version");
-        } else {
-            prompt.muted(try std.fmt.allocPrint(allocator, "{s} was not set — nothing to do.", .{args[2]}));
-        }
-        return;
-    }
     if (std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "configure")) {
         std.process.exit(try runCheck(allocator, io, &env));
     }
