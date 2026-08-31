@@ -186,7 +186,7 @@ final class PluginServeCommand extends AbstractCommand
     {
         $file = sys_get_temp_dir() . '/hkm-ground-router-' . bin2hex(random_bytes(6)) . '.php';
 
-        $autoload = \dirname(__DIR__) . '/vendor/autoload.php';
+        $autoload = $this->autoloaderPath();
         $export   = var_export([$provider, ...$providers], true);
 
         file_put_contents($file, <<<PHP
@@ -235,6 +235,53 @@ final class PluginServeCommand extends AbstractCommand
         PHP);
 
         return $file;
+    }
+
+    /**
+     * The composer autoloader the fresh `php -S` process must require.
+     *
+     * It is found by asking where the autoloader ALREADY IN EFFECT lives,
+     * rather than by counting directories up from this file. Ground runs from
+     * at least three layouts — a kernel checkout, an installed bundle
+     * (`lib/hkm-kernel/`), and a plugin's own `vendor/` — and the hop count
+     * from `src/Commands/` to `vendor/` is different in each. A hardcoded
+     * `dirname(__DIR__)` was right in none of them: it named
+     * `modules/ground/src/vendor/autoload.php`, a path that has never existed,
+     * so every `ground serve` request died in the router before reaching the
+     * kernel.
+     *
+     * `ClassLoader.php` always sits at `vendor/composer/ClassLoader.php`, so
+     * two levels up from the class file that is loaded RIGHT NOW is the
+     * autoloader that loaded it — correct by construction in any layout,
+     * including one this code has never seen.
+     */
+    private function autoloaderPath(): string
+    {
+        if (class_exists(\Composer\Autoload\ClassLoader::class, autoload: false)) {
+            $classLoader = (new \ReflectionClass(\Composer\Autoload\ClassLoader::class))->getFileName();
+
+            if (\is_string($classLoader)) {
+                $candidate = \dirname($classLoader, 2) . '/autoload.php';
+
+                if (is_file($candidate)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        // No composer autoloader in the process — ground was loaded some other
+        // way. Walk up looking for one rather than emitting a path that is
+        // certain to fail: the child process cannot recover from a bad require.
+        for ($dir = __DIR__; $dir !== \dirname($dir); $dir = \dirname($dir)) {
+            if (is_file($dir . '/vendor/autoload.php')) {
+                return $dir . '/vendor/autoload.php';
+            }
+        }
+
+        throw new \RuntimeException(
+            'Could not locate a composer autoloader to hand the serve router. '
+            . 'Run `composer install` in the kernel.',
+        );
     }
 
     private function export(string|bool $value): string

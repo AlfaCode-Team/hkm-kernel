@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-08-31
+
+### Fixed
+- **`ground serve` handed its router an autoloader path that exists in no
+  layout**, so every request died before reaching the kernel:
+  `Failed opening required '.../modules/ground/src/vendor/autoload.php'`. The
+  router `php -S` executes runs in a fresh process per request and so has to
+  `require` a composer autoloader itself; the path was built by counting
+  directories up from the command's own source file, which named a `vendor/`
+  inside `src/`. The command still started and printed `Listening` — the fatal
+  was in a different process, on the first request, which is why nothing caught
+  it. It now asks where the autoloader ALREADY IN EFFECT lives (two levels above
+  the loaded `Composer\Autoload\ClassLoader`), correct by construction in a
+  kernel checkout, an installed bundle and a plugin's own `vendor/` alike.
+  `ServeTest` now reads the emitted router and asserts the paths it names are
+  real — a generated file is executed by something other than the test runner,
+  so nothing about it is checked unless it is checked deliberately.
+
 ## [1.8.0] - 2026-08-31
 
 ### Added
