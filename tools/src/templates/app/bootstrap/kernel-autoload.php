@@ -40,7 +40,7 @@ declare(strict_types=1);
  *                                               locally, this alone is enough and
  *                                               the steps below are skipped.
  *   2. $HKM_KERNEL_HOME/vendor/autoload.php   — the installed kernel.
- *   2b. $PSP_GLOBAL_AUTOLOAD                   — explicit override env var. Point
+ *   2b. $HKM_GLOBAL_AUTOLOAD                   — explicit override env var. Point
  *                                               it at any vendor/autoload.php
  *                                               (e.g. the monorepo's) to reuse a
  *                                               specific kernel + its plugins.
@@ -56,7 +56,7 @@ declare(strict_types=1);
  * -----------------------------------------------------------------------------
  *  HOW TO CUSTOMISE
  * -----------------------------------------------------------------------------
- *   - Kernel in a non-standard location?      set PSP_GLOBAL_AUTOLOAD=/abs/.../vendor/autoload.php
+ *   - Kernel in a non-standard location?      set HKM_GLOBAL_AUTOLOAD=/abs/.../vendor/autoload.php
  *   - Want a fully self-contained project?    `composer require alfacode-team/php-service-platform`
  *                                              locally; step 1 then satisfies everything.
  *   - The function is guarded by function_exists() + the class_exists() early
@@ -68,14 +68,14 @@ declare(strict_types=1);
  * =============================================================================
  */
 
-if (!function_exists('psp_require_kernel_autoload')) {
+if (!function_exists('hkm_require_kernel_autoload')) {
     /**
      * Locate and require the autoloader(s) that provide the framework kernel.
      *
      * Idempotent: safe to call repeatedly. Returns as soon as the kernel class
      * is resolvable; hard-exits with code 1 if it can never be found.
      */
-    function psp_require_kernel_autoload(): void
+    function hkm_require_kernel_autoload(): void
     {
         // The canonical "is the framework available?" probe. As soon as this
         // class exists, every kernel namespace is autoloadable and we are done.
@@ -101,9 +101,14 @@ if (!function_exists('psp_require_kernel_autoload')) {
 
         // (2) Explicit override — highest priority after local vendor. Lets an
         // operator or a test harness pin an exact kernel install.
-        $explicit = getenv('PSP_GLOBAL_AUTOLOAD');
-        if (is_string($explicit) && $explicit !== '') {
-            $candidates[] = $explicit;
+        // HKM_ first; PSP_ is the pre-rename name, still honoured so a project
+        // generated before the rename — or a shell profile that exports it —
+        // keeps resolving.
+        foreach (['HKM_GLOBAL_AUTOLOAD', 'PSP_GLOBAL_AUTOLOAD'] as $var) {
+            $explicit = getenv($var);
+            if (is_string($explicit) && $explicit !== '') {
+                $candidates[] = $explicit;
+            }
         }
 
         // (3) The installed kernel, via HKM_KERNEL_HOME.
@@ -111,7 +116,7 @@ if (!function_exists('psp_require_kernel_autoload')) {
         // This is how `hkm` installs itself — a system install under
         // /opt/hkm-kernel, or a user install under ~/.local/lib/hkm-kernel —
         // and without it that kernel is invisible to PHP. `hkm run` papered
-        // over the gap by exporting PSP_GLOBAL_AUTOLOAD for its child, so the
+        // over the gap by exporting HKM_GLOBAL_AUTOLOAD for its child, so the
         // dev server worked and NOTHING else did: the same project served by
         // nginx/PHP-FPM, or a worker started by systemd, or a plain
         // `php app/cli/run.php`, died on "Could not load the global kernel
@@ -163,7 +168,7 @@ if (!function_exists('psp_require_kernel_autoload')) {
         // handling is not installed this early, so report clearly and exit(1).
         $msg = "[PSP] Could not load the global kernel autoload.\n"
             . "Install globally: composer global require alfacode-team/php-service-platform\n"
-            . "Or set PSP_GLOBAL_AUTOLOAD=/absolute/path/to/vendor/autoload.php\n";
+            . "Or set HKM_GLOBAL_AUTOLOAD=/absolute/path/to/vendor/autoload.php\n";
 
         // STDERR only exists under the CLI SAPI; the web SAPI has no such
         // constant, so branch on PHP_SAPI to emit the error correctly.
@@ -180,7 +185,7 @@ if (!function_exists('psp_require_kernel_autoload')) {
     }
 }
 
-if (!function_exists('psp_kernel_home')) {
+if (!function_exists('hkm_kernel_home')) {
     /**
      * Resolve the framework KERNEL HOME — the directory that owns the shared
      * `plugins/` tree — used by the `require`s that the `hkm plugins` tooling
@@ -196,7 +201,7 @@ if (!function_exists('psp_kernel_home')) {
      * and hard-exit, rather than let a later require_once fatal cryptically with
      * "failed to open stream".
      */
-    function psp_kernel_home(?string $fallback = null): string
+    function hkm_kernel_home(?string $fallback = null): string
     {
         static $home = null;
         if ($home !== null) {

@@ -1,0 +1,10 @@
+{
+    "name": "ground-essential",
+    "version": "1.0.0",
+    "solves": "ground.essential",
+    "type": "module",
+    "requires": [],
+    "exposes": ["AlfacodeTeam\\Ground\\Tests\\Fixtures\\Essential\\AmbientContract"],
+    "routes": [],
+    "config": []
+}

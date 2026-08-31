@@ -1,0 +1,50 @@
+{
+    "name": "alfacode-team/ground",
+    "description": "The plugin developer's test bench — boot one plugin on a real kernel, with no project, no database and no configuration.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "hkm-kernel",
+        "testing",
+        "test-bench",
+        "plugin-development",
+        "dev.ground"
+    ],
+    "authors": [
+        {
+            "name": "AlfaCode Team",
+            "email": "shamavurasheed@gmail.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": ">=8.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11 || ^12 || ^13"
+    },
+    "autoload": {
+        "psr-4": {
+            "AlfacodeTeam\\Ground\\": "src/"
+        },
+        "files": [
+            "src/aliases.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AlfacodeTeam\\Ground\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "//": "The kernel is NOT required here, deliberately. This package is a path repo INSIDE the kernel and is required BY it; requiring it back would be a cycle composer resolves only by luck. Everything the harness touches (Kernel, Ports, HttpPipeline) is present because the kernel is what loads it.",
+        "branch-alias": {
+            "dev-main": "1.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

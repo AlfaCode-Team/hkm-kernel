@@ -126,8 +126,9 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     else
         null;
     if (autoload) |a| {
-        try env.put("PSP_GLOBAL_AUTOLOAD", a);
-    } else if (env.get("PSP_GLOBAL_AUTOLOAD") == null) {
+        try env.put("HKM_GLOBAL_AUTOLOAD", a);
+        try env.put("PSP_GLOBAL_AUTOLOAD", a); // pre-rename projects
+    } else if (env.get("HKM_GLOBAL_AUTOLOAD") == null and env.get("PSP_GLOBAL_AUTOLOAD") == null) {
         prompt.warn("No kernel autoload found — relying on the project's own resolver.");
         prompt.muted("Set HKM_KERNEL_HOME or PSP_GLOBAL_AUTOLOAD if PHP cannot find the kernel.");
     }
@@ -145,7 +146,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // Export the resolved project-registry dir so the kernel + plugins (Edge)
     // read the SAME registry the launcher uses, without re-deriving it.
     if (try services.resolveProjectsDir(allocator, io, env)) |projects_dir| {
-        try env.put("PSP_PROJECTS_DIR", projects_dir);
+        try env.put("HKM_PROJECTS_DIR", projects_dir);
+        try env.put("PSP_PROJECTS_DIR", projects_dir); // pre-rename projects
     }
 
     const php = env.get("HKM_PHP_BIN") orelse "php";

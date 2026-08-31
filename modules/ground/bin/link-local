@@ -1,0 +1,193 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * link-local — install a plugin's dependencies from the checkouts next door.
+ *
+ *     cd ~/…/PLUGINS/PHP/hkm-plugin-user
+ *     ../hkm-plugin-ground/bin/link-local
+ *     vendor/bin/phpunit
+ *
+ * ─── THE PROBLEM ────────────────────────────────────────────────────────────
+ *
+ * Every plugin declares its siblings through `vcs` repositories pointing at
+ * private GitHub repos. `composer install` on a fresh checkout therefore stops
+ * at `Could not authenticate against github.com`, and nothing in the plugin can
+ * be tested — including the ground tests, which need the sibling PROVIDERS to
+ * be real classes before a kernel can boot them.
+ *
+ * That is the wrong failure to hit while developing. The code you want to test
+ * against is not on GitHub at all: it is the checkout in the directory beside
+ * this one, with your unpushed changes in it.
+ *
+ * ─── WHAT IT DOES ───────────────────────────────────────────────────────────
+ *
+ * Writes `composer.local.json` — a copy of composer.json whose `repositories`
+ * are local `path` entries for the kernel, its modules, and every sibling
+ * plugin checkout — then installs with `COMPOSER=composer.local.json`.
+ *
+ * The tracked `composer.json` is NEVER touched. That is the whole point of
+ * routing through COMPOSER rather than editing in place: a released install
+ * must still resolve from GitHub for everyone else, and a local convenience
+ * that silently rewrites the manifest would be committed by accident within a
+ * week. Add `composer.local.*` to .gitignore and the arrangement is invisible.
+ *
+ * ─── VERSIONS ───────────────────────────────────────────────────────────────
+ *
+ * A path repo advertises the version of the branch it is on, and the branch is
+ * rarely the one the constraint names — the kernel here sits on `dev-mac` while
+ * every plugin asks for `dev-master`. Composer's `options.versions` is the
+ * sanctioned way to say "this checkout IS that version", so the constraints are
+ * satisfied without editing a single require.
+ */
+
+$root = rtrim($argv[1] ?? (getcwd() ?: '.'), '/');
+
+$KERNEL  = getenv('HKM_KERNEL_PATH') ?: '/Users/user/Documents/HKMCODE/PHP';
+$PLUGINS = getenv('HKM_PLUGINS_PATH') ?: \dirname($root);
+
+$manifest = $root . '/composer.json';
+
+if (!is_file($manifest)) {
+    fwrite(STDERR, "link-local: no composer.json in {$root}\n");
+
+    exit(1);
+}
+
+$composer = json_decode((string) file_get_contents($manifest), true);
+
+if (!\is_array($composer)) {
+    fwrite(STDERR, "link-local: {$manifest} is not valid JSON\n");
+
+    exit(1);
+}
+
+/**
+ * The version each local checkout must claim, because its branch does not match
+ * what the constraints ask for. Anything not listed advertises its own branch,
+ * which for the plugins (all on `main` → dev-main) is already right.
+ */
+$pinned = [
+    $KERNEL                            => ['alfacode-team/php-service-platform' => 'dev-master'],
+    $KERNEL . '/modules/http'          => ['alfacode-team/http'                 => '1.0.0'],
+    $KERNEL . '/modules/bind-it'       => ['phpshots/bind-it'                   => '0.1.4'],
+    $KERNEL . '/modules/common-type-alias' => ['phpshots/common-type-alias'     => '0.1.1'],
+];
+
+$paths = [
+    $KERNEL,
+    $KERNEL . '/modules/http',
+    $KERNEL . '/modules/common-type-alias',
+    $KERNEL . '/modules/bind-it',
+    $KERNEL . '/modules/php-io-cli',
+    $KERNEL . '/modules/let-migrate',
+];
+
+foreach (glob($PLUGINS . '/hkm-plugin-*') ?: [] as $dir) {
+    // Ground itself is a KERNEL MODULE now, autoloaded by the kernel every
+    // plugin already requires. Linking the old standalone checkout as well
+    // would put a second `Plugins\Ground\` on the autoloader — two copies of
+    // PluginGroundTestCase, and which one a test extends decided by composer's
+    // ordering.
+    if (basename($dir) === 'hkm-plugin-ground') {
+        continue;
+    }
+
+    $paths[] = $dir;
+}
+foreach (glob($PLUGINS . '/hkm-*support*') ?: [] as $dir) {
+    $paths[] = $dir;
+}
+
+$repositories = [];
+$linked       = 0;
+
+foreach ($paths as $path) {
+    // A directory without a composer.json is not a package. Skipping quietly is
+    // right: this globs a whole workspace, and a scratch directory in it must
+    // not fail the install.
+    if ($path === $root || !is_file($path . '/composer.json')) {
+        continue;
+    }
+
+    $entry = ['type' => 'path', 'url' => $path];
+
+    if (isset($pinned[$path])) {
+        $entry['options'] = ['versions' => $pinned[$path]];
+    }
+
+    $repositories[] = $entry;
+    $linked++;
+}
+
+// Anything that was NOT a vcs entry is kept — a private satis, a local artifact
+// repo. Only the GitHub remotes are replaced, because only they are the problem.
+foreach ($composer['repositories'] ?? [] as $existing) {
+    if (\is_array($existing) && ($existing['type'] ?? '') !== 'vcs' && ($existing['type'] ?? '') !== 'path') {
+        $repositories[] = $existing;
+    }
+}
+
+$composer['repositories']       = $repositories;
+$composer['minimum-stability'] ??= 'dev';
+$composer['prefer-stable']     ??= true;
+
+/**
+ * phpunit, so a plugin that has never been tested can still run one.
+ *
+ * The HARNESS no longer needs a line here: ground ships with the kernel, which
+ * every plugin already requires, so `PluginGroundTestCase` is on the autoloader
+ * the moment composer install finishes. That is the main thing moving it into
+ * the kernel bought — a scaffolded test used to die on "class not found" until
+ * you knew to add a dev dependency nobody had told you about.
+ */
+$composer['require-dev']['phpunit/phpunit'] ??= '^11 || ^12 || ^13';
+
+/**
+ * Drop a require on the OLD standalone harness package.
+ *
+ * Plugins written before ground moved into the kernel declare
+ * `alfacode-team/hkm-plugin-ground` in require-dev. That package no longer has
+ * a source, so composer stops with "found in the lock file but not in remote
+ * repositories" — and the requirement is already satisfied, because the harness
+ * arrives with the kernel.
+ *
+ * Removed HERE and not from composer.json, for the same reason nothing else is:
+ * this file is the local development manifest. Delete the line from
+ * composer.json when you are ready; nothing breaks either way.
+ */
+unset(
+    $composer['require-dev']['alfacode-team/hkm-plugin-ground'],
+    $composer['require']['alfacode-team/hkm-plugin-ground'],
+);
+
+file_put_contents(
+    $root . '/composer.local.json',
+    json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+);
+
+fwrite(STDOUT, "link-local: wrote composer.local.json with {$linked} local path repositories\n");
+fwrite(STDOUT, "link-local: composer.json was NOT modified\n\n");
+
+/**
+ * `update`, not `install`.
+ *
+ * This manifest is REGENERATED on every run — a new sibling checkout appears, a
+ * require-dev is added — so a `composer.local.lock` from the previous run is
+ * almost always out of date, and `install` refuses it with a merge-conflict
+ * message that has nothing to do with what happened. The lock here pins nothing
+ * anyone depends on: every entry is a local path repo tracking a working tree.
+ * Resolving fresh each time is both correct and what you want.
+ */
+$command = 'COMPOSER=composer.local.json composer update --no-interaction --no-progress';
+
+passthru('cd ' . escapeshellarg($root) . ' && ' . $command, $code);
+
+if ($code === 0) {
+    fwrite(STDOUT, "\nlink-local: done. Run `vendor/bin/phpunit`.\n");
+    fwrite(STDOUT, "link-local: add composer.local.json and composer.local.lock to .gitignore.\n");
+}
+
+exit($code);

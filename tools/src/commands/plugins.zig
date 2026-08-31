@@ -896,6 +896,33 @@ fn phpQuote(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
     return out.toOwnedSlice(allocator);
 }
 
+
+/// Which kernel-home helper THIS project defines: `hkm_kernel_home` after the
+/// rename, `psp_kernel_home` before it.
+///
+/// The name is emitted into the project's own config, and the function is
+/// defined by the project's own bootstrap — so writing the new name into a
+/// project generated before the rename produces a config that fatals on an
+/// undefined function the next time the project boots. Read the bootstrap and
+/// use what is actually there.
+fn kernelHomeFn(allocator: std.mem.Allocator, io: Io, root: []const u8) []const u8 {
+    var buf: [4096]u8 = undefined;
+    const path = std.fmt.bufPrint(&buf, "{s}/app/bootstrap/kernel-autoload.php", .{util.trimSlash(root)}) catch
+        return "hkm_kernel_home";
+
+    const source = Dir.cwd().readFileAlloc(io, path, allocator, .limited(256 * 1024)) catch
+        return "hkm_kernel_home";
+
+    // Only the legacy name present → this project predates the rename.
+    if (std.mem.indexOf(u8, source, "function hkm_kernel_home") == null and
+        std.mem.indexOf(u8, source, "function psp_kernel_home") != null)
+    {
+        return "psp_kernel_home";
+    }
+
+    return "hkm_kernel_home";
+}
+
 /// If the plugin at `pluginPath` ships a `Support/helpers.php`, return the PHP
 /// `require_once` EXPRESSION (everything after `require_once `, incl. trailing
 /// `;`) that references it. The expression is made as portable as the plugin's
@@ -903,7 +930,7 @@ fn phpQuote(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
 ///   • inside the project (incl. its `vendor/` composer packages)
 ///       → `__DIR__ . '/../..<rel>'`      (relative to the bootstrap dir)
 ///   • inside the kernel home (HKM_KERNEL_HOME / discovered kernel root)
-///       → `psp_kernel_home('<kroot>') . '<rel>'`  (resolves + guards at runtime)
+///       → `hkm_kernel_home('<kroot>') . '<rel>'`  (resolves + guards at runtime)
 ///   • anywhere else (a globally-installed package, an odd mount)
 ///       → `'<abs>'`                       (absolute literal — last resort)
 /// `null` when the plugin ships no helpers file to wire.
@@ -919,7 +946,7 @@ pub fn supportHelpersExpr(allocator: std.mem.Allocator, io: Io, env: *EnvMap, ro
         return try std.fmt.allocPrint(allocator, "__DIR__ . '{s}';", .{try phpQuote(allocator, try std.fmt.allocPrint(allocator, "/../..{s}", .{helpers[r.len..]}))});
     }
 
-    // 2. Inside the kernel home — reference it through psp_kernel_home() (defined
+    // 2. Inside the kernel home — reference it through hkm_kernel_home() (defined
     //    in kernel-autoload.php), which resolves HKM_KERNEL_HOME at runtime so a
     //    relocated kernel still works, falls back to the discovered dev-time path,
     //    and — crucially — hard-fails with a clear "framework not installed
@@ -930,8 +957,12 @@ pub fn supportHelpersExpr(allocator: std.mem.Allocator, io: Io, env: *EnvMap, ro
             if (util.isInside(helpers, kroot)) {
                 return try std.fmt.allocPrint(
                     allocator,
-                    "psp_kernel_home('{s}') . '{s}';",
-                    .{ try phpQuote(allocator, kroot), try phpQuote(allocator, helpers[kroot.len..]) },
+                    "{s}('{s}') . '{s}';",
+                    .{
+                        kernelHomeFn(allocator, io, root),
+                        try phpQuote(allocator, kroot),
+                        try phpQuote(allocator, helpers[kroot.len..]),
+                    },
                 );
             }
         }

@@ -28,7 +28,7 @@ declare(strict_types=1);
 
 // 1. Autoloaders.
 require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 // 2. Build the application. app/bootstrap/app.php loads the .env cascade
 //    (reading $_SERVER['argv'] for --env / --domain) and installs ErrorGuard.

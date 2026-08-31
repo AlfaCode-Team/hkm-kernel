@@ -83,10 +83,12 @@
             "AlfacodeTeam\\PhpServicePlatform\\": "src/",
             "AlfacodeTeam\\PhpServicePlatform\\System\\": "src/System/",
             "Project\\": "projects/",
-            "Plugins\\": "plugins/"
+            "Plugins\\": "plugins/",
+            "AlfacodeTeam\\Ground\\": "modules/ground/src/"
         },
         "files": [
-            "src/Kernel/Support/helpers.php"
+            "src/Kernel/Support/helpers.php",
+            "modules/ground/src/aliases.php"
         ],
         "exclude-from-classmap": [
             "**/database/seeders/**",
@@ -95,11 +97,13 @@
         ]
     },
     "bin": [
-        "bin/psp"
+        "bin/hkm-cli",
+        "modules/ground/bin/ground"
     ],
     "autoload-dev": {
         "psr-4": {
-            "Tests\\": "tests/"
+            "Tests\\": "tests/",
+            "AlfacodeTeam\\Ground\\Tests\\": "modules/ground/tests/"
         }
     },
     "authors": [

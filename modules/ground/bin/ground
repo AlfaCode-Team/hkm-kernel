@@ -1,0 +1,82 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * ground — the plugin developer's command.
+ *
+ *     cd ~/…/PLUGINS/PHP/hkm-plugin-user
+ *     ground              # where am I, and what can I do
+ *     ground install      # dependencies, from the checkouts next door
+ *     ground check        # is this plugin well-formed
+ *     ground serve        # browse it
+ *     ground test         # run its tests
+ *
+ * Six verbs, no arguments needed. The plugin is the one you are standing in;
+ * naming one is for reaching a DIFFERENT plugin (`ground check view`).
+ *
+ * ─── WHY A WRAPPER ──────────────────────────────────────────────────────────
+ *
+ * Underneath, these are ordinary kernel CLI commands — `plugin:check`,
+ * `plugin:probe`, `plugin:serve`, `make:ground-test` — the same ones a project
+ * gets through `hkm`. That naming is right INSIDE a project, where they sit
+ * beside fifty other commands and the prefix is what tells you whose they are.
+ *
+ * It is wrong here. While developing a plugin there is nothing to disambiguate
+ * from, and `../hkm-plugin-ground/bin/ground plugin:check user` is nine words to
+ * say "check this". So the verbs live here and the commands stay as they are;
+ * anything this does not recognise is passed straight through, so the long
+ * forms and every flag keep working.
+ */
+
+/**
+ * Find an autoloader, in every layout this file can be reached from.
+ *
+ * Ground lives in the kernel now, so this script has three homes and each puts
+ * the autoloader somewhere different:
+ *
+ *   kernel checkout   <kernel>/modules/ground/bin/ground   → ../../../vendor
+ *   inside a plugin   <plugin>/vendor/alfacode-team/php-service-platform/
+ *                       modules/ground/bin/ground          → ../../../../../..
+ *   vendor/bin        <plugin>/vendor/bin/ground           → ../autoload.php
+ *
+ * The last one is why this is a probe and not a constant: composer's bin proxy
+ * is a real file in vendor/bin, so __DIR__ is not where the source lives.
+ */
+$autoload = null;
+
+foreach ([
+    __DIR__ . '/../../../vendor/autoload.php',           // kernel checkout
+    __DIR__ . '/../../../../../../vendor/autoload.php',  // installed under a plugin
+    __DIR__ . '/../autoload.php',                        // reached via vendor/bin
+    __DIR__ . '/../vendor/autoload.php',                 // standalone checkout
+] as $candidate) {
+    if (is_file($candidate)) {
+        $autoload = $candidate;
+
+        break;
+    }
+}
+
+if ($autoload === null) {
+    fwrite(STDERR, "ground: no vendor/autoload.php found from " . __DIR__ . ".\nRun `composer install`.\n");
+
+    exit(1);
+}
+
+require $autoload;
+
+/**
+ * One dispatcher, not two.
+ *
+ * This file used to carry its own copy of the verb switch, written before the
+ * logic moved into {@see \AlfacodeTeam\Ground\Cli}. The copies drifted the
+ * moment a verb was added to one of them: `hkm ground migrate` worked and
+ * `vendor/bin/ground migrate` answered "Command not found", for the same
+ * plugin, on the same machine, in the same minute.
+ *
+ * So both entry points now call the same method, and this file is only here to
+ * find an autoloader.
+ */
+exit(\AlfacodeTeam\Ground\Cli::run(\array_slice($_SERVER['argv'], 1)));

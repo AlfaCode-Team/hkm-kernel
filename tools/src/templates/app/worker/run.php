@@ -42,7 +42,7 @@ declare(strict_types=1);
 
 // 1. Autoloaders. The bootstrap (required below) loads .env + installs ErrorGuard.
 require_once __DIR__ . '/../bootstrap/kernel-autoload.php';
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Kernel;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\JobPayload;

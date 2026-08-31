@@ -1,0 +1,6 @@
+{
+  "alias": "@ground-sample",
+  "entry": "index.ts",
+  "framework": "react",
+  "surfaces": { "admin": "admin/Pages" }
+}

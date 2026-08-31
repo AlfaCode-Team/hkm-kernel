@@ -33,14 +33,14 @@ server {
             #
             # LIVE — the installed kernel (values from `hkm-config print`):
             # fastcgi_param HKM_KERNEL_HOME     /opt/hkm-kernel;
-            # fastcgi_param PSP_PROJECTS_DIR    /opt/hkm-kernel/projects;
-            # fastcgi_param PSP_GLOBAL_AUTOLOAD /opt/hkm-kernel/vendor/autoload.php;
+            # fastcgi_param HKM_PROJECTS_DIR    /opt/hkm-kernel/projects;
+            # fastcgi_param HKM_GLOBAL_AUTOLOAD /opt/hkm-kernel/vendor/autoload.php;
             #
             # DEV — against a checkout instead (HKM_DEV_HOME from config.env):
             # fastcgi_param HKM_DEV_HOME        /path/to/checkout;
             # fastcgi_param HKM_KERNEL_HOME     /path/to/checkout;
-            # fastcgi_param PSP_GLOBAL_AUTOLOAD /path/to/checkout/vendor/autoload.php;
-            # fastcgi_param PSP_PROJECTS_DIR    /path/to/checkout/projects;
+            # fastcgi_param HKM_GLOBAL_AUTOLOAD /path/to/checkout/vendor/autoload.php;
+            # fastcgi_param HKM_PROJECTS_DIR    /path/to/checkout/projects;
 
             # PHP-FPM pool. On a multi-PHP host use the VERSIONED socket that matches
             # the PHP your project targets (e.g. php8.4-fpm.sock), not the generic one:

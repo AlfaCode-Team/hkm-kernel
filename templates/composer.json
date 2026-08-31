@@ -1,5 +1,5 @@
 {
-    "name": "psp/{{PROJECT_NAME}}",
+    "name": "hkm/{{PROJECT_NAME}}",
     "description": "A PhpServicePlatform project.",
     "type": "project",
     "require": {

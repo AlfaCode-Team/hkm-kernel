@@ -6,6 +6,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-31
+
+### Added
+- **`hkm ground` — the plugin developer's bench, as a kernel module.** Developing
+  a plugin previously required a project to test it from, which is backwards:
+  the plugin is the thing being written and the project does not exist yet.
+  `modules/ground` boots ONE plugin on the real kernel — real BootPipeline, real
+  route compiler, real dependency graph, real scope isolation — with every port
+  bound to a fake and the compiled manifests written to a throwaway workspace.
+  Six verbs, no arguments: the plugin is the one you are standing in (`.` says
+  so explicitly; a name reaches a different one), resolved by walking up from
+  the working directory so it works from `ui/` and `tests/` too.
+
+  - `ground init` — everything a plugin needs to be testable, once: `.gitignore`
+    entries first, `phpunit.xml`, a CI workflow, dependencies, a scaffolded
+    test, the UI setup, and the database harness. Idempotent, and it reports
+    whether each file was WRITTEN or KEPT rather than overwriting an author's.
+  - `ground check` — static conformance: manifest drift, undeclared `env()`,
+    unbound contracts, access-rule violations. Exits 1 on any error.
+  - `ground probe` — boot it and report what compiled.
+  - `ground serve` — the real `HttpPipeline` behind `php -S`, against fakes.
+  - `ground test` — phpunit, then vitest when the plugin ships page tests.
+  - `ground migrate` — see below.
+
+  It is a MODULE, not a plugin: it owns no business domain and extends no
+  project. Because every plugin already requires the kernel, every plugin now
+  gets `PluginGroundTestCase` with no dev dependency at all, and
+  `vendor/bin/ground` without `hkm` on PATH.
+
+- **`ground migrate` — migrations against every database, for real.** A
+  migration is the one thing in a plugin that cannot be tested against a fake:
+  a fake records SQL without parsing it, and `--pretend` compiles without
+  executing, so a statement MySQL accepts and PostgreSQL rejects passes both.
+  This connects to actual servers, CREATES its own scratch database per run,
+  applies every migration, inspects the schema, then `reset()`s to exercise
+  every `down()` — the half that `hkm plugins disable` depends on — and drops
+  the scratch database afterwards. It never touches a database anyone
+  configured. Drivers that are unconfigured or unreachable are reported as
+  SKIPPED with the reason and never counted as passes; `--strict` fails the run
+  when any supported database went untested, which is what CI should use.
+
+  Connections come from `ground.databases.json` — written by `--init` straight
+  into `.gitignore`, because it holds credentials for servers that exist on one
+  machine — or from `GROUND_DB_MYSQL` / `GROUND_DB_PGSQL` / `GROUND_DB_SQLSRV`,
+  which override the file so CI needs no file at all.
+
+### Changed
+- **`psp` is gone from every name a user sees.** `bin/psp` is now `bin/hkm-cli`;
+  the bundler and the upgrade path still install it as `bin/hkm`, so installed
+  layouts are unchanged. `[psp]` output prefixes are `[hkm]`, and the global CLI
+  calls itself "HKM Kernel CLI".
+- **`PSP_GLOBAL_AUTOLOAD` / `PSP_PROJECTS_DIR` are now `HKM_*`.** The old names
+  are still READ as a fallback everywhere, and the launcher EXPORTS both — a
+  project generated before this release reads `PSP_`, one generated after reads
+  `HKM_`, and nothing can tell which it is about to run.
+- **Generated project glue is `hkm_*`.** `psp_require_kernel_autoload()`,
+  `psp_kernel_home()` and `psp_register_project_autoload()` become `hkm_*` in
+  new projects; the managed marker is `[hkm-support:<Folder>]`. The tooling
+  reads BOTH spellings, and `hkm plugins` emits whichever name the target
+  project actually defines — writing the new name into a project generated
+  before this release would produce a config that fatals on an undefined
+  function.
+
+### Fixed
+- **`hkm --dev` handed PHP the launcher binary.** The CLI path was hardcoded to
+  `<root>/bin/hkm`, which in a BUNDLE is the PHP CLI but in the dev monorepo is
+  this launcher's own compiled executable — so every `--dev` passthrough died
+  with a parse error thousands of lines into a Mach-O file. Resolution now takes
+  `bin/hkm` when it IS a PHP script and falls back to `bin/hkm-cli`, reading the
+  first bytes rather than trusting the name.
+- **`ALTER TABLE` compiled MySQL syntax for every driver** (`modules/let-migrate`).
+  Additions were batched into one statement and indexes added with `ADD KEY`,
+  neither of which SQLite, PostgreSQL or SQL Server accept; and drops ran
+  columns BEFORE the indexes over them, which only MySQL tolerates. A rollback
+  written in the correct order was reordered by the compiler into one that could
+  not work anywhere but MySQL. Found by `ground migrate` on its first run.
+
 ## [1.7.0] - 2026-08-30
 
 ### Security

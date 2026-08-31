@@ -56,10 +56,10 @@ declare(strict_types=1);
 // call leaves every framework class undefined, and the failure surfaces on the
 // first one used rather than here.
 // -----------------------------------------------------------------------------
-if (!function_exists('psp_require_kernel_autoload') || !function_exists('psp_kernel_home')) {
+if (!function_exists('hkm_require_kernel_autoload') || !function_exists('hkm_kernel_home')) {
     require_once __DIR__ . '/kernel-autoload.php';
 }
-psp_require_kernel_autoload();
+hkm_require_kernel_autoload();
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Kernel;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\CachePort;

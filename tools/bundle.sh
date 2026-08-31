@@ -19,7 +19,7 @@
 # What a bundle contains:
 #   • the native `hkm` + `hkm-config` launcher (Zig, statically linked)
 #   • the kernel PHP source (src/) + vendor/ (composer --no-dev)
-#   • the PHP CLI (bin/psp) installed AS bin/hkm so the launcher's default
+#   • the PHP CLI (bin/hkm-cli) installed AS bin/hkm so the launcher's default
 #     passthrough path (<kernel>/bin/hkm) resolves.
 #
 # End users still need PHP 8.4 on PATH — `hkm doctor` verifies it.
@@ -56,7 +56,7 @@ MODULES="${MODULES:-bundle}"
 # vendor/ is ALWAYS excluded — composer resolves it on the target. Everything
 # staged is git-tracked ⇒ no gitignored junk (.claude, node_modules, var/cache,
 # submodule vendors) can leak.
-SRC_PATHS="src plugins projects templates composer.json composer.lock bin/psp README.md LICENSE"
+SRC_PATHS="src plugins projects templates composer.json composer.lock bin/hkm-cli README.md LICENSE"
 [ "$MODULES" = bundle ] && SRC_PATHS="$SRC_PATHS modules"
 
 # Emit modules.lock: "<path> <url> <pinned-sha>" per submodule, from the SHA
@@ -88,7 +88,7 @@ stage_kernel() { # $1 = destination kernel root
   if [ "$MODULES" = git ]; then write_modules_lock "$k"; fi
 
   # PHP CLI installed under the name the launcher expects (bin/hkm).
-  if [ -f "$k/bin/psp" ]; then mv "$k/bin/psp" "$k/bin/hkm"; chmod +x "$k/bin/hkm"; fi
+  if [ -f "$k/bin/hkm-cli" ]; then mv "$k/bin/hkm-cli" "$k/bin/hkm"; chmod +x "$k/bin/hkm"; fi
 
   # Runtime install ships NO documentation or build tooling: strip every `docs`/
   # `doc` and `tools` directory + leftover test caches. The templates/ subtree is
