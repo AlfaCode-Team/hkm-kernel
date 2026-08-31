@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlfacodeTeam\Ground;
 
+use AlfacodeTeam\Ground\EnvFile;
 use AlfacodeTeam\Ground\Inspection\PluginLocator;
 use AlfacodeTeam\Ground\Ui\UiManifest;
 
@@ -49,6 +50,7 @@ final class Cli
             'probe'                       => self::kernel(['plugin:probe', ...$rest]),
             'serve'                       => self::kernel(['plugin:serve', ...$rest]),
             'dev', 'ui'                   => self::kernel(['plugin:dev', ...$rest]),
+            'drop', 'db:drop'             => self::kernel(['plugin:drop', ...$rest]),
             'migrate', 'db'               => self::kernel(['plugin:migrate', ...$rest]),
             'new'                         => self::scaffold($rest),
             'test', 't'                   => self::test($rest),
@@ -94,7 +96,45 @@ final class Cli
             ? '  · .gitignore   already covers the local files'
             : '  ✓ .gitignore   ignored ' . \count($ignored) . ' local path(s)');
 
-        // 2. The committed test config.
+        // `--ignore` stops here. The ignore list grows as ground learns to
+        // generate more (a dev workspace, a lockfile from a different package
+        // manager), and an EXISTING plugin then needs only that one step —
+        // running the whole of init to get it would also scaffold CI and
+        // reinstall dependencies it never asked for.
+        if (\in_array('--ignore', $args, true)) {
+            foreach ($ignored as $path) {
+                self::line("      + {$path}");
+            }
+
+            self::line();
+
+            return 0;
+        }
+
+        // 2. The env this plugin and its dependencies DECLARE.
+        //
+        // Written before anything runs, so the first `probe` or `serve` has it.
+        // Merged rather than rewritten: a real key someone pasted in survives
+        // re-running init, which is what makes this safe to run again whenever
+        // a dependency is added.
+        $locator = PluginLocator::fromCwd();
+        $chain   = [$plugin];
+
+        foreach ($locator->dependenciesFor($plugin)['providers'] as $provider) {
+            foreach ($locator->all() as $candidate) {
+                if ($candidate->providerClass === $provider) {
+                    $chain[] = $candidate;
+                    break;
+                }
+            }
+        }
+
+        $added = EnvFile::merge($dir, $chain);
+        self::line($added === []
+            ? '  · .env         already covers every declared var'
+            : '  ✓ .env         ' . \count($added) . ' var(s) from ' . \count($chain) . ' plugin(s)');
+
+        // 3. The committed test config.
         $init->phpunitConfig();
 
         if (!\in_array('--no-ci', $args, true)) {
@@ -108,7 +148,7 @@ final class Cli
             self::line("  · kept         {$file}");
         }
 
-        // 3. Dependencies. Everything below needs the harness on the autoloader.
+        // 4. Dependencies. Everything below needs the harness on the autoloader.
         self::line();
         self::line('  Installing dependencies…');
         $code = self::shell(escapeshellarg(\dirname(__DIR__) . '/bin/link-local'), $dir);
@@ -265,7 +305,9 @@ final class Cli
         self::line('  check       static checks — the mistakes a boot cannot catch');
         self::line('  probe       boot it and report what compiled');
         self::line('  serve       browse it at http://127.0.0.1:8321');
-        self::line('  migrate     run the migrations on every REAL database (--init to configure)');
+        self::line('  dev         `yarn dev` for the plugin UI — HMR against the real kernel');
+        self::line('  migrate     migrations + seeders on every REAL database, central AND tenant');
+        self::line('  drop        remove scratch databases a killed run left behind');
         self::line('  test        phpunit, and vitest if there are page tests');
         self::line('  new test    scaffold tests from module.json  (new ui-test for pages)');
         self::line();

@@ -233,4 +233,59 @@ final class MigrationTest extends TestCase
 
         @rmdir($dir);
     }
+
+    /**
+     * The harness runs the whole DEPENDENCY CHAIN, not just one plugin.
+     *
+     * A plugin's schema does not stop at its own tables — tenancy's
+     * `user_tenants` has a foreign key onto `users`, owned by the User plugin.
+     * Running one plugin alone rehearses something no project ever does, and
+     * fails for a reason that is not that plugin's fault.
+     */
+    public function testRunsMigrationsFromEveryPluginInTheChain(): void
+    {
+        $root = sys_get_temp_dir() . '/ground-chain-' . bin2hex(random_bytes(5));
+
+        foreach (['dependency', 'target'] as $name) {
+            mkdir("{$root}/{$name}/database/migrations", 0o775, true);
+            file_put_contents("{$root}/{$name}/database/migrations/2026_01_01_000000_{$name}.php", '<?php');
+        }
+
+        try {
+            $harness = new MigrationHarness(["{$root}/dependency", "{$root}/target"]);
+            $paths   = $harness->migrationPaths();
+
+            self::assertCount(2, $paths);
+            self::assertSame("{$root}/dependency/database/migrations", $paths[0], 'Dependencies come first.');
+            self::assertSame("{$root}/target/database/migrations", $paths[1]);
+        } finally {
+            foreach (['dependency', 'target'] as $name) {
+                @unlink("{$root}/{$name}/database/migrations/2026_01_01_000000_{$name}.php");
+                @rmdir("{$root}/{$name}/database/migrations");
+                @rmdir("{$root}/{$name}/database");
+                @rmdir("{$root}/{$name}");
+            }
+            @rmdir($root);
+        }
+    }
+
+    /** A single directory still works — the string form is the common case. */
+    public function testASinglePluginStillRunsAlone(): void
+    {
+        $root = sys_get_temp_dir() . '/ground-solo-' . bin2hex(random_bytes(5));
+        mkdir("{$root}/database/migrations", 0o775, true);
+        file_put_contents("{$root}/database/migrations/2026_01_01_000000_solo.php", '<?php');
+
+        try {
+            self::assertSame(
+                ["{$root}/database/migrations"],
+                (new MigrationHarness($root))->migrationPaths(),
+            );
+        } finally {
+            @unlink("{$root}/database/migrations/2026_01_01_000000_solo.php");
+            @rmdir("{$root}/database/migrations");
+            @rmdir("{$root}/database");
+            @rmdir($root);
+        }
+    }
 }

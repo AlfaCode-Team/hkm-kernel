@@ -153,6 +153,29 @@ final class PluginManifest
      *
      * @return list<string>
      */
+    /**
+     * Module domains this plugin's SCHEMA needs, which its code does not.
+     *
+     * Settings creates `tenant_settings_*` with a foreign key onto `tenants` —
+     * a table the Tenancy plugin owns — while its services never call anything
+     * of Tenancy's. Putting `tenancy.routing` in `requires[]` to make the
+     * migrations run would make EVERY request load Tenancy, which is a runtime
+     * coupling that does not exist and a cost paid on every page.
+     *
+     * So the schema dependency is declared separately, and read only here:
+     *
+     *     "migrationRequires": ["tenancy.routing"]
+     *
+     * `ground migrate` seeds the chain with it; nothing else in the kernel
+     * looks at the key, so it cannot affect what a request loads.
+     *
+     * @return list<string>
+     */
+    public function migrationRequires(): array
+    {
+        return array_values(array_map('strval', (array) ($this->data['migrationRequires'] ?? [])));
+    }
+
     public function routeRequires(): array
     {
         $domains = [];
