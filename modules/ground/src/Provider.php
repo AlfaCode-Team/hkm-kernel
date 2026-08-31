@@ -15,6 +15,8 @@ use AlfacodeTeam\Ground\Commands\MakeUiTestCommand;
 use AlfacodeTeam\Ground\Commands\PluginCheckCommand;
 use AlfacodeTeam\Ground\Commands\PluginMigrateCommand;
 use AlfacodeTeam\Ground\Commands\PluginProbeCommand;
+use AlfacodeTeam\Ground\Commands\PluginDevCommand;
+use AlfacodeTeam\Ground\Commands\PluginDropCommand;
 use AlfacodeTeam\Ground\Commands\PluginServeCommand;
 
 /**
@@ -70,6 +72,8 @@ final class Provider implements ModuleContract
         $cli->command(PluginProbeCommand::class);
         $cli->command(PluginMigrateCommand::class);
         $cli->command(PluginServeCommand::class);
+        $cli->command(PluginDevCommand::class);
+        $cli->command(PluginDropCommand::class);
         $cli->command(MakeGroundTestCommand::class);
         $cli->command(MakeUiTestCommand::class);
     }

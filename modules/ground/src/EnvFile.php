@@ -1,0 +1,239 @@
+<?php
+
+declare(strict_types=1);
+
+namespace AlfacodeTeam\Ground;
+
+/**
+ * The plugin's own `.env`, for running it in ground.
+ *
+ * ─── WHY GROUND NEEDS ONE AT ALL ────────────────────────────────────────────
+ *
+ * Ground already synthesises an environment: `APP_KEY`, `APP_ENV=testing`, and
+ * for every var a plugin declares in `config[]` either its default or a
+ * type-correct placeholder. That is what lets a plugin boot with no
+ * configuration whatsoever, and it stays the floor.
+ *
+ * What it cannot do is know a REAL value. A gateway wants a sandbox API key; a
+ * mail plugin wants a MailHog host; a developer wants `APP_DEBUG=false` for one
+ * afternoon to see what a production render looks like. Those are properties of
+ * one machine, so they belong in a file that machine owns and git never sees.
+ *
+ * ─── PRECEDENCE ─────────────────────────────────────────────────────────────
+ *
+ *   config[] default / placeholder   ← the floor: always boots
+ *   .env                             ← this file: what YOU set
+ *   PluginGround::env([...])         ← a test being explicit, always wins
+ *
+ * A test that says `->env(['X' => '1'])` is stating a precondition of that
+ * test; a `.env` sitting in the directory is ambient. The explicit one wins, or
+ * the same suite would pass or fail depending on a file it never mentions.
+ */
+final class EnvFile
+{
+    public const FILENAME = '.env';
+
+    /**
+     * Read a plugin's `.env` into key => value.
+     *
+     * Deliberately a small parser, not a dotenv library: this file is generated
+     * by `ground init` and edited by hand, so it holds `KEY=value` lines and
+     * comments. Interpolation, multi-line values and variable expansion are not
+     * supported — a value that needs them belongs in a test, where it is
+     * visible, rather than hidden in an env file.
+     *
+     * @return array<string, string>
+     */
+    public static function read(string $pluginDirectory): array
+    {
+        $path = rtrim($pluginDirectory, '/') . '/' . self::FILENAME;
+
+        if (!is_file($path)) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach (file($path, \FILE_IGNORE_NEW_LINES | \FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            $line = trim($line);
+
+            // A commented var is DELIBERATELY absent, not empty: an empty string
+            // is a value and would beat the plugin's own internal default. That
+            // is why `init` writes optional vars commented out in the first
+            // place, so reading them back as '' would undo the whole point.
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            if (str_starts_with($line, 'export ')) {
+                $line = ltrim(substr($line, 7));
+            }
+
+            $split = strpos($line, '=');
+
+            if ($split === false) {
+                continue;
+            }
+
+            $key   = trim(substr($line, 0, $split));
+            $value = trim(substr($line, $split + 1));
+
+            if ($key === '') {
+                continue;
+            }
+
+            // Strip ONE matching pair of quotes; a value like `pa"ss` keeps them.
+            $length = \strlen($value);
+            if ($length >= 2) {
+                $first = $value[0];
+                $last  = $value[$length - 1];
+
+                if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+                    $value = substr($value, 1, -1);
+                }
+            }
+
+            $out[$key] = $value;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The file `ground init` writes, from what the chain DECLARES.
+     *
+     * ─── WHY THIS DIFFERS FROM `hkm plugins enable` ─────────────────────────
+     *
+     * `enable` writes a required-without-default var as an ACTIVE, empty
+     * `KEY=`, precisely so the boot fails until a real secret is supplied. That
+     * is right for a project: shipping without the secret is the bug.
+     *
+     * Here it would be exactly wrong. Ground's entire promise is that a plugin
+     * boots with no configuration, and an empty string is a VALUE — it would
+     * override the type-correct placeholder ground injects and fail
+     * ValidateConfigStage on a bench that is supposed to just run. So every var
+     * without a default is written COMMENTED: ground's placeholder applies
+     * until you uncomment the line and put a real value there, and the key is
+     * still visible so you know it exists.
+     *
+     * Vars are grouped by the plugin that declared them, because the chain
+     * includes dependencies and "which plugin wants this?" is otherwise a
+     * grep.
+     *
+     * @param  list<PluginManifest> $chain the plugin under test and its dependencies
+     * @return string
+     */
+    public static function render(array $chain): string
+    {
+        $out = [
+            '# Environment for running this plugin in `hkm ground`.',
+            '#',
+            '# Generated by `ground init` from the config[] declarations of this',
+            '# plugin and everything it depends on. Local only — gitignored, and',
+            '# never part of the package.',
+            '#',
+            '# Vars WITHOUT a default are commented out on purpose. Ground injects a',
+            '# type-correct placeholder for those, so the plugin boots with nothing',
+            '# set; uncomment a line to supply a real value.',
+            '',
+        ];
+
+        foreach ($chain as $manifest) {
+            $vars = $manifest->configVars();
+
+            if ($vars === []) {
+                continue;
+            }
+
+            $out[] = '# ── ' . $manifest->name() . ' ' . str_repeat('─', max(1, 60 - \strlen($manifest->name())));
+
+            foreach ($vars as $var) {
+                $key = $var['key'];
+
+                if ($var['default'] !== null) {
+                    $out[] = $key . '=' . $var['default'];
+
+                    continue;
+                }
+
+                $out[] = '# ' . $key . '=' . ($var['required'] ? '   # required — ground uses a placeholder until set' : '');
+            }
+
+            $out[] = '';
+        }
+
+        return implode("\n", $out) . "\n";
+    }
+
+    /**
+     * Merge newly declared vars into an existing file, touching nothing else.
+     *
+     * The same rule `hkm plugins enable` follows: what is already in the file is
+     * never modified. A real secret someone pasted in survives re-running
+     * `init`, and a var they deliberately commented out stays commented out —
+     * so this is safe to run whenever a dependency is added.
+     *
+     * @param  list<PluginManifest> $chain
+     * @return list<string> the keys appended
+     */
+    public static function merge(string $pluginDirectory, array $chain): array
+    {
+        $path = rtrim($pluginDirectory, '/') . '/' . self::FILENAME;
+
+        if (!is_file($path)) {
+            file_put_contents($path, self::render($chain));
+
+            return self::declaredKeys($chain);
+        }
+
+        $existing = (string) file_get_contents($path);
+        $missing  = [];
+
+        foreach ($chain as $manifest) {
+            foreach ($manifest->configVars() as $var) {
+                // Mentioned AT ALL — active or commented — counts as present.
+                if (self::mentions($existing, $var['key'])) {
+                    continue;
+                }
+
+                $missing[$var['key']] = $var;
+            }
+        }
+
+        if ($missing === []) {
+            return [];
+        }
+
+        $block = "\n# ── added by `ground init` " . str_repeat('─', 36) . "\n";
+
+        foreach ($missing as $var) {
+            $block .= $var['default'] !== null
+                ? $var['key'] . '=' . $var['default'] . "\n"
+                : '# ' . $var['key'] . '=' . ($var['required'] ? '   # required — ground uses a placeholder until set' : '') . "\n";
+        }
+
+        file_put_contents($path, rtrim($existing, "\n") . "\n" . $block);
+
+        return array_keys($missing);
+    }
+
+    /** @param list<PluginManifest> $chain @return list<string> */
+    private static function declaredKeys(array $chain): array
+    {
+        $keys = [];
+
+        foreach ($chain as $manifest) {
+            foreach ($manifest->configVars() as $var) {
+                $keys[$var['key']] = true;
+            }
+        }
+
+        return array_keys($keys);
+    }
+
+    /** Is this key named anywhere in the file, active or commented? */
+    private static function mentions(string $haystack, string $key): bool
+    {
+        return preg_match('/^\s*#?\s*(export\s+)?' . preg_quote($key, '/') . '\s*=/m', $haystack) === 1;
+    }
+}

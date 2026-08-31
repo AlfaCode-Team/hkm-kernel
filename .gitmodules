@@ -13,4 +13,4 @@
 [submodule "modules/http"]
 	path = modules/http
 	url = git@github.com:AlfaCode-Team/http.git
-	branch = master
+	branch = main

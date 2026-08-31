@@ -350,8 +350,14 @@ final class PluginGround
             }
         }
 
-        // Caller's env wins over everything, including the placeholders.
-        $values = [...$values, ...$this->env];
+        // The plugin's own `.env` sits BETWEEN the synthesised floor and an
+        // explicit ->env(): it supplies the real values this machine has (a
+        // sandbox key, a local mail host), overriding placeholders and
+        // defaults. A test naming a value still wins, because that value is a
+        // precondition of the test and must not depend on a file the test
+        // never mentions.
+        $fromFile = EnvFile::read($this->pluginDirectory());
+        $values   = [...$values, ...$fromFile, ...$this->env];
 
         $restore = [];
         foreach ($values as $key => $value) {
@@ -360,7 +366,28 @@ final class PluginGround
             $_SERVER[$key] = $value;
         }
 
-        return [$restore, array_values(array_unique($placeholders)), $values];
+        // A var the .env actually sets is no longer standing on a placeholder,
+        // so it must not be reported as one — that list is what the harness
+        // prints as "not configured", and naming a var the developer just
+        // configured sends them looking for a problem that is not there.
+        $placeholders = array_values(array_filter(
+            array_unique($placeholders),
+            static fn(string $key): bool => !isset($fromFile[$key]),
+        ));
+
+        return [$restore, $placeholders, $values];
+    }
+
+    /**
+     * The directory of the plugin UNDER TEST — providers[0] by construction.
+     *
+     * Only that plugin's `.env` is read. A dependency's would be reaching into
+     * a checkout the developer is not working on, and two of them could set the
+     * same key with no way to see which won.
+     */
+    private function pluginDirectory(): string
+    {
+        return PluginManifest::of($this->providers[0])->directory();
     }
 
     /**
