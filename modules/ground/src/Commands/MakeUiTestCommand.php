@@ -107,10 +107,12 @@ final class MakeUiTestCommand extends AbstractCommand
 
         file_put_contents($file, <<<TSX
             import { describe, it, expect } from "vitest";
+            import { createElement } from "react";
             // Add `screen` here when you assert on what the user sees:
             //   import { render, screen } from "@testing-library/react";
             import { render } from "@testing-library/react";
             import { PageContext } from "@pageflow/react";
+            import { AdminLayout } from "@pageflow/admin";
             import Page from "{$import}";
             import fixture from "../__fixtures__/{$slug}.json";
 
@@ -134,12 +136,25 @@ final class MakeUiTestCommand extends AbstractCommand
              * as JSX attributes renders nothing. The value is the whole page object —
              * the same thing <App> supplies at runtime, and the same shape the fixture
              * holds.
+             *
+             * The LAYOUT is applied for the same reason. Rendering a bare <Page />
+             * tested the page body and nothing around it: a page whose `.layout`
+             * throws, or whose shell needs a prop the server stopped sending, passed
+             * here and broke in the browser. This mirrors what <App> does — honour
+             * `Component.layout` when there is one, fall back to <AdminLayout> when
+             * there is not — so the test renders the same tree a request does.
              */
             function renderPage() {
+              const child = createElement(Page as any, fixture.props as any);
+              const layout = (Page as any).layout;
+
+              const tree =
+                typeof layout === "function"
+                  ? layout(child)
+                  : <AdminLayout>{child}</AdminLayout>;
+
               return render(
-                <PageContext.Provider value={fixture as any}>
-                  <Page />
-                </PageContext.Provider>,
+                <PageContext.Provider value={fixture as any}>{tree}</PageContext.Provider>,
               );
             }
 
@@ -322,6 +337,57 @@ final class MakeUiTestCommand extends AbstractCommand
                 },
               });
             }
+
+            // jsdom implements no matchMedia AT ALL — it is not a stub that
+            // returns false, the property is simply absent. Every page rendered
+            // in the admin shell hits it on the first render (AdminLayout →
+            // useIsMobile → useMediaQuery), so without this the layout throws
+            // "window.matchMedia is not a function" and the failure names the
+            // shell rather than the page under test.
+            //
+            // It answers "not matching", i.e. the DESKTOP branch, because that
+            // is the layout a test asserting on a sidebar expects. Override it
+            // in a single test to render the mobile drawer instead.
+            if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+              Object.defineProperty(window, "matchMedia", {
+                configurable: true,
+                writable: true,
+                value: (query: string): MediaQueryList =>
+                  ({
+                    matches: false,
+                    media: query,
+                    onchange: null,
+                    addEventListener: () => {},
+                    removeEventListener: () => {},
+                    dispatchEvent: () => false,
+                    // Deprecated, but still what some libraries reach for first.
+                    addListener: () => {},
+                    removeListener: () => {},
+                  }) as unknown as MediaQueryList,
+              });
+            }
+
+            // Also absent from jsdom, and reached on MOUNT rather than on
+            // render: the shell's SidebarNav observes its own container to
+            // decide how many nav items fit. A constructor that does not exist
+            // throws from inside a passive effect, so the stack names React's
+            // commit phase and not the component — which is a long way from
+            // "jsdom has no ResizeObserver".
+            //
+            // The stub never fires. A test that needs the overflow branch has
+            // to drive it explicitly; one that does not gets a stable layout
+            // instead of a resize it did not ask for.
+            if (typeof globalThis.ResizeObserver === "undefined") {
+              Object.defineProperty(globalThis, "ResizeObserver", {
+                configurable: true,
+                writable: true,
+                value: class {
+                  observe() {}
+                  unobserve() {}
+                  disconnect() {}
+                },
+              });
+            }
             TS) ? 1 : 0;
 
         if ($written > 0) {
@@ -344,6 +410,13 @@ final class MakeUiTestCommand extends AbstractCommand
      * wired declare in their own ui.json — rendering an admin page without
      * `lucide-react` fails on the first icon, and guessing that list is how it
      * goes stale.
+     *
+     * Tailwind is in devDependencies for the DEV SERVER, not for vitest: the
+     * config `ground dev` generates loads `@tailwindcss/vite`, and the
+     * stylesheet it writes opens with `@import "tailwindcss"`, resolved from
+     * this ui/'s node_modules. Both are missing without these three, and the
+     * failure lands on whoever runs `yarn dev` rather than on whoever ran
+     * `ground install`.
      */
     private function packageJson(UiWorkspace $workspace): string
     {
@@ -357,6 +430,12 @@ final class MakeUiTestCommand extends AbstractCommand
             ],
             'dependencies'    => $workspace->dependencies === [] ? new \stdClass() : $workspace->dependencies,
             'devDependencies' => [
+                '@tailwindcss/vite'         => '^4.0.0',
+                // A PEER of @testing-library/react since v16, so npm does not
+                // pull it in and jest-dom's matchers fail to import — the whole
+                // suite dies before a test runs, naming a package nobody asked
+                // for.
+                '@testing-library/dom'      => '^10.4.0',
                 '@testing-library/jest-dom' => '^6.6.0',
                 '@testing-library/react'    => '^16.1.0',
                 '@types/react'              => '^19.0.0',
@@ -365,6 +444,8 @@ final class MakeUiTestCommand extends AbstractCommand
                 'jsdom'                     => '^26.0.0',
                 'react'                     => '^19.0.0',
                 'react-dom'                 => '^19.0.0',
+                'tailwindcss'               => '^4.0.0',
+                'tw-animate-css'            => '^1.2.0',
                 'typescript'                => '^5.7.0',
                 'vitest'                    => '^3.0.0',
             ],

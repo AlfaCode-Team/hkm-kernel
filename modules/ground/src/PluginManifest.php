@@ -140,6 +140,116 @@ final class PluginManifest
     }
 
     /**
+     * Every route with its prefixes, filters, requires and name RESOLVED —
+     * i.e. the paths a browser can actually be pointed at.
+     *
+     * {@see allRoutes()} flattens `groups[]` but deliberately leaves each entry
+     * as written, because its callers are checking declarations. Anything that
+     * NAVIGATES needs the other thing: a route declared `{"path": "/{id}"}`
+     * inside `{"prefix": "/admin"}` under `"routePrefix": "/api"` is served at
+     * `/api/admin/{id}`, and a tool that showed `/{id}` would be listing a URL
+     * that 404s.
+     *
+     * The inheritance rules are the compiler's, reproduced here because this is
+     * a READ of the same manifest and disagreeing with the compiler would be
+     * worse than not showing routes at all:
+     *
+     *   prefix    concatenated outward-in
+     *   name      concatenated outward-in, and an UNNAMED route stays unnamed
+     *   filters   merged, de-duplicated BY ALIAS — a route's `throttle:5,1`
+     *             replaces a group's `throttle:60,1` rather than adding to it
+     *   requires  union
+     *
+     * @return list<array{method: string, path: string, handler: string, name: ?string, filters: list<string>, requires: list<string>, dynamic: bool}>
+     */
+    public function expandedRoutes(): array
+    {
+        $out = [];
+
+        $inherited = [
+            'prefix'   => (string) ($this->data['routePrefix'] ?? ''),
+            'name'     => (string) ($this->data['routeName'] ?? ''),
+            'filters'  => array_map('strval', (array) ($this->data['routeFilters'] ?? [])),
+            'requires' => array_map('strval', (array) ($this->data['routeRequires'] ?? [])),
+        ];
+
+        $walk = function (array $node, array $inherited) use (&$walk, &$out): void {
+            foreach ($node['routes'] ?? [] as $route) {
+                if (!\is_array($route)) {
+                    continue;
+                }
+
+                $name = (string) ($route['name'] ?? '');
+                $path = $inherited['prefix'] . (string) ($route['path'] ?? '');
+
+                $out[] = [
+                    'method'   => strtoupper((string) ($route['method'] ?? 'GET')),
+                    // A module with no prefix and a route path of "" is the
+                    // module root, which is "/" and not the empty string.
+                    'path'     => $path === '' ? '/' : $path,
+                    'handler'  => (string) ($route['handler'] ?? ''),
+                    'name'     => $name === '' ? null : $inherited['name'] . $name,
+                    'filters'  => self::mergeFilters(
+                        $inherited['filters'],
+                        array_map('strval', (array) ($route['filters'] ?? [])),
+                    ),
+                    'requires' => array_values(array_unique([
+                        ...$inherited['requires'],
+                        ...array_map('strval', (array) ($route['requires'] ?? [])),
+                    ])),
+                    'dynamic'  => str_contains($path, '{'),
+                ];
+            }
+
+            foreach ($node['groups'] ?? [] as $group) {
+                if (!\is_array($group)) {
+                    continue;
+                }
+
+                $walk($group, [
+                    'prefix'   => $inherited['prefix'] . (string) ($group['prefix'] ?? ''),
+                    'name'     => $inherited['name'] . (string) ($group['name'] ?? ''),
+                    'filters'  => self::mergeFilters(
+                        $inherited['filters'],
+                        array_map('strval', (array) ($group['filters'] ?? [])),
+                    ),
+                    'requires' => array_values(array_unique([
+                        ...$inherited['requires'],
+                        ...array_map('strval', (array) ($group['requires'] ?? [])),
+                    ])),
+                ]);
+            }
+        };
+
+        $walk($this->data, $inherited);
+
+        return $out;
+    }
+
+    /**
+     * Outer filters, then inner, de-duplicated by ALIAS.
+     *
+     * `throttle:60,1` and `throttle:5,1` are the same filter configured twice,
+     * not two filters — listing both would say a route runs the stage twice,
+     * which is the bug the compiler's own de-duplication exists to prevent.
+     *
+     * @param list<string> $outer
+     * @param list<string> $inner
+     * @return list<string>
+     */
+    private static function mergeFilters(array $outer, array $inner): array
+    {
+        $byAlias = [];
+
+        foreach ([...$outer, ...$inner] as $filter) {
+            $alias           = strtok($filter, ':');
+            $byAlias[$alias] = $filter;
+        }
+
+        return array_values($byAlias);
+    }
+
+    /**
      * Module domains required by INDIVIDUAL routes or groups, rather than by the
      * module as a whole.
      *

@@ -6,6 +6,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-01
+
+### Added
+- **`ground dev` renders a plugin's pages on a BENCH rather than bare.** The
+  generated entry handed Pageflow's `<App>` no `children`, so a page that
+  declares no `.layout` — three of the eight plugin admin pages on disk — opened
+  as unstyled markup on a white document, which reads like the page is broken
+  rather than like a one-line assignment has not been written yet.
+
+  The entry now frames every page in `GroundFrame` (`@ground/dev`, new, in this
+  package's own `ui/`). It is a FRAME, not a replacement layout: the production
+  tree renders untouched inside it, because `ground serve` running the real
+  pipeline is the only reason to trust what it shows. The layout therefore
+  becomes a control rather than a decision — `page` (the page's own `.layout`,
+  else the admin shell for an `admin/Pages` page and nothing for a `site/Pages`
+  one), `bare`, `admin`, `auth`.
+
+  The bench also carries what only ground knows: every page from the glob with
+  the route that renders it (a page no route reaches was previously unreachable
+  in a browser at all), the plugin's routes with prefixes and filters resolved,
+  the Pageflow page object, and an `adminShell` seeder.
+
+- **`PluginManifest::expandedRoutes()`** — every route with its module and group
+  prefixes, names, filters and `requires` resolved. `allRoutes()` deliberately
+  leaves entries as written, which is right for checking declarations and wrong
+  for anything that navigates: a route declared `/{id}` inside `{"prefix":
+  "/admin"}` under `"routePrefix": "/api"` is served at `/api/admin/{id}`.
+
+- **The `--sidebar-*` design tokens**, in the shared frontend theme. The admin
+  shell in `@pageflow/admin` names eleven of them (`bg-sidebar-bg`,
+  `text-sidebar-fg-muted`, `w-[var(--sidebar-width)]`, …) and not one was defined
+  anywhere — the shell was ported out of HKM 0.3 and its stylesheet was left
+  behind, so the sidebar rendered transparent with no width in every project. An
+  undefined custom property is not an error, so nothing reported it.
+
+### Fixed
+- **`ground dev` marked only ONE surface hot, so pages on any other surface got
+  no scripts at all.** PHP looks for `{surface}-hot` for whichever surface the
+  CONTROLLER named; `--mode` wrote one file. A plugin whose pages render on
+  `site` therefore served a bare shell with an empty `#app` while `yarn dev` sat
+  there reporting itself ready on `admin` — no error in the PHP log, nothing in
+  the console. One server serves every entry under the same root, so every
+  declared surface is now marked hot.
+
+- **A dev server that failed to start deleted a running one's hot file.** The
+  cleanup was armed in `configureServer`, which runs before the port is bound,
+  so with `strictPort` a second `yarn dev` exited during startup and removed the
+  hot file belonging to the server that was working. Ownership is now claimed
+  inside the `listening` handler, and the teardown hooks are armed there too.
+
+- **`ground dev` loaded no CSS at all.** The generated config had no Tailwind
+  plugin and the entry imported no stylesheet, while the pages, the shared `@ui`
+  kit and the admin shell are all Tailwind-only. Every page rendered unstyled.
+  The workspace now generates a stylesheet — the kernel theme inlined, so
+  `@import "tailwindcss"` resolves from a location that has it — with explicit
+  `@source` directives, since Tailwind's automatic scan stops at gitignored
+  directories and every file that matters is outside it.
+
+- **The scaffolded vitest tests never applied a page's `.layout`.** They rendered
+  a bare `<Page />`, so the shell around it — the thing most likely to break —
+  was never exercised. They now apply `Page.layout ?? AdminLayout`, which
+  immediately surfaced that jsdom implements neither `matchMedia` nor
+  `ResizeObserver`, both reached by `AdminLayout` on its first render; the
+  generated `setup.ts` now supplies both. `@testing-library/dom` was also missing
+  from the generated `package.json` — a peer of `@testing-library/react` since
+  v16, without which the whole suite dies on import.
+
+- **The shared `ThemeProvider` did not implement the API its own consumers
+  call.** It exposed `{ theme, toggle }` with `theme: "light" | "dark"`, while
+  `@pageflow/admin`'s `ThemeToggle` destructures `setTheme` and calls it with
+  `"light" | "dark" | "system"` — so every click on the theme switch called
+  `undefined` — and the shared `sonner.tsx` does `const { theme = 'system' }`.
+  Neither failure is visible to a type-check or a build. The provider now
+  exposes `setTheme` and `resolvedTheme`, treats `system` as a real third state
+  that keeps tracking the OS, and guards `localStorage` in both directions (the
+  unguarded read in the state initializer took the whole app down before first
+  paint in a private window).
+
+### Changed
+- The default theme is now `system` rather than `light`. Anyone who has never
+  chosen one follows their OS — which is what `sonner.tsx` already assumed.
+
 ## [1.9.0] - 2026-08-31
 
 ### Added
