@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-01
+
+### Fixed
+- **`hkm ground init` generated a CI workflow that called a binary nothing
+  installs.** The generated `.github/workflows/ground.yml` ran
+  `vendor/bin/hkm-ground check --here` and `vendor/bin/hkm-ground migrate
+  --strict`, but this package declares `"bin": ["bin/hkm-cli",
+  "modules/ground/bin/ground"]` — so what a plugin actually gets in its
+  `vendor/bin` is `ground`. No package has ever shipped a `hkm-ground`
+  executable, and `alfacode-team/ground` is not published separately at all: it
+  is a path repo inside this repository, reachable only because the kernel
+  autoloads it.
+
+  So every plugin that ran `ground init` got a workflow whose first step could
+  only ever exit 127, `No such file or directory` — and it failed at the step
+  AFTER `composer install` succeeded, which reads like the plugin is broken
+  rather than like the workflow named the wrong file. Five plugin repositories
+  had already been scaffolded with it.
+
+  The generator now emits `vendor/bin/ground`. Existing checkouts need the two
+  lines changed by hand or `ground init` re-run; nothing else in the workflow
+  moves.
+
 ## [1.10.0] - 2026-09-01
 
 ### Added
