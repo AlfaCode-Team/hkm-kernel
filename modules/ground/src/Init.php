@@ -213,13 +213,13 @@ final class Init
               - run: composer install --no-interaction --prefer-dist
 
               - name: Static checks
-                run: vendor/bin/hkm-ground check --here
+                run: vendor/bin/ground check --here
 
               - name: Tests
                 run: vendor/bin/phpunit
 
               - name: Migrations, on every database
-                run: vendor/bin/hkm-ground migrate --strict
+                run: vendor/bin/ground migrate --strict
 
         YAML);
     }
