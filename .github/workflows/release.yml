@@ -192,10 +192,8 @@ jobs:
   # keeps the bump from being lost; granting the Actions bot a branch-protection
   # bypass (or using a PAT) is what makes it fully hands-off.
   #
-  # Never fails the workflow: the release is already published by this point, so
-  # a failure here would misreport a good release as broken. That means BOTH
-  # blocked paths — the push and the PR — have to degrade to a warning, since
-  # each is refused by a different repo setting.
+  # Never fails the workflow: the release is already published by this point,
+  # and failing here would only misreport a successful release as broken.
   homebrew:
     name: Bump Homebrew formula
     needs: release
