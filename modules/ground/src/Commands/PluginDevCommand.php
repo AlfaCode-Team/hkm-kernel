@@ -81,8 +81,16 @@ final class PluginDevCommand extends AbstractCommand
 
         $this->newLine();
         $this->info('Surfaces  : ' . implode(', ', $surfaces));
-        $this->info('Serving   : ' . $surface);
-        $this->info('Hot file  : ' . $dev->publicPath() . "/{$surface}-hot");
+
+        // EVERY surface goes hot, not just the one --mode names. One server
+        // serves them all, and PHP looks for the hot file of whichever surface
+        // the CONTROLLER named — so reporting a single one here described a
+        // setup where a page rendered on another surface silently got no
+        // scripts at all.
+        $this->info('Hot files : ' . implode(', ', array_map(
+            static fn(string $name): string => $name . '-hot',
+            $surfaces,
+        )) . '  in ' . $dev->publicPath());
 
         if (!is_dir($target->directory() . '/ui/node_modules')) {
             $this->newLine();

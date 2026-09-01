@@ -88,6 +88,16 @@ final class UiWorkspace
             }
         }
 
+        // Ground's own dev bench. It belongs HERE rather than in DevWorkspace
+        // because both generated configs need it: the dev server's, and the
+        // VITEST one — a test that boots the generated entry (which imports the
+        // bench) otherwise fails to resolve it, and the message names the entry
+        // rather than the missing alias.
+        $bench = self::benchPath();
+        if ($bench !== null) {
+            $aliases['@ground/dev'] = $bench;
+        }
+
         $shared = self::sharedKitPath();
         if ($shared !== null) {
             // The template's own alias list, from vite/aliases.ts
@@ -137,6 +147,31 @@ final class UiWorkspace
         }
 
         return new self($aliases, $dependencies);
+    }
+
+    /**
+     * Ground's own `ui/dev` — the bench the generated entry frames pages with.
+     *
+     * Found by reflection for the same reason {@see sharedKitPath} does it:
+     * this package runs from a kernel checkout, an installed bundle and a
+     * plugin's vendor/, and the hop count to its root differs in each.
+     *
+     * It cannot come from the locator. The locator globs `*<slash>module.json`
+     * one level down, and ground keeps its manifest at `src/module.json` — so
+     * ground never appears in its own scan and would never be aliased.
+     */
+    public static function benchPath(): ?string
+    {
+        $file = (new \ReflectionClass(self::class))->getFileName();
+
+        if ($file === false) {
+            return null;
+        }
+
+        // …/modules/ground/src/Ui/UiWorkspace.php → …/modules/ground
+        $dev = \dirname($file, 3) . '/ui/dev';
+
+        return is_file($dev . '/index.ts') ? $dev . '/index.ts' : null;
     }
 
     /**
@@ -259,8 +294,15 @@ final class UiWorkspace
         return implode("\n", $lines);
     }
 
-    /** $to expressed relative to $from, with `../` hops. */
-    private static function relative(string $from, string $to): string
+    /**
+     * $to expressed relative to $from, with `../` hops.
+     *
+     * Public because {@see DevWorkspace} generates a stylesheet whose `@source`
+     * directives have to reach the same sibling checkouts these aliases point
+     * at, and re-deriving the hop count there would be a second implementation
+     * of this that drifts the first time the workspace layout changes.
+     */
+    public static function relative(string $from, string $to): string
     {
         $fromParts = explode('/', trim($from, '/'));
         $toParts   = explode('/', trim($to, '/'));

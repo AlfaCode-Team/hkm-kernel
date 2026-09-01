@@ -7,6 +7,12 @@
  * @ui/* can use `bg-background`, `text-muted-foreground`, `border-border`,
  * `ring-ring`, `rounded-lg`, etc. `tw-animate-css` supplies the `animate-in` /
  * `data-[state=open]` transitions shadcn components rely on.
+ *
+ * It also carries the `--sidebar-*` chrome tokens that @pageflow/admin's shell
+ * reads. Those referenced nothing for a while: the shell was ported out of HKM
+ * 0.3 and its stylesheet was left behind, so every class it names
+ * (`bg-sidebar-bg`, `text-sidebar-fg-muted`, `w-[var(--sidebar-width)]`)
+ * resolved to no colour and no width in every project.
  */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -40,6 +46,31 @@
   --chart-3: 197 37% 24%;
   --chart-4: 43 74% 66%;
   --chart-5: 27 87% 67%;
+
+  /*
+   * Admin sidebar chrome, consumed by @pageflow/admin's shell (AdminLayout,
+   * Sidebar, SidebarNav, OrgSwitcher). They live HERE, beside the shadcn
+   * tokens, because the shell references them from every surface — a project's
+   * and the one `ground dev` generates alike — and a token defined in only one
+   * of those renders the sidebar transparent in the other.
+   *
+   * The two accent tokens defer to --primary rather than restating a colour, so
+   * a project that rebrands by overriding --primary gets a matching sidebar and
+   * never discovers this block. The neutrals are their own values: a sidebar
+   * that tracked --background would vanish against the page it sits next to.
+   */
+  --sidebar-bg: 0 0% 100%;
+  --sidebar-fg: 0 0% 30%;
+  --sidebar-fg-muted: 0 0% 55%;
+  --sidebar-fg-active: var(--primary);
+  --sidebar-border: 214.3 31.8% 91.4%;
+  --sidebar-hover: 210 40% 96%;
+  --sidebar-active: var(--primary);
+  --sidebar-section: 0 0% 45%;
+
+  /* A LENGTH, not a colour — read directly as var() by the layout's motion
+     variants and `w-[var(--sidebar-width)]`, so it is not in @theme inline. */
+  --sidebar-width: 260px;
 }
 
 .dark {
@@ -67,6 +98,15 @@
   --chart-3: 30 80% 55%;
   --chart-4: 280 65% 60%;
   --chart-5: 340 75% 55%;
+
+  --sidebar-bg: 222.2 84% 4.9%;
+  --sidebar-fg: 210 40% 80%;
+  --sidebar-fg-muted: 215 20.2% 55%;
+  --sidebar-fg-active: var(--primary);
+  --sidebar-border: 217.2 32.6% 17.5%;
+  --sidebar-hover: 217.2 32.6% 17.5%;
+  --sidebar-active: var(--primary);
+  --sidebar-section: 215 20.2% 55%;
 }
 
 /* Map the HSL tokens onto Tailwind's color/radius scales (v4 `@theme inline`). */
@@ -96,6 +136,15 @@
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
 
+  --color-sidebar-bg: hsl(var(--sidebar-bg));
+  --color-sidebar-fg: hsl(var(--sidebar-fg));
+  --color-sidebar-fg-muted: hsl(var(--sidebar-fg-muted));
+  --color-sidebar-fg-active: hsl(var(--sidebar-fg-active));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-hover: hsl(var(--sidebar-hover));
+  --color-sidebar-active: hsl(var(--sidebar-active));
+  --color-sidebar-section: hsl(var(--sidebar-section));
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -110,4 +159,13 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
   }
+}
+
+/*
+ * The shell's own transition utility, used on every sidebar row and toggle.
+ * Declared as @utility (not a plain class) so Tailwind orders it with the rest
+ * of the utility layer and a `hover:` variant on the same element still wins.
+ */
+@utility sidebar-transition {
+  transition: all 200ms ease-out;
 }

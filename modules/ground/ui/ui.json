@@ -1,0 +1,10 @@
+{
+  "alias": "@ground",
+  "entry": "dev/index.ts",
+  "framework": "react",
+  "exports": {
+    "@ground/dev": "dev/index.ts"
+  },
+  "surfaces": {},
+  "dependencies": {}
+}
