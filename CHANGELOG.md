@@ -6,6 +6,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-02
+
+### Fixed
+- **The migration engine only worked on MySQL** (`modules/let-migrate`). A
+  commit titled *"refactor: remove deprecated methods"* had restored `src/`,
+  `tests/` and the README byte-for-byte to their state before a day of merged
+  PR work — undoing four driver fixes and a Laravel-parity alias, and deleting
+  the eight tests that covered them. Nothing was failing that the deletion
+  fixed. Restored and carried forward:
+  - `ALTER TABLE` compiled MySQL syntax for every driver — additions batched
+    into one comma-separated statement, indexes added with `ADD KEY`, and drops
+    running columns BEFORE the indexes over them. A rollback written in the
+    correct order was reordered by the compiler into one that could not run
+    anywhere but MySQL, in the one direction nobody exercises until they
+    uninstall a plugin.
+  - PostgreSQL rejected `BOOLEAN DEFAULT 1`, and `modifyColumn()` emitted three
+    `;`-joined statements into a clause the extended query protocol refuses.
+  - SQLite could not add a foreign key to an existing table, and `modifyColumn()`
+    compiled `CREATE TABLE "__tmp_users" ()` — it was broken outright, because
+    the rebuild SQLite requires was driven from a blueprint holding only the
+    delta. It now reconstructs the full table from the `SchemaInspector`,
+    carrying existing indexes across and unwrapping defaults so a literal is
+    not re-quoted on every rebuild.
+  - Seeding a second database in one run died with *Cannot redeclare class* —
+    reachable the moment one run seeds once per driver, which is what
+    `hkm ground migrate` does.
+- **PostgreSQL: every schema lookup silently matched nothing.** The driver and
+  inspector used libpq's `$1` placeholders, which PDO neither understands nor
+  rejects — so `tableExists()` answered `false` for a table with seven columns,
+  and the inspector reported no columns, indexes or foreign keys. Anything
+  guarded by `hasTable()`, and everything built on schema diffing or dumping,
+  was quietly wrong on that driver. Found only by executing against a live
+  server.
+- **SQL Server emitted invalid T-SQL for every column addition and every
+  foreign key** — `ALTER TABLE … ADD COLUMN` (T-SQL has no `COLUMN` keyword
+  there) and `ON DELETE RESTRICT` (unimplemented; its actions are `NO ACTION`,
+  `CASCADE`, `SET NULL`, `SET DEFAULT`). Both are argued from the T-SQL
+  specification and are **not** verified against a live server — none was
+  reachable — but each replaces SQL the server rejects outright.
+- **`MigrationConfig`: singular `path` overrode plural `paths`** instead of
+  acting as its fallback, so a config carrying both silently ran one directory
+  and ignored the array — failing by doing less work rather than by erroring.
+- **`Blueprint::dropColumn()` accepted one column**, so `dropColumn('a', 'b')`
+  silently dropped only `a`. Now variadic, and the `drop*` methods chain.
+
+### Added
+- **`useCurrent()` / `useCurrentOnUpdate()` / `bigIncrements()`** — Laravel
+  parity, so a ported migration compiles unchanged. Without them the failure is
+  a fatal *Call to undefined method* raised the moment the migration runs,
+  during a deploy.
+- **`StatusRenderer`** — `migrate:status` as normalised data, aligned table
+  lines and JSON from one source, so the human and `--json` views cannot
+  disagree.
+- **`tests/Live` — the migration compiler executed against every reachable
+  engine.** Configured with `LETMIGRATE_DB_MYSQL` / `_PGSQL` / `_SQLSRV`
+  (`GROUND_DB_*` honoured); each run uses its own scratch database and drops it.
+  A driver that is unconfigured or not answering SKIPS with the reason, never
+  counted as a pass. This release was verified on SQLite, MariaDB 12.3 and
+  PostgreSQL 18; SQL Server skipped, and says so.
+
+### Changed
+- `docs/guides/18_MIGRATIONS.md` — `->useCurrent()` and `->useCurrentOnUpdate()`
+  now exist, so the anti-pattern entry saying they do not is corrected. The
+  `->index()` half stands: an index is declared on the Blueprint, not the
+  column.
+
+
 ## [1.10.1] - 2026-09-01
 
 ### Fixed
