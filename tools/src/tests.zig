@@ -27,6 +27,7 @@ const std = @import("std");
 test {
     _ = @import("commands/cli.zig");
     _ = @import("commands/discover.zig");
+    _ = @import("commands/install.zig");
     _ = @import("commands/doctor.zig");
     _ = @import("commands/list.zig");
     _ = @import("commands/module.zig");

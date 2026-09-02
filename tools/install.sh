@@ -226,6 +226,25 @@ if [ -d "$DEST" ]; then mv "$DEST" "$OLD"; fi
 mv "$NEW" "$DEST"
 rm -rf "$OLD"
 
+# ── make the installed kernel readable by the accounts that RUN it ──────────
+# The kernel is SHARED infrastructure: every PHP-FPM pool on this box loads its
+# PHP out of this one tree, and those pools run as their own accounts
+# (www-data, nginx, a per-site user) — never as the account that ran this
+# installer. `cp -R` above applies the INSTALLING account's umask, so on a box
+# with umask 027 or 077 the whole tree lands mode 0750 or 0700 and every site
+# dies with "Permission denied" on a kernel file it can see but not open. The
+# install itself reports success, because the installer can obviously read what
+# it just wrote.
+#
+# Normalise instead of trusting the umask: directories traversable, files
+# readable, and anything that WAS executable still executable (bin/psp,
+# vendor/bin/* — a flat 0644 pass strips them and the failure only shows up at
+# the first invocation). There are no secrets in here; a project's .env lives
+# in the project, not in the kernel.
+find "$DEST" -type d -exec chmod 755 {} + 2>/dev/null || true
+find "$DEST" -type f ! -perm -u+x -exec chmod 644 {} + 2>/dev/null || true
+find "$DEST" -type f -perm -u+x -exec chmod 755 {} + 2>/dev/null || true
+
 # Stage beside the destination, then rename over it. A plain `cp` truncates
 # and writes INTO the existing file, which fails with "Text file busy" the
 # moment that exact binary is the one currently running this script — i.e.

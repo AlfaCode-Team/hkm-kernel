@@ -80,8 +80,8 @@ hkm install [path|name] [options]
 --no-plugins               skip fetching the bootstrap's plugins
 --no-chmod                 skip fixing var/ and userdata/ mode bits
 --verify-plugins           run each plugin's own test suite while installing (slow)
---production, --prod       tighter mode bits (dir 0750/file 0640, no world access)
---owner=<user>[:<group>]   chown var/ and userdata/ to this user[:group] (needs root/sudo)
+--production, --prod       harden the WHOLE tree: code 0750/0640, var+userdata 2770/0660
+--owner=<user>[:<group>]   chown the whole project to this user[:group] (needs root/sudo)
 ```
 
 What it does, in order: registers the project in the kernel registry; recreates
@@ -95,33 +95,100 @@ right after scaffolding.
 
 ### `--production` / `--owner` — correct permissions AND ownership on a server
 
-Dev mode chmods `var/`/`userdata/` to `0775`/`0664` (group-writable, world
-readable) and stops there — good enough when the files are already owned by
-whoever is running `hkm`. On a real server that is rarely the case: the web
-server / PHP-FPM pool usually runs as its own account (`www-data`, `nginx`,
-`app`, …), and CHMOD alone cannot fix that — only `chown` can.
+Dev mode chmods `var/`/`userdata/` to `0775`/`0664` and stops there — good
+enough when the files are already owned by whoever is running `hkm`. On a real
+server that is never the case: the web server / PHP-FPM pool runs as its own
+account (`www-data`, `nginx`, `app`, …), and it needs to READ every PHP file in
+the project and EXECUTE (traverse) every directory holding one — not just write
+to `var/`. Chmod alone cannot arrange that; only `chown` can.
 
-- `--production` swaps the mode bits for `0750`/`0640` (owner + group only, no
-  "other" access at all). It does **not** guess an owner — correctness matters
-  more than convenience here, and guessing wrong on a shared box is worse than
-  asking.
-- `--owner=<user>[:<group>]` recursively `chown`s `var/` and `userdata/` to
-  that account. It is passed straight through to the system `chown`, so
-  `www-data`, `www-data:www-data` and `:www-data` (group only) all work.
-  Requires root/sudo unless the process already owns the target files — a
-  failed chown is reported per-directory, never swallowed silently.
+Passing `--production` or `--owner=` runs a **hardening pass over the whole
+project**, as the LAST step of the install — after `composer install` and the
+plugin fetch, because both create files (`vendor/`, `plugins/`) owned by
+whoever ran the command.
+
+The model is **split ownership**: the deploy account keeps the code, the pool
+reaches it through the GROUP.
+
+| Path | `--production` | default (`--owner` alone) |
+|---|---|---|
+| directories holding code | `2750` | `2755` |
+| files holding code | `0640` | `0644` |
+| an already-executable file (`bin/psp`, `vendor/bin/*`) | `0750` | `0755` |
+| `var/`, `userdata/` directories | `2770` | `2775` |
+| `var/`, `userdata/` files | `0660` | `0664` |
+| `.env` | `0640` | `0640` |
+| `.git` | untouched | untouched |
+
+**There is no chmod-only version of this.** Opening the tree with
+`chmod -R o+rX` looks like it would avoid the chown, and it cannot: `.env`
+carries `APP_KEY` and the database password, so world-readable is the one thing
+it must never be — and `var/cache/manifests` needs the pool to WRITE (the boot
+compiles manifests into it on every request unless `BOOT_CACHE=1`), which no
+amount of "execute for others" grants. Reaching the tree through a shared GROUP
+is what covers both.
+
+Five details are load-bearing:
+
+- **`.env` is `0640`, never `0600`.** PHP-FPM has to read `APP_KEY`, and a
+  `0600` `.env` owned by the deploy user is the single most common reason a tree
+  that runs fine from the shell fails to boot under a pool running as another
+  account. Group-readable, never group-writable, never world-anything.
+- **Code is never group-writable**, in either profile. An FPM pool that can
+  rewrite the PHP it is executing turns any file-write bug into remote code
+  execution. Only `var/` and `userdata/` — which the application genuinely
+  writes — are group-writable.
+- **Every directory carries setgid** (the `2` prefix), code included. The group
+  is the only thing granting the pool access, and a file created later — a log
+  the pool writes at 3am, a file a `git pull` lands — otherwise takes the
+  creating account's primary group and drops out of the share. Without it every
+  deploy silently un-shares whatever it touched, and the site 500s on a file
+  that was readable an hour ago.
+- **An already-executable file keeps its exec bit**, re-granted only where the
+  profile grants read (so `0640` → `0750`, never `0751`). A flat `chmod 0640`
+  over the tree strips `bin/psp` and `vendor/bin/*`, and the install looks like
+  it worked right up until the first invocation.
+
+`.git` is skipped by both the chown and the chmod: it holds the whole history —
+every secret ever committed and later removed included — nothing in a request
+path reads it, and leaving it alone means the deploy user can still `git pull`
+after a `sudo hkm install`.
+
+After the pass the command **re-stats what it changed** and reports any mode
+that did not actually take (a filesystem refusing setgid, an ACL, not being
+root), rather than reporting success for a chmod the kernel rejected.
+
+It also checks whether the pool can REACH the project at all: opening
+`/home/deploy/shop/app/public_html/index.php` needs execute on every directory
+down that path, and a home directory is `0700` on a stock Debian install.
+Nothing inside the project can fix that, so the offending parents are named —
+and reported only, never changed: widening a directory outside the project is
+the operator's call.
+
+- `--owner=<user>[:<group>]` is passed straight through to the system `chown`,
+  so `www-data`, `deploy:www-data` and `:www-data` (group only) all work.
+  Requires root/sudo unless the process already owns the files; a failed chown
+  is reported, never swallowed silently.
+- **`--owner=:www-data` (group only) is the form to reach for when the tree is
+  deployed by a CI account** — a Bitbucket/Jenkins user, a `git pull` from a
+  developer's login. It changes the GROUP and leaves the OWNER alone, so the
+  deploy account keeps writing to its own checkout while the pool gets in
+  through the group. Re-run it after a deploy that adds files; setgid keeps the
+  ones created inside existing directories correct on its own.
 - Set `HKM_PROD_OWNER` once in your deploy environment to avoid repeating
   `--owner=` on every run; an explicit `--owner=` flag always wins.
-- `--production` with no `--owner` (and no `HKM_PROD_OWNER`) still tightens the
-  mode bits, but warns that ownership was left unchanged instead of guessing.
+- `--production` with no `--owner` (and no `HKM_PROD_OWNER`) still applies the
+  mode bits, but warns that ownership was left unchanged instead of guessing —
+  correctness matters more than convenience, and guessing wrong on a shared box
+  is worse than asking.
 
 ```bash
 cd my-shop && hkm install       # after a fresh git clone
 hkm install ./my-shop
 hkm install shop                # by registered name
 hkm install --no-install        # vendor/ already cached — skip composer
-sudo hkm install --production --owner=www-data:www-data   # on a server
-HKM_PROD_OWNER=www-data:www-data sudo hkm install --production
+sudo hkm install --production --owner=deploy:www-data     # on a server
+HKM_PROD_OWNER=deploy:www-data sudo hkm install --production
 ```
 
 ---
