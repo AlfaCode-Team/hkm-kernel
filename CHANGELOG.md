@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing at the cause. Enabling an already-enabled plugin now tops up its
   block. Safe by construction: the seeder only ever ADDS keys the file does not
   already mention, in any form, so a real secret is never rewritten.
+- **`.env.example` documented the Tenancy control-plane switch as a hostname.**
+  `TENANCY_CONTROL_PLANE=admin.example.com` reads as "the control plane lives
+  here"; the plugin declares the key as `type: bool`, where any non-empty string
+  is truthy — so the example value silently turned tenant routing OFF for anyone
+  who uncommented it. Corrected to a bool, with `TENANCY_CENTRAL_DOMAINS` (a
+  real declared key that was missing) added beside it and the mode values named.
+  The plugin's own `module.json` stays the authority; this is the example
+  catching up to it.
 - **Re-seeding wrote a second block for the same plugin.** The append was
   unconditional, so a plugin seeded twice got two `# ─── Auth ───` headings, and
   three after that. Every key was still present exactly once, so nothing broke —
