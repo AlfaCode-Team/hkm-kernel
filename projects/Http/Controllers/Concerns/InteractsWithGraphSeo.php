@@ -157,6 +157,7 @@ trait InteractsWithGraphSeo
         ?string $searchUrl = null,
         string $locale = 'en_US',
         bool $index = true,
+        ?string $alt = null,
         ?Request $request = null,
     ): string {
         $siteName ??= (string) (env('APP_NAME') ?: '');
@@ -191,6 +192,7 @@ trait InteractsWithGraphSeo
         $og = $this->openGraph($ogType, $title)
             ->url($url)
             ->locale($locale)
+            ->addProperty('og', 'image:alt',$alt) // fallback for OG image alt
             ->twitterLargeImage();
 
         if ($description !== '') {
