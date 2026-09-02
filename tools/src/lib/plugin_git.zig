@@ -12,6 +12,7 @@
 const std = @import("std");
 const semver = @import("semver.zig");
 const prompt = @import("prompt.zig");
+const util = @import("util.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -42,7 +43,35 @@ pub fn available(allocator: std.mem.Allocator, io: Io, env: *EnvMap) bool {
 }
 
 /// Run git capturing stdout. Returns null when the command failed.
+/// Git must never stop and ask for a password.
+///
+/// GitHub answers **404 for a repository that does not exist and for one the
+/// caller may not see** — it will not confirm a private repo's existence to an
+/// anonymous request. Git cannot tell those apart, so it assumes the second and
+/// falls back to asking for a username and password. The result is a credential
+/// prompt in the middle of a plugin fetch for a repo that is PUBLIC and simply
+/// renamed, misspelled, or not published yet: no account can unlock it, typing
+/// one cannot help, and an unattended `hkm install` on a deploy box or in CI
+/// hangs there until somebody kills it.
+///
+/// `GIT_TERMINAL_PROMPT=0` turns that into git's own one-line error naming the
+/// URL, which the call site already prints — the information actually needed.
+/// `BatchMode=yes` does the same for an SSH remote's passphrase prompt.
+///
+/// Set `HKM_GIT_INTERACTIVE=1` to restore the prompt for a genuinely private
+/// remote you intend to authenticate against by hand. An existing
+/// `GIT_SSH_COMMAND` is left alone — it is the user's own, and it may already
+/// carry the identity file the fetch depends on.
+fn noPrompt(env: *EnvMap) void {
+    if (util.envIsTruthy(env, "HKM_GIT_INTERACTIVE")) return;
+    env.put("GIT_TERMINAL_PROMPT", "0") catch {};
+    if (env.get("GIT_SSH_COMMAND") == null) {
+        env.put("GIT_SSH_COMMAND", "ssh -o BatchMode=yes") catch {};
+    }
+}
+
 fn capture(allocator: std.mem.Allocator, io: Io, env: *EnvMap, argv: []const []const u8) ?[]const u8 {
+    noPrompt(env);
     const res = std.process.run(allocator, io, .{ .argv = argv, .environ_map = env }) catch return null;
     switch (res.term) {
         .exited => |c| if (c != 0) return null,
@@ -53,6 +82,7 @@ fn capture(allocator: std.mem.Allocator, io: Io, env: *EnvMap, argv: []const []c
 
 /// Run git with stdio inherited, so clone/fetch progress reaches the terminal.
 fn passthrough(io: Io, env: *EnvMap, argv: []const []const u8) !u8 {
+    noPrompt(env);
     var child = try std.process.spawn(io, .{
         .argv = argv,
         .environ_map = env,
@@ -331,7 +361,8 @@ pub fn isDirty(allocator: std.mem.Allocator, io: Io, env: *EnvMap, dir: []const 
 pub fn explain(e: GitError) []const u8 {
     return switch (e) {
         GitError.GitMissing => "git is not installed or not on PATH",
-        GitError.RemoteUnreachable => "could not reach the remote (offline, private, or the repo does not exist)",
+        GitError.RemoteUnreachable => "could not reach the remote — it does not exist, is private, or you are offline "
+            ++ "(GitHub answers 404 for 'missing' and 'not yours' alike; check the spelling first)",
         GitError.RefNotFound => "the requested version does not exist on the remote",
         GitError.CommandFailed => "the git command failed",
     };

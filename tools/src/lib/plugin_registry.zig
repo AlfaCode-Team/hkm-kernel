@@ -30,6 +30,7 @@ pub const default_org = "AlfaCode-Team";
 /// scattering special cases through the commands.
 const slug_overrides = [_]struct { folder: []const u8, slug: []const u8 }{
     .{ .folder = "DevTools", .slug = "dev-tools" },
+    .{ .folder = "FileManager", .slug = "file-manager" },
     .{ .folder = "HttpClient", .slug = "http-client" },
     .{ .folder = "RedisCache", .slug = "redis-cache" },
     .{ .folder = "SecurityFilters", .slug = "security-filters" },
@@ -368,4 +369,45 @@ test "only the configured org's plugin repos count as first-party" {
     try std.testing.expect(!remoteIsFirstParty(&env, "https://github.com/not-AlfaCode-Team/hkm-plugin-logger.git"));
     try std.testing.expect(!remoteIsFirstParty(&env, "https://git.internal/AlfaCode-Team/hkm-plugin-logger.git"));
     try std.testing.expect(!remoteIsFirstParty(&env, "/srv/git/hkm-plugin-logger.git"));
+}
+
+test "every multi-word plugin folder maps to its real hyphenated repo slug" {
+    // These are the repos that actually exist under the org with a hyphen. A
+    // folder missing from slug_overrides silently loses the hyphen — the URL
+    // 404s, and because GitHub answers 404 for "private" too, git asks for a
+    // username and password for a repo that is PUBLIC. FileManager was missing
+    // here, and that is exactly how it presented: an account prompt during
+    // `hkm install`, on a plugin anyone can clone.
+    const cases = [_]struct { folder: []const u8, slug: []const u8 }{
+        .{ .folder = "DevTools", .slug = "dev-tools" },
+        .{ .folder = "FileManager", .slug = "file-manager" },
+        .{ .folder = "HttpClient", .slug = "http-client" },
+        .{ .folder = "RedisCache", .slug = "redis-cache" },
+        .{ .folder = "SecurityFilters", .slug = "security-filters" },
+        .{ .folder = "SocialAuth", .slug = "social-auth" },
+    };
+    for (cases) |c| {
+        const got = try slugFor(std.testing.allocator, c.folder);
+        defer std.testing.allocator.free(got);
+        try std.testing.expectEqualStrings(c.slug, got);
+        // and the round trip back to the PSR-4 folder name must survive
+        const back = try canonicalName(std.testing.allocator, c.slug);
+        defer std.testing.allocator.free(back);
+        try std.testing.expectEqualStrings(c.folder, back);
+    }
+}
+
+test "single-word repos are NOT hyphenated by accident" {
+    const cases = [_]struct { folder: []const u8, slug: []const u8 }{
+        .{ .folder = "SiteSEO", .slug = "siteseo" },
+        .{ .folder = "ViteManifest", .slug = "vitemanifest" },
+        .{ .folder = "OAuth2", .slug = "oauth2" },
+        .{ .folder = "View", .slug = "view" },
+        .{ .folder = "Crypto", .slug = "crypto" },
+    };
+    for (cases) |c| {
+        const got = try slugFor(std.testing.allocator, c.folder);
+        defer std.testing.allocator.free(got);
+        try std.testing.expectEqualStrings(c.slug, got);
+    }
 }
