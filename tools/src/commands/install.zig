@@ -17,7 +17,8 @@
 //!   6. fetch every plugin the project's own bootstrap wires (mirrors what
 //!      `hkm new` does right after scaffolding — see lib/plugin_provision.zig)
 //!   7. with --production / --owner: chown and chmod the WHOLE project for the
-//!      web server's account — last, because steps 5 and 6 create vendor/ and
+//!      web server's account, plus the plugin-store versions its plugins/
+//!      symlinks point at — last, because steps 5 and 6 create vendor/ and
 //!      plugins/ as whoever ran the command
 //!
 //! Every step besides directory creation can be skipped with a --no-* flag, for
@@ -36,6 +37,8 @@ const services = @import("../lib/services.zig");
 const plugin_assets = @import("../lib/plugin_assets.zig");
 const plugin_provision = @import("../lib/plugin_provision.zig");
 const plugins_cmd = @import("plugins.zig");
+const installer = @import("../lib/plugin_install.zig");
+const pstore = @import("../lib/plugin_store.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -74,7 +77,8 @@ const Options = struct {
     /// group-and-world-readable dev modes (0775/0664).
     production: bool = false,
     /// --owner=<user>[:<group>] (also HKM_PROD_OWNER) — chown the whole
-    /// project to this user[:group], typically `deploy:www-data`: the deploy
+    /// project, AND the plugin-store versions its plugins/ symlinks resolve to,
+    /// to this user[:group], typically `deploy:www-data`: the deploy
     /// account keeps the code, the web server / PHP-FPM pool reaches it through
     /// the group. Passed straight to the system `chown`, so `user`,
     /// `user:group` and `:group` (group-only) all work. Requires root/sudo
@@ -141,7 +145,7 @@ fn printHelp() void {
     prompt.item("--no-chmod", "skip fixing var/ and userdata/ mode bits");
     prompt.item("--verify-plugins", "run each plugin's own test suite while installing (slow)");
     prompt.item("--production, --prod", "harden the WHOLE tree: code 0750/0640, var+userdata 2770/0660");
-    prompt.item("--owner=<user>[:<group>]", "chown the whole project to this user[:group] (needs root/sudo)");
+    prompt.item("--owner=<user>[:<group>]", "chown the project AND its linked plugin store entries to this user[:group] (needs root/sudo)");
     prompt.item("--help, -h", "show this help");
     prompt.blank();
     prompt.section("Environment");
@@ -468,7 +472,10 @@ fn hardenProject(
 
     prompt.note("");
     if (owner) |o| {
-        if (o.len > 0) fixOwnership(allocator, io, env, root, o);
+        if (o.len > 0) {
+            fixOwnership(allocator, io, env, root, o);
+            fixPluginStoreOwnership(allocator, io, env, root, o);
+        }
     } else {
         prompt.warn("--production: no --owner given (and HKM_PROD_OWNER is unset) — ownership left unchanged.");
         prompt.muted("pass --owner=<user>[:<group>] — typically your web server's account, e.g. deploy:www-data.");
@@ -483,7 +490,7 @@ fn hardenProject(
     ) catch "Permissions applied");
 
     verifyModes(allocator, io, root, m);
-    reportTraversal(allocator, io, root);
+    reportTraversal(allocator, io, env, root);
 }
 
 /// Re-stat the paths that decide whether the application boots, and say so when
@@ -657,6 +664,114 @@ fn fixOwnership(allocator: std.mem.Allocator, io: Io, env: *EnvMap, root: []cons
     }
 }
 
+/// chown the plugin-store entries this project's `plugins/*` symlinks point at.
+///
+/// A project's plugins are not IN the project. `hkm plugins install` keeps one
+/// copy per (plugin, version, origin) in the global store and links the project
+/// at it (lib/plugin_store.zig), so `plugins/Logger` is a symlink out of the
+/// tree. Both halves of the hardening pass stop at that boundary by design:
+/// `hardenTree` skips symlinks because a chmod would follow one and rewrite a
+/// target outside the project, and `fixOwnership` only walks the project root.
+///
+/// The result, before this pass, was a project that verified clean and could
+/// not serve: every file the pool had to READ FIRST — every Provider, every
+/// controller a route resolves to — was still owned by whoever ran the command,
+/// and the report said "Project owned by deploy:www-data".
+///
+/// Only the versions THIS project links to are touched. The store is shared by
+/// every project on the machine, and taking ownership of all of it on behalf of
+/// one project's web account is not this command's call.
+fn fixPluginStoreOwnership(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    root: []const u8,
+    owner: []const u8,
+) void {
+    const plugins_dir = std.fmt.allocPrint(allocator, "{s}/plugins", .{root}) catch return;
+    var dir = Dir.cwd().openDir(io, plugins_dir, .{ .iterate = true }) catch return;
+    defer dir.close(io);
+
+    // The resolved store, used ONLY to bound how far up a target we may walk.
+    // A link pointing somewhere else entirely — a working copy someone is
+    // editing — gets its own tree chown'd and nothing above it.
+    const store: ?[]const u8 = blk: {
+        const fallback = fb: {
+            const p = installer.pluginsRoot(allocator, io, env, root) catch break :fb root;
+            break :fb util.parentOf(p) orelse root;
+        };
+        break :blk pstore.root(allocator, env, fallback) catch null;
+    };
+
+    var done: std.ArrayList([]const u8) = .empty;
+    var linked: usize = 0;
+    var failed: usize = 0;
+
+    var it = dir.iterate();
+    while (it.next(io) catch null) |entry| {
+        const link = std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugins_dir, entry.name }) catch continue;
+        // A real directory is inside the project — fixOwnership already had it.
+        if (!util.isSymlink(io, link)) continue;
+        const target = util.linkTarget(allocator, io, link) orelse continue;
+        // Relative targets stay inside the project, absolute ones are the store.
+        if (target.len == 0 or target[0] != '/') continue;
+        // A dangling link has nothing to chown; `hkm plugins verify` reports it.
+        if (!util.dirExists(Dir.cwd(), io, target)) continue;
+        linked += 1;
+
+        if (!chownOnce(allocator, io, env, &done, target, owner, true)) failed += 1;
+
+        // Everything between the store root and the version directory has to be
+        // traversable by the new owner too, or the tree just chown'd cannot be
+        // reached. Walk up only INSIDE the store, never above it: the store's
+        // own parents are a user's cache or home, and chowning those to a web
+        // account on behalf of one project would be a machine-wide surprise.
+        const s_root = store orelse continue;
+        if (!util.isInside(target, s_root)) continue;
+        var cursor: ?[]const u8 = util.parentOf(target);
+        while (cursor) |dir_path| : (cursor = util.parentOf(dir_path)) {
+            if (!util.isInside(dir_path, s_root)) break;
+            if (!chownOnce(allocator, io, env, &done, dir_path, owner, false)) failed += 1;
+            if (std.mem.eql(u8, util.trimSlash(dir_path), util.trimSlash(s_root))) break;
+        }
+    }
+
+    if (linked == 0) return;
+
+    if (failed == 0) {
+        prompt.ok(std.fmt.allocPrint(
+            allocator,
+            "{d} linked plugin store entr{s} owned by {s}",
+            .{ linked, if (linked == 1) @as([]const u8, "y") else "ies", owner },
+        ) catch "Plugin store ownership fixed");
+    } else {
+        prompt.warn(std.fmt.allocPrint(
+            allocator,
+            "chown {s} failed on {d} plugin store path(s) — the pool cannot read those plugins.",
+            .{ owner, failed },
+        ) catch "chown failed on the plugin store — the pool cannot read those plugins.");
+    }
+}
+
+/// chown `path`, remembering it so a path reached through several links — the
+/// store root, a plugin directory holding two pinned versions — is chown'd once
+/// rather than once per link.
+fn chownOnce(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    done: *std.ArrayList([]const u8),
+    path: []const u8,
+    owner: []const u8,
+    recursive: bool,
+) bool {
+    for (done.items) |p| {
+        if (std.mem.eql(u8, p, path)) return true;
+    }
+    done.append(allocator, path) catch {};
+    return chownPath(io, env, path, owner, recursive);
+}
+
 /// `chown [-R] <owner> <path>`. Shells out rather than resolving the user/group
 /// name to a uid/gid natively — the OS's own NSS already knows how to do that
 /// correctly (files, LDAP, whatever `/etc/nsswitch.conf` says), and `chown`
@@ -700,27 +815,96 @@ fn chownPath(io: Io, env: *EnvMap, path: []const u8, owner: []const u8, recursiv
 ///
 /// Reported, never changed: widening a directory that is not part of the
 /// project is the operator's call, not this command's.
-fn reportTraversal(allocator: std.mem.Allocator, io: Io, root: []const u8) void {
+fn reportTraversal(allocator: std.mem.Allocator, io: Io, env: *EnvMap, root: []const u8) void {
     var blocked: std.ArrayList([]const u8) = .empty;
+    collectBlocked(allocator, io, util.parentOf(root), &blocked);
 
-    var cursor: ?[]const u8 = util.parentOf(root);
+    if (blocked.items.len > 0) {
+        prompt.warn("The web server may not be able to REACH the project — these parent directories deny traversal to others:");
+        for (blocked.items) |item| prompt.muted(std.fmt.allocPrint(allocator, "  {s}", .{item}) catch item);
+        prompt.muted("Each one needs execute for the pool's account: `chmod o+x <dir>`, add the account to its group, or");
+        prompt.muted("move the project somewhere the web server already reaches (/var/www, /srv).");
+    }
+
+    reportStoreTraversal(allocator, io, env, root);
+}
+
+/// The same check for the PLUGIN STORE, which the project reaches by symlink.
+///
+/// Worth its own pass and its own advice: the store defaults to `$HOME/.cache`
+/// (lib/plugin_store.zig), and a deploy run under sudo resolves that to
+/// `/root/.cache` — a directory that is 0700 on every mainstream distro. The
+/// chown above then succeeds on every entry and the site still cannot read one
+/// of them, because the denial is a level above anything this command owns.
+///
+/// The remedy differs too. Widening a home directory to reach a cache is the
+/// wrong trade; the store is relocatable precisely so it does not have to be.
+fn reportStoreTraversal(allocator: std.mem.Allocator, io: Io, env: *EnvMap, root: []const u8) void {
+    const fallback = fb: {
+        const p = installer.pluginsRoot(allocator, io, env, root) catch break :fb root;
+        break :fb util.parentOf(p) orelse root;
+    };
+    const store = pstore.root(allocator, env, fallback) catch return;
+    // Nothing installed from the store — no reason to talk about it.
+    if (!util.dirExists(Dir.cwd(), io, store)) return;
+    // A store INSIDE the project is covered by the project's own walk above.
+    if (util.isInside(store, root)) return;
+    // Say nothing about a store this project does not actually reach into —
+    // the warning below asserts that its plugins/ links point there.
+    if (!linksIntoStore(allocator, io, root, store)) return;
+
+    var blocked: std.ArrayList([]const u8) = .empty;
+    collectBlocked(allocator, io, store, &blocked);
+    if (blocked.items.len == 0) return;
+
+    prompt.warn("The web server cannot REACH the plugin store — the project's plugins/ symlinks point into it:");
+    for (blocked.items) |item| prompt.muted(std.fmt.allocPrint(allocator, "  {s}", .{item}) catch item);
+    prompt.muted(std.fmt.allocPrint(
+        allocator,
+        "  store: {s}",
+        .{store},
+    ) catch "");
+    prompt.muted("Move it somewhere the pool already reaches rather than widening a home directory:");
+    prompt.muted("  hkm plugins store --set=/var/lib/hkm/plugin-store   (or: export HKM_PLUGIN_STORE=…)");
+    prompt.muted("then re-point this project's links with: hkm plugins lock");
+}
+
+/// True when at least one `plugins/*` entry is a symlink resolving into
+/// `store`. Cheap enough to run unconditionally: a project has a handful of
+/// plugins, and this reads only the link targets, never the trees behind them.
+fn linksIntoStore(allocator: std.mem.Allocator, io: Io, root: []const u8, store: []const u8) bool {
+    const plugins_dir = std.fmt.allocPrint(allocator, "{s}/plugins", .{root}) catch return false;
+    var dir = Dir.cwd().openDir(io, plugins_dir, .{ .iterate = true }) catch return false;
+    defer dir.close(io);
+
+    var it = dir.iterate();
+    while (it.next(io) catch null) |entry| {
+        const link = std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugins_dir, entry.name }) catch continue;
+        if (!util.isSymlink(io, link)) continue;
+        const target = util.linkTarget(allocator, io, link) orelse continue;
+        if (util.isInside(target, store)) return true;
+    }
+    return false;
+}
+
+/// Walk from `start` up to `/`, collecting every directory that denies
+/// traversal to "other" — reachable only by its owner or a member of its
+/// group, which a web server account rarely is.
+fn collectBlocked(
+    allocator: std.mem.Allocator,
+    io: Io,
+    start: ?[]const u8,
+    blocked: *std.ArrayList([]const u8),
+) void {
+    var cursor: ?[]const u8 = start;
     while (cursor) |path| : (cursor = util.parentOf(path)) {
         if (util.statMode(io, path)) |mode| {
-            // No execute for "other" — reachable only by the owner or a member
-            // of the directory's group, which a web server account rarely is.
             if ((mode & 0o001) == 0) {
                 blocked.append(allocator, std.fmt.allocPrint(allocator, "{s} ({o})", .{ path, mode }) catch path) catch {};
             }
         }
         if (std.mem.eql(u8, path, "/")) break;
     }
-
-    if (blocked.items.len == 0) return;
-
-    prompt.warn("The web server may not be able to REACH the project — these parent directories deny traversal to others:");
-    for (blocked.items) |item| prompt.muted(std.fmt.allocPrint(allocator, "  {s}", .{item}) catch item);
-    prompt.muted("Each one needs execute for the pool's account: `chmod o+x <dir>`, add the account to its group, or");
-    prompt.muted("move the project somewhere the web server already reaches (/var/www, /srv).");
 }
 
 // --------------------------------------------------------------------------

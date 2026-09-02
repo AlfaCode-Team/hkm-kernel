@@ -15,6 +15,20 @@ const EnvMap = std.process.Environ.Map;
 
 /// Resolve the project root directory from a path or registered name.
 /// Returns an absolute path to a folder that contains a proj.json.
+/// `path` and every directory above it, nearest first, ending at "/".
+///
+/// Split out from `resolveRoot` so the walk itself is testable without a
+/// filesystem: the interesting part is the sequence, not the stat.
+pub fn ancestors(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {
+    var out: std.ArrayList([]const u8) = .empty;
+    var cursor: ?[]const u8 = util.trimSlash(path);
+    while (cursor) |p| : (cursor = util.parentOf(p)) {
+        try out.append(allocator, if (p.len == 0) "/" else p);
+        if (p.len == 0 or std.mem.eql(u8, p, "/")) break;
+    }
+    return out.items;
+}
+
 pub fn resolveRoot(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []const u8) !?[]const u8 {
     // No target → current working directory.
     const candidate = if (target.len == 0) (env.get("PWD") orelse ".") else target;
@@ -23,6 +37,21 @@ pub fn resolveRoot(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: [
     const abs = try util.absPath(allocator, env, candidate);
     if (util.fileExists(io, try std.fmt.allocPrint(allocator, "{s}/proj.json", .{abs}))) {
         return abs;
+    }
+
+    // CWD MODE: walk up. Every other tool open in that same terminal — git,
+    // composer, npm — finds its project from anywhere inside it, and being told
+    // "'.' is neither a project folder nor a registered name" while standing in
+    // `<project>/app` is a worse answer than the directory above holds.
+    //
+    // Only when no target was given. An EXPLICIT path stays exact: `hkm install
+    // ./tools` quietly hardening the parent project instead of failing is the
+    // kind of help nobody wants from a command that chowns things.
+    if (target.len == 0) {
+        for ((try ancestors(allocator, abs))[1..]) |dir| {
+            const marker = try std.fmt.allocPrint(allocator, "{s}/proj.json", .{dir});
+            if (util.fileExists(io, marker)) return dir;
+        }
     }
 
     // NAME MODE: look the name up in the kernel registry.
@@ -159,4 +188,40 @@ pub fn replace(allocator: std.mem.Allocator, input: []const u8, needle: []const 
     }
     try out.appendSlice(allocator, rest);
     return out.toOwnedSlice(allocator);
+}
+
+// ── tests ──────────────────────────────────────────────────────
+
+test "ancestors walks from the directory up to the root, nearest first" {
+    const a = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+
+    const got = try ancestors(arena.allocator(), "/srv/app/src/Http");
+    try std.testing.expectEqual(@as(usize, 5), got.len);
+    try std.testing.expectEqualStrings("/srv/app/src/Http", got[0]);
+    try std.testing.expectEqualStrings("/srv/app/src", got[1]);
+    try std.testing.expectEqualStrings("/srv/app", got[2]);
+    try std.testing.expectEqualStrings("/srv", got[3]);
+    try std.testing.expectEqualStrings("/", got[4]);
+}
+
+test "ancestors terminates on the root itself" {
+    const a = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+
+    const got = try ancestors(arena.allocator(), "/");
+    try std.testing.expectEqual(@as(usize, 1), got.len);
+    try std.testing.expectEqualStrings("/", got[0]);
+}
+
+test "a trailing slash does not produce a duplicate first entry" {
+    const a = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+
+    const got = try ancestors(arena.allocator(), "/srv/app/");
+    try std.testing.expectEqualStrings("/srv/app", got[0]);
+    try std.testing.expectEqualStrings("/srv", got[1]);
 }

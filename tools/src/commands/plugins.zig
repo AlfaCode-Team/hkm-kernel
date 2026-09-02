@@ -851,7 +851,14 @@ fn enableWithDeps(
     if (steps.items.len == 0) {
         prompt.warn(try std.fmt.allocPrint(allocator, "{s} and all its dependencies are already enabled.", .{folder}));
         if (missing.items.len > 0) noteMissingDomains(allocator, missing.items);
-        prompt.outro("No changes made");
+
+        // Wiring is unchanged, but the plugin's config[] may not be. A plugin
+        // that gains a variable in a later version has an .env block that is
+        // now incomplete, and the boot fails on the missing key with nothing
+        // pointing at the cause. Re-seeding here is safe by construction: seed()
+        // only ever ADDS keys the file does not already mention, in any form.
+        const added = reseedEnv(allocator, io, root, folder, if (located) |l| l.dir else null, dry_run);
+        prompt.outro(if (added > 0) "Env block updated" else "No changes made");
         return 0;
     }
 
@@ -974,6 +981,45 @@ pub fn supportHelpersExpr(allocator: std.mem.Allocator, io: Io, env: *EnvMap, ro
 
 /// Enable ONE plugin into `source`, returning the updated text (no file write).
 /// Publishes assets + runs migrations as a side effect (skipped on dry-run).
+/// Top up a plugin's `.env` block with variables its module.json declares and
+/// the file does not have yet, merging into the block it already owns.
+///
+/// Returns how many were added. Every failure is a warning rather than an error:
+/// this runs on a command whose job was already done, and a .env that could not
+/// be written is not a reason to report the enable itself as failed.
+fn reseedEnv(
+    allocator: std.mem.Allocator,
+    io: Io,
+    root: []const u8,
+    folder: []const u8,
+    dir: ?[]const u8,
+    dry_run: bool,
+) usize {
+    const d = dir orelse return 0;
+    const vars = penv.readVars(allocator, io, d, folder) catch return 0;
+    if (vars.len == 0) return 0;
+
+    const seeded = penv.seed(allocator, io, root, folder, vars, dry_run) catch |e| {
+        prompt.warn(std.fmt.allocPrint(
+            allocator,
+            "could not update .env ({t}) — add {s}'s new config[] variables by hand.",
+            .{ e, folder },
+        ) catch folder);
+        return 0;
+    };
+    if (seeded.added.len == 0) return 0;
+
+    prompt.ok(std.fmt.allocPrint(allocator, "{s} {d} new env var(s) to {s}'s block:", .{
+        if (dry_run) "would add" else "Added",
+        seeded.added.len,
+        folder,
+    }) catch "Added new env vars");
+    for (seeded.added) |v| {
+        prompt.muted(std.fmt.allocPrint(allocator, "    {s}", .{v.key}) catch v.key);
+    }
+    return seeded.added.len;
+}
+
 fn enableOne(
     allocator: std.mem.Allocator,
     io: Io,
