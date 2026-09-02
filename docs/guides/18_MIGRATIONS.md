@@ -240,9 +240,12 @@ $t->string('email')
 > primary key use the Blueprint method `$t->primary(['a', 'b'])`. Do not use
 > both on the same table.
 >
-> **There is no fluent `->index()` or `->useCurrent()` column modifier.**
-> Declare indexes with the Blueprint method `$t->index(['col'])` (see below),
-> and a current-timestamp default with `->default('CURRENT_TIMESTAMP')`.
+> **There is no fluent `->index()` column modifier.** Declare indexes with the
+> Blueprint method `$t->index(['col'])` (see below).
+>
+> `->useCurrent()` and `->useCurrentOnUpdate()` DO exist — Laravel-parity
+> aliases of `->default('CURRENT_TIMESTAMP')` and
+> `->onUpdateCurrentTimestamp()`. Either spelling compiles identically.
 
 ### Timestamps Behavior
 
@@ -841,7 +844,7 @@ echo $result->summary();
 ✗ Write migrations without matching down() rollback
 ✗ Forget to run data migrations inside transactions (or explicit transaction handling)
 ✗ Use --seed in refresh without wiring SeederRunner to MigrateRefreshCommand
-✗ Use a fluent `->index()` or `->useCurrent()` column modifier — they do NOT exist; use `$t->index(['col'])` and `->default('CURRENT_TIMESTAMP')`
+✗ Use a fluent `->index()` column modifier — it does NOT exist; use `$t->index(['col'])`
 ✗ Combine a column `->primary()` with a Blueprint `$t->primary([...])` on the same table — pick one (double PRIMARY KEY error)
 ✗ Reference `seed:run`/`seed:fresh`/`seed:status` or `migrate:make` — the real commands are `db:seed` and `make:migration`
 ✗ Hardcode database table names — use string literals, never interpolation
