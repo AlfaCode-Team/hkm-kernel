@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-09-02
+
+### Fixed
+- **A plugin fetch asked for a GitHub account, for a repo that is public.**
+  `FileManager` was the one hyphenated plugin missing from the slug override
+  table, so it resolved to `hkm-plugin-filemanager` — a repository that does not
+  exist. GitHub answers **404 for "does not exist" and "not yours" alike**; it
+  will not confirm a private repo to an anonymous request. Git cannot tell those
+  apart, assumed the second, and stopped to ask for a username and password that
+  no account could have satisfied. Added the override, plus tests pinning every
+  multi-word folder to its real hyphenated slug (and round-tripping back to the
+  PSR-4 folder name) so the next repo added with a hyphen cannot drift the same
+  way.
+- **Git could block a deploy on a credential prompt.** The plugin fetch inherited
+  the terminal, so an unreachable remote hung `hkm install` on a password box
+  until somebody killed it — on a deploy box or in CI, indefinitely. Every git
+  invocation now runs with `GIT_TERMINAL_PROMPT=0` and SSH `BatchMode=yes`: a bad
+  remote fails immediately and the call site names the plugin and URL, which is
+  the information actually needed. `HKM_GIT_INTERACTIVE=1` restores the prompt
+  for a genuinely private remote you intend to authenticate against by hand.
+
 ## [1.12.0] - 2026-09-02
 
 ### Fixed
@@ -39,24 +60,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could obviously read what it had just written. The installer now normalises
   the tree it lays down: directories traversable, files readable, and anything
   that WAS executable still executable.
-
-- **A plugin fetch asked for a GitHub account, for a repo that is public.**
-  `FileManager` was the one hyphenated plugin missing from the slug override
-  table, so it resolved to `hkm-plugin-filemanager` — a repository that does not
-  exist. GitHub answers **404 for "does not exist" and "not yours" alike**; it
-  will not confirm a private repo to an anonymous request. Git cannot tell those
-  apart, assumed the second, and stopped to ask for a username and password that
-  no account could have satisfied. Added the override, plus tests pinning every
-  multi-word folder to its real hyphenated slug (and round-tripping back to the
-  PSR-4 folder name) so the next repo added with a hyphen cannot drift the same
-  way.
-- **Git could block a deploy on a credential prompt.** The plugin fetch inherited
-  the terminal, so an unreachable remote hung `hkm install` on a password box
-  until somebody killed it — on a deploy box or in CI, indefinitely. Every git
-  invocation now runs with `GIT_TERMINAL_PROMPT=0` and SSH `BatchMode=yes`: a bad
-  remote fails immediately and the call site names the plugin and URL, which is
-  the information actually needed. `HKM_GIT_INTERACTIVE=1` restores the prompt
-  for a genuinely private remote you intend to authenticate against by hand.
 
 ### Changed
 - `hkm install --production` / `--owner=` now apply a split-ownership model:
