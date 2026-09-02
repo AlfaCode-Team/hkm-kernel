@@ -6,6 +6,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-02
+
+### Fixed
+- **A project installed with `--production --owner=` still could not be served
+  by PHP-FPM.** The pass only ever touched `var/` and `userdata/`, so every
+  directory a request actually reads — `app/public_html`, `src/`, `vendor/`,
+  `plugins/` — kept the deploying user's ownership and whatever mode the clone
+  arrived with. The pool could write logs it was never going to reach the code
+  to produce. Three separate reasons a boot failed, each fixed:
+  - the pass now covers the WHOLE project tree, and runs LAST — after
+    `composer install` and the plugin fetch, both of which create `vendor/` and
+    `plugins/` as whoever ran the command. Running at step 3, as it did, meant
+    the two largest directories in the project were created *after* the
+    permissions were "fixed".
+  - `.env` was chmod'd `0600`. PHP-FPM running as another account cannot read
+    `APP_KEY` through that, and the boot fails on a file whose mode bits look
+    deliberate. It is now `0640` — group-readable, never group-writable, never
+    world-anything.
+  - nothing reported that the pool could not TRAVERSE to the project. Reaching
+    `app/public_html/index.php` needs execute on every parent directory, and a
+    home directory is `0700` on a stock Debian install — unfixable from inside
+    the project, so the offending parents are now named (reported only, never
+    changed).
+
+- **The installed kernel was left at whatever the installing account's umask
+  produced** (`tools/install.sh`). `/opt/hkm-kernel` is shared infrastructure —
+  every PHP-FPM pool on the box loads its PHP out of that one tree, and none of
+  those pools runs as the account that installed it. With `umask 027` or `077`
+  the whole tree landed 0750/0700 and every site died with "Permission denied"
+  on a kernel file, while the install reported success because the installer
+  could obviously read what it had just written. The installer now normalises
+  the tree it lays down: directories traversable, files readable, and anything
+  that WAS executable still executable.
+
+### Changed
+- `hkm install --production` / `--owner=` now apply a split-ownership model:
+  code owned by the deploy user and only READABLE through the web server's
+  group (`2750`/`0640`), `var/` and `userdata/` group-writable (`2770`/`0660`).
+  EVERY directory carries setgid, code included: the group is the only thing
+  granting the pool access, so a file created later — a log written at 3am, a
+  file a `git pull` lands — would otherwise take the creating account's primary
+  group and drop out of the share, and each deploy would silently un-share
+  whatever it touched.
+  Code is never group-writable in either profile — an FPM pool that can rewrite
+  the PHP it executes turns any file-write bug into code execution. An
+  already-executable file keeps its exec bit (re-granted only where the profile
+  grants read, so `bin/psp` and `vendor/bin/*` survive at `0750`, not `0751`),
+  and `.git` is skipped by both the chown and the chmod.
+- The pass re-stats what it changed and reports any mode the filesystem
+  refused, instead of reporting success for a chmod the kernel rejected.
+
+
 ## [1.11.0] - 2026-09-02
 
 ### Fixed

@@ -241,6 +241,17 @@ pub fn chmodPath(io: Io, path: []const u8, mode: u32) void {
     Dir.cwd().setFilePermissions(io, path, @enumFromInt(mode), .{}) catch {};
 }
 
+/// A path's current mode bits, or null when it cannot be stat'd (gone, or a
+/// directory this process may not look into). Symlinks are NOT followed: the
+/// caller is fixing permissions inside a tree, and a symlink's target is
+/// routinely outside it — following one would rechmod a file the walk never
+/// intended to touch. Always null on Windows, which has no mode bits.
+pub fn statMode(io: Io, path: []const u8) ?u32 {
+    if (@import("builtin").os.tag == .windows) return null;
+    const st = Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch return null;
+    return @intFromEnum(st.permissions) & 0o7777;
+}
+
 /// Recursively make `path` writable: `dirMode` (e.g. 0o775) on every directory
 /// including `path` itself, `fileMode` (e.g. 0o664) on every regular file
 /// beneath it. Fixes a runtime tree (var/, userdata/) left behind by a
