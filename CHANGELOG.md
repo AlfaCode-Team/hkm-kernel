@@ -6,6 +6,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-09-03
+
+### Fixed
+- **`hkm install --owner=` left every plugin file owned by the deploying user.**
+  A project's plugins are not in the project: `hkm plugins install` keeps one
+  copy per (plugin, version, origin) in the global store and links the project
+  at it, so `plugins/Logger` is a symlink out of the tree. Both halves of the
+  hardening pass stopped at that boundary by design — `hardenTree` skips
+  symlinks because a chmod would follow one and rewrite a target outside the
+  project, and the chown only walked the project root. The result was a project
+  that verified clean and could not serve: every file the pool has to read
+  first, every Provider and every controller a route resolves to, still belonged
+  to whoever ran the command, under a report that said `Project owned by
+  deploy:www-data`. `--owner` now also chowns the store versions the project
+  links to, plus the directories between them and the store root so the trees it
+  just chowned can be reached. Only the versions THIS project links to: the store
+  is shared by every project on the machine, and claiming all of it for one
+  project's web account is not that command's call.
+- **`--production` reported a reachable project while the plugins were
+  unreachable.** The traversal check walked the parents of the project root only.
+  Since the store moved out of the project it defaults to `$HOME/.cache`, which a
+  deploy under sudo resolves to `/root/.cache` — 0700 on every mainstream distro
+  — so the chown succeeded on every entry and the site still could not read one
+  of them. The check now covers the store's own parents, with its own remedy:
+  relocate the store (`hkm plugins store --set=`, or `HKM_PLUGIN_STORE`) rather
+  than widen a home directory to reach a cache.
+- **A plugin that gained an env var never got it.** `hkm plugins enable` returns
+  early when the plugin and its dependencies are already wired, so a plugin
+  declaring a new `config[]` entry in a later version left an `.env` block that
+  was now incomplete — and the boot failed on the missing key with nothing
+  pointing at the cause. Enabling an already-enabled plugin now tops up its
+  block. Safe by construction: the seeder only ever ADDS keys the file does not
+  already mention, in any form, so a real secret is never rewritten.
+- **`.env.example` documented the Tenancy control-plane switch as a hostname.**
+  `TENANCY_CONTROL_PLANE=admin.example.com` reads as "the control plane lives
+  here"; the plugin declares the key as `type: bool`, where any non-empty string
+  is truthy — so the example value silently turned tenant routing OFF for anyone
+  who uncommented it. Corrected to a bool, with `TENANCY_CENTRAL_DOMAINS` (a
+  real declared key that was missing) added beside it and the mode values named.
+  The plugin's own `module.json` stays the authority; this is the example
+  catching up to it.
+- **Re-seeding wrote a second block for the same plugin.** The append was
+  unconditional, so a plugin seeded twice got two `# ─── Auth ───` headings, and
+  three after that. Every key was still present exactly once, so nothing broke —
+  the grouping the block exists to provide just quietly stopped being true. New
+  keys are now merged into the block the plugin already owns, keeping the blank
+  line that separates it from the next one.
+
+### Added
+- **`hkm env` — audit and tidy a project's `.env`.** A dotenv file accumulates:
+  a plugin seeds its block on enable, someone appends a key at the bottom to try
+  something, a second plugin declares a variable the first one already did. None
+  of that is an error anywhere. The loader resolves a repeated key silently, the
+  boot succeeds, and the value in effect is whichever line happens to be last —
+  a file that works and does not say what it is doing.
+  - `hkm env` reports duplicates with every occurrence's line number and marks
+    which one is live. That marker is the point: `LoadEnvironment::setVar`
+    overwrites on each call and the cascade reads a file top to bottom, so the
+    LAST active assignment wins — the opposite of what most people assume when
+    they append a key to the bottom of a .env.
+  - `hkm env dedupe` asks per key rather than choosing. The right survivor is
+    not derivable: `DB_HOST=localhost` on line 12 and `DB_HOST=10.0.0.4` on line
+    88 are both plausible, and the one in effect is as likely to be the accident
+    as the intent. `--keep=effective` is the scriptable form that cannot change
+    behaviour; `--keep=first` / `--keep=last` are positional.
+  - `hkm env group` reorders the file into blocks: a key a plugin declares in its
+    `module.json` `config[]` goes under that plugin, otherwise under the feature
+    its prefix names, otherwise `Ungrouped`. Comments attached to a key move with
+    it, comments attached to nothing are rescued into a `Notes` block rather than
+    dropped, and the pass refuses to write unless every key AND every
+    informational comment that went in comes out again.
+  - Every write leaves the previous file beside it as `.env.bak`, at 0600.
+- **A project is found from anywhere inside it.** `resolveRoot` checked the exact
+  working directory, so `hkm env` in `<project>/app` answered "'.' is neither a
+  project folder (with proj.json) nor a registered name" about a project one
+  directory up. It now walks up to the filesystem root, the way git, composer and
+  npm all find theirs — for every command that takes a `[path|name]`, not just
+  `env`. An EXPLICIT path stays exact: the same resolver backs
+  `hkm install --owner`, and a command that chowns a tree must never quietly
+  retarget itself above where it was pointed.
+
 ## [1.12.1] - 2026-09-02
 
 ### Fixed

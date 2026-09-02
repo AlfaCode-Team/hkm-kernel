@@ -29,6 +29,7 @@ test {
     _ = @import("commands/discover.zig");
     _ = @import("commands/install.zig");
     _ = @import("commands/doctor.zig");
+    _ = @import("commands/env.zig");
     _ = @import("commands/list.zig");
     _ = @import("commands/module.zig");
     _ = @import("commands/new.zig");
@@ -43,6 +44,7 @@ test {
     _ = @import("constants.zig");
     _ = @import("lib/banner.zig");
     _ = @import("lib/composer_version.zig");
+    _ = @import("lib/env_file.zig");
     _ = @import("lib/install_scope.zig");
     _ = @import("lib/inspector/dashboard.zig");
     _ = @import("lib/inspector/meminspector.zig");

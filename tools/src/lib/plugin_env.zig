@@ -25,6 +25,7 @@
 
 const std = @import("std");
 const util = @import("util.zig");
+const envfile = @import("env_file.zig");
 
 const Io = std.Io;
 const Dir = std.Io.Dir;
@@ -150,8 +151,45 @@ pub fn hasKey(content: []const u8, key: []const u8) bool {
     return false;
 }
 
+/// Byte offset just past the last non-blank line of this plugin's existing
+/// block, or null when the file has no block for it yet.
+///
+/// Without this, a plugin that gains a variable in a later version seeds a
+/// SECOND `# ─── Auth ───` block on the next enable, and a third after that.
+/// The file still works — every key is present exactly once — but the grouping
+/// it was written to provide quietly stops being true, which is the whole point
+/// of the block.
+fn insertionPoint(content: []const u8, pluginName: []const u8) ?usize {
+    var found = false;
+    var end: ?usize = null;
+    var pos: usize = 0;
+
+    while (pos <= content.len) {
+        const nl = std.mem.indexOfScalarPos(u8, content, pos, '\n') orelse content.len;
+        const line = content[pos..nl];
+
+        if (envfile.headerLabel(line)) |label| {
+            if (found) break; // the next block starts here
+            if (std.mem.eql(u8, label, pluginName)) found = true;
+        } else if (found and std.mem.trim(u8, line, " \t\r").len > 0) {
+            end = nl;
+        }
+
+        if (nl == content.len) break;
+        pos = nl + 1;
+    }
+
+    return if (found) (end orelse null) else null;
+}
+
 /// Append every variable of `vars` that the project's `.env` does not already
 /// mention, under a labelled block. Creates the file when absent.
+///
+/// Two rules, both load-bearing. A key already in the file — set, or commented
+/// out — is never rewritten, so a real secret is never clobbered by a re-enable
+/// or by a second plugin that happens to declare the same variable. And the new
+/// keys go into this plugin's OWN block, merged into it when one already
+/// exists.
 pub fn seed(
     allocator: std.mem.Allocator,
     io: Io,
@@ -179,27 +217,12 @@ pub fn seed(
         return .{ .added = missing.items, .skipped = skipped, .path = path, .created = created };
     }
 
-    var out: std.ArrayList(u8) = .empty;
-    try out.appendSlice(allocator, existing);
-
-    // Exactly one blank line before the block, whatever the file ended with.
-    if (out.items.len > 0) {
-        while (out.items.len > 0 and (out.items[out.items.len - 1] == '\n' or out.items[out.items.len - 1] == '\r')) {
-            _ = out.pop();
-        }
-        try out.appendSlice(allocator, "\n\n");
-    }
-
-    try out.appendSlice(allocator, try std.fmt.allocPrint(
-        allocator,
-        "# ─── {s} ─────────────────────────────────────────────────\n" ++
-            "# Declared in the plugin's module.json config[]. Added by `hkm plugins enable`.\n",
-        .{pluginName},
-    ));
-
+    // The variable lines themselves, built once — they go either into this
+    // plugin's existing block or into a fresh one.
+    var body: std.ArrayList(u8) = .empty;
     for (missing.items) |v| {
         if (v.default) |d| {
-            try out.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{s}={s}\n", .{ v.key, d }));
+            try body.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{s}={s}\n", .{ v.key, d }));
             continue;
         }
 
@@ -207,7 +230,7 @@ pub fn seed(
             // Active but empty. The kernel counts '' as missing, so the boot
             // still stops here until a real value is supplied — which is the
             // correct outcome for something like an API key.
-            try out.appendSlice(allocator, try std.fmt.allocPrint(
+            try body.appendSlice(allocator, try std.fmt.allocPrint(
                 allocator,
                 "{s}=          # REQUIRED{s} — set this before booting\n",
                 .{ v.key, typeSuffix(allocator, v.type_name) },
@@ -217,11 +240,48 @@ pub fn seed(
 
         // Optional with no default: COMMENTED. Writing it empty would be read as
         // the string '' and would quietly beat the plugin's own default.
-        try out.appendSlice(allocator, try std.fmt.allocPrint(
+        try body.appendSlice(allocator, try std.fmt.allocPrint(
             allocator,
             "# {s}=         # optional{s}\n",
             .{ v.key, typeSuffix(allocator, v.type_name) },
         ));
+    }
+
+    var out: std.ArrayList(u8) = .empty;
+
+    if (insertionPoint(existing, pluginName)) |at| {
+        // Merge into the block this plugin already owns.
+        const rest = existing[at..];
+        const tail = std.mem.trimStart(u8, rest, "\n");
+        // How the block was separated from whatever follows it. The inserted
+        // lines go INSIDE the block, so that separation has to be put back —
+        // otherwise every re-seed pulls the next block up by one line.
+        const newlines = rest.len - tail.len;
+
+        try out.appendSlice(allocator, existing[0..at]);
+        try out.append(allocator, '\n');
+        try out.appendSlice(allocator, body.items);
+        var n: usize = 1;
+        while (n < newlines) : (n += 1) try out.append(allocator, '\n');
+        try out.appendSlice(allocator, tail);
+    } else {
+        try out.appendSlice(allocator, existing);
+
+        // Exactly one blank line before the block, whatever the file ended with.
+        if (out.items.len > 0) {
+            while (out.items.len > 0 and (out.items[out.items.len - 1] == '\n' or out.items[out.items.len - 1] == '\r')) {
+                _ = out.pop();
+            }
+            try out.appendSlice(allocator, "\n\n");
+        }
+
+        try out.appendSlice(allocator, try std.fmt.allocPrint(
+            allocator,
+            "# ─── {s} ─────────────────────────────────────────────────\n" ++
+                "# Declared in the plugin's module.json config[]. Added by `hkm plugins enable`.\n",
+            .{pluginName},
+        ));
+        try out.appendSlice(allocator, body.items);
     }
 
     Dir.cwd().writeFile(io, .{ .sub_path = path, .data = out.items }) catch |e| return e;
@@ -256,4 +316,27 @@ test "hasKey does not match a longer key with the same prefix" {
 
 test "hasKey ignores a key mentioned only in prose" {
     try std.testing.expect(!hasKey("# see APP_KEY for details\n", "APP_KEY"));
+}
+
+test "insertionPoint finds a plugin's own block and ignores the next one" {
+    const src =
+        "APP_KEY=x\n\n" ++
+        "# ─── Auth ───\n" ++
+        "AUTH_TTL=60\n\n" ++
+        "# ─── Mail ───\n" ++
+        "MAIL_HOST=smtp\n";
+
+    // Just past `AUTH_TTL=60` — inside Auth, not swallowing the Mail block.
+    const at = insertionPoint(src, "Auth").?;
+    try std.testing.expectEqualStrings("APP_KEY=x\n\n# ─── Auth ───\nAUTH_TTL=60", src[0..at]);
+
+    try std.testing.expect(insertionPoint(src, "Storage") == null);
+}
+
+test "a key already in the file is never rewritten, set or commented" {
+    // Both forms count as present: rewriting a commented one would grow the
+    // file on every enable, and rewriting a set one would clobber a real secret.
+    try std.testing.expect(hasKey("DEMO_SECRET=live-value\n", "DEMO_SECRET"));
+    try std.testing.expect(hasKey("# DEMO_MODE=\n", "DEMO_MODE"));
+    try std.testing.expect(!hasKey("DEMO_MODE_X=1\n", "DEMO_MODE"));
 }
