@@ -192,7 +192,6 @@ trait InteractsWithGraphSeo
         $og = $this->openGraph($ogType, $title)
             ->url($url)
             ->locale($locale)
-            ->addProperty('og', 'image:alt',$alt) // fallback for OG image alt
             ->twitterLargeImage();
 
         if ($description !== '') {
@@ -202,7 +201,7 @@ trait InteractsWithGraphSeo
             $og->siteName($siteName);
         }
         if ($image !== null && $image !== '') {
-            $og->image($this->ogImage($image, 1200, 630, $title, $request));
+            $og->image($this->ogImage($image, 1200, 630, $alt ?? $title, $request));
         }
         if ($og instanceof Article) {
             if (($data['authorUrl'] ?? '') !== '') {
