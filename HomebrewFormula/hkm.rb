@@ -34,8 +34,8 @@
 class Hkm < Formula
   desc "CLI for the HKM kernel, a modular PHP service platform"
   homepage "https://github.com/AlfaCode-Team/hkm-kernel"
-  url "https://github.com/AlfaCode-Team/hkm-kernel/releases/download/v1.9.0/hkm-kernel-1.9.0-macos-universal.tar.gz"
-  sha256 "922c858200b8f3f3aa380f9a1195aee7af14092d1ff54f1d16587972ad8c9e05"
+  url "https://github.com/AlfaCode-Team/hkm-kernel/releases/download/v1.10.0/hkm-kernel-1.10.0-macos-universal.tar.gz"
+  sha256 "fd037093e25edcf29d6514668382b748b4db3106d1eb04c28edee451f615f8bc"
   license "MIT"
 
   livecheck do
