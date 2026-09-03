@@ -6,6 +6,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-09-04
+
+### Changed
+- **`EventBus::dispatch()` now returns the listener failures it isolated**
+  (`array<class-string, \Throwable>`, empty on full success). Isolation was
+  right — one broken subscriber must not stop the others — but callers had no
+  way to tell it apart from success, and one of them was a transactional
+  outbox. A mis-scoped listener threw, the bus swallowed it exactly as designed,
+  the outbox marked the row dispatched because `dispatch()` had returned
+  normally, and the row was consumed and never retried: a tenant membership was
+  lost permanently while the table recorded `status=1, attempts=1,
+  last_error=NULL`. Adding the value is backward compatible — every existing
+  `$bus->dispatch($e);` ignores it and behaves exactly as before — but anything
+  that RECORDS delivery should now check it and re-queue rather than consume.
+
+### Fixed
+- **A listener that could not be resolved was reported as a broken constructor.**
+  `resolveListener()` caught every container failure and fell back to
+  `new $listenerClass()`. For a listener with constructor arguments that threw
+  `ArgumentCountError`, so a `bindInternal()` binding — which the container had
+  already refused with a `ScopeViolationException` naming the scope, the class
+  and the fix — was logged as "Too few arguments to function
+  …::__construct()". Every reader then went to the listener's constructor,
+  which was correct, instead of to the binding, which was not; the same shape
+  had already been misdiagnosed twice before. `new` is now attempted only when
+  it can actually succeed (a constructor with no required parameters);
+  otherwise the container's own exception is rethrown untouched.
+
 ## [1.13.0] - 2026-09-03
 
 ### Fixed

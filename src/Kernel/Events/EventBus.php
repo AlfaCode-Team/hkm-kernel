@@ -80,15 +80,44 @@ final class EventBus
         $this->subscribers[$eventName][] = $listenerClass;
     }
 
-    /** Dispatch an integration event to all subscribers, each in isolation. */
-    public function dispatch(IntegrationEventContract $event): void
+    /**
+     * Dispatch an integration event to all subscribers, each in isolation.
+     *
+     * RETURNS THE FAILURES. Isolation is right — one broken listener must not
+     * stop the others — but isolation was being read as success, and a caller
+     * that cannot tell the difference will record one. That is precisely how a
+     * mis-scoped listener cost a real tenant membership: the listener threw, the
+     * bus swallowed it exactly as designed, and the transactional outbox then
+     * marked the row dispatched because dispatch() had returned normally. The
+     * row was consumed, never retried, and the seat was lost permanently — while
+     * `status=1, attempts=1, last_error=NULL` said the delivery went fine.
+     *
+     * A void return left the caller no way to know, so the fix belongs here.
+     * Adding the value is backward compatible: every existing
+     * `$bus->dispatch($e);` keeps working untouched and simply ignores it. An
+     * outbox, a relay, or anything else that records delivery SHOULD check it
+     * and re-queue rather than consume — see OutboxRelayService.
+     *
+     * Failures are still logged here, so a caller that ignores the return is no
+     * worse off than before. Note the logger is optional: with none bound there
+     * is no log line at all, which is the second reason the return value has to
+     * exist.
+     *
+     * @return array<class-string, \Throwable> listener class => its failure.
+     *         Empty when every subscriber handled the event.
+     */
+    public function dispatch(IntegrationEventContract $event): array
     {
+        $failures = [];
+
         foreach ($this->subscribers[$event->name()] ?? [] as $listenerClass) {
             try {
                 $listener = $this->resolveListener($listenerClass);
                 $listener->handle($event);
             } catch (\Throwable $e) {
                 // Isolate subscriber failures — never mask the original dispatch.
+                $failures[$listenerClass] = $e;
+
                 $this->logger?->error('EventBus listener failed', [
                     'listener' => $listenerClass,
                     'event'    => $event->name(),
@@ -97,6 +126,8 @@ final class EventBus
                 ]);
             }
         }
+
+        return $failures;
     }
 
     /**
@@ -116,7 +147,23 @@ final class EventBus
      * a dependency-free listener and a container that cannot resolve it —
      * so nothing that worked before stops working.
      *
+     * AND THE FALLBACK IS NOW CONDITIONAL, because unconditionally it destroyed
+     * the evidence. A listener bound with bindInternal() is unresolvable from
+     * outside its module scope, so the container threw ScopeViolationException —
+     * naming the real fault exactly. That was caught here, discarded, and
+     * replaced with `new`, which threw ArgumentCountError; dispatch() logged
+     * "Too few arguments to function …::__construct()". Every reader then went
+     * looking at the listener's constructor, which was fine, instead of at the
+     * binding, which was not. The third time this shape cost a production seat
+     * was enough.
+     *
+     * So `new` is attempted ONLY when it can actually work — a constructor with
+     * no required parameters. Otherwise the container's own exception is
+     * rethrown untouched, and the log finally names the cause.
+     *
      * @param class-string $listenerClass
+     *
+     * @throws \Throwable the container's failure, when `new` cannot substitute
      */
     private function resolveListener(string $listenerClass): object
     {
@@ -126,10 +173,42 @@ final class EventBus
             if (is_object($listener)) {
                 return $listener;
             }
-        } catch (\Throwable) {
-            // Not bound and not autowirable here — fall through.
+
+            // Bound to a non-object. `new` below is still worth a try, but there
+            // is no container exception to rethrow, so synthesise the cause.
+            $containerFailure = new \RuntimeException(sprintf(
+                'Container resolved [%s] to a %s, not a listener object.',
+                $listenerClass,
+                get_debug_type($listener),
+            ));
+        } catch (\Throwable $e) {
+            $containerFailure = $e;
+        }
+
+        if ($this->needsConstructorArguments($listenerClass)) {
+            throw $containerFailure;
         }
 
         return new $listenerClass();
+    }
+
+    /**
+     * Would `new $listenerClass()` fail for want of arguments?
+     *
+     * A missing or unreadable class is reported as "no arguments needed" so the
+     * `new` below still runs and throws the honest Error about the class itself
+     * — reflection's complaint would only add a layer.
+     *
+     * @param class-string $listenerClass
+     */
+    private function needsConstructorArguments(string $listenerClass): bool
+    {
+        try {
+            $constructor = (new \ReflectionClass($listenerClass))->getConstructor();
+        } catch (\ReflectionException) {
+            return false;
+        }
+
+        return $constructor !== null && $constructor->getNumberOfRequiredParameters() > 0;
     }
 }
