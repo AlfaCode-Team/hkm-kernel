@@ -157,6 +157,7 @@ trait InteractsWithGraphSeo
         ?string $searchUrl = null,
         string $locale = 'en_US',
         bool $index = true,
+        ?string $alt = null,
         ?Request $request = null,
     ): string {
         $siteName ??= (string) (env('APP_NAME') ?: '');
@@ -200,7 +201,7 @@ trait InteractsWithGraphSeo
             $og->siteName($siteName);
         }
         if ($image !== null && $image !== '') {
-            $og->image($this->ogImage($image, 1200, 630, $title, $request));
+            $og->image($this->ogImage($image, 1200, 630, $alt ?? $title, $request));
         }
         if ($og instanceof Article) {
             if (($data['authorUrl'] ?? '') !== '') {

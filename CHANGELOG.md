@@ -6,6 +6,188 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-09-04
+
+### Changed
+- **`EventBus::dispatch()` now returns the listener failures it isolated**
+  (`array<class-string, \Throwable>`, empty on full success). Isolation was
+  right — one broken subscriber must not stop the others — but callers had no
+  way to tell it apart from success, and one of them was a transactional
+  outbox. A mis-scoped listener threw, the bus swallowed it exactly as designed,
+  the outbox marked the row dispatched because `dispatch()` had returned
+  normally, and the row was consumed and never retried: a tenant membership was
+  lost permanently while the table recorded `status=1, attempts=1,
+  last_error=NULL`. Adding the value is backward compatible — every existing
+  `$bus->dispatch($e);` ignores it and behaves exactly as before — but anything
+  that RECORDS delivery should now check it and re-queue rather than consume.
+
+### Fixed
+- **A listener that could not be resolved was reported as a broken constructor.**
+  `resolveListener()` caught every container failure and fell back to
+  `new $listenerClass()`. For a listener with constructor arguments that threw
+  `ArgumentCountError`, so a `bindInternal()` binding — which the container had
+  already refused with a `ScopeViolationException` naming the scope, the class
+  and the fix — was logged as "Too few arguments to function
+  …::__construct()". Every reader then went to the listener's constructor,
+  which was correct, instead of to the binding, which was not; the same shape
+  had already been misdiagnosed twice before. `new` is now attempted only when
+  it can actually succeed (a constructor with no required parameters);
+  otherwise the container's own exception is rethrown untouched.
+
+## [1.13.0] - 2026-09-03
+
+### Fixed
+- **`hkm install --owner=` left every plugin file owned by the deploying user.**
+  A project's plugins are not in the project: `hkm plugins install` keeps one
+  copy per (plugin, version, origin) in the global store and links the project
+  at it, so `plugins/Logger` is a symlink out of the tree. Both halves of the
+  hardening pass stopped at that boundary by design — `hardenTree` skips
+  symlinks because a chmod would follow one and rewrite a target outside the
+  project, and the chown only walked the project root. The result was a project
+  that verified clean and could not serve: every file the pool has to read
+  first, every Provider and every controller a route resolves to, still belonged
+  to whoever ran the command, under a report that said `Project owned by
+  deploy:www-data`. `--owner` now also chowns the store versions the project
+  links to, plus the directories between them and the store root so the trees it
+  just chowned can be reached. Only the versions THIS project links to: the store
+  is shared by every project on the machine, and claiming all of it for one
+  project's web account is not that command's call.
+- **`--production` reported a reachable project while the plugins were
+  unreachable.** The traversal check walked the parents of the project root only.
+  Since the store moved out of the project it defaults to `$HOME/.cache`, which a
+  deploy under sudo resolves to `/root/.cache` — 0700 on every mainstream distro
+  — so the chown succeeded on every entry and the site still could not read one
+  of them. The check now covers the store's own parents, with its own remedy:
+  relocate the store (`hkm plugins store --set=`, or `HKM_PLUGIN_STORE`) rather
+  than widen a home directory to reach a cache.
+- **A plugin that gained an env var never got it.** `hkm plugins enable` returns
+  early when the plugin and its dependencies are already wired, so a plugin
+  declaring a new `config[]` entry in a later version left an `.env` block that
+  was now incomplete — and the boot failed on the missing key with nothing
+  pointing at the cause. Enabling an already-enabled plugin now tops up its
+  block. Safe by construction: the seeder only ever ADDS keys the file does not
+  already mention, in any form, so a real secret is never rewritten.
+- **`.env.example` documented the Tenancy control-plane switch as a hostname.**
+  `TENANCY_CONTROL_PLANE=admin.example.com` reads as "the control plane lives
+  here"; the plugin declares the key as `type: bool`, where any non-empty string
+  is truthy — so the example value silently turned tenant routing OFF for anyone
+  who uncommented it. Corrected to a bool, with `TENANCY_CENTRAL_DOMAINS` (a
+  real declared key that was missing) added beside it and the mode values named.
+  The plugin's own `module.json` stays the authority; this is the example
+  catching up to it.
+- **Re-seeding wrote a second block for the same plugin.** The append was
+  unconditional, so a plugin seeded twice got two `# ─── Auth ───` headings, and
+  three after that. Every key was still present exactly once, so nothing broke —
+  the grouping the block exists to provide just quietly stopped being true. New
+  keys are now merged into the block the plugin already owns, keeping the blank
+  line that separates it from the next one.
+
+### Added
+- **`hkm env` — audit and tidy a project's `.env`.** A dotenv file accumulates:
+  a plugin seeds its block on enable, someone appends a key at the bottom to try
+  something, a second plugin declares a variable the first one already did. None
+  of that is an error anywhere. The loader resolves a repeated key silently, the
+  boot succeeds, and the value in effect is whichever line happens to be last —
+  a file that works and does not say what it is doing.
+  - `hkm env` reports duplicates with every occurrence's line number and marks
+    which one is live. That marker is the point: `LoadEnvironment::setVar`
+    overwrites on each call and the cascade reads a file top to bottom, so the
+    LAST active assignment wins — the opposite of what most people assume when
+    they append a key to the bottom of a .env.
+  - `hkm env dedupe` asks per key rather than choosing. The right survivor is
+    not derivable: `DB_HOST=localhost` on line 12 and `DB_HOST=10.0.0.4` on line
+    88 are both plausible, and the one in effect is as likely to be the accident
+    as the intent. `--keep=effective` is the scriptable form that cannot change
+    behaviour; `--keep=first` / `--keep=last` are positional.
+  - `hkm env group` reorders the file into blocks: a key a plugin declares in its
+    `module.json` `config[]` goes under that plugin, otherwise under the feature
+    its prefix names, otherwise `Ungrouped`. Comments attached to a key move with
+    it, comments attached to nothing are rescued into a `Notes` block rather than
+    dropped, and the pass refuses to write unless every key AND every
+    informational comment that went in comes out again.
+  - Every write leaves the previous file beside it as `.env.bak`, at 0600.
+- **A project is found from anywhere inside it.** `resolveRoot` checked the exact
+  working directory, so `hkm env` in `<project>/app` answered "'.' is neither a
+  project folder (with proj.json) nor a registered name" about a project one
+  directory up. It now walks up to the filesystem root, the way git, composer and
+  npm all find theirs — for every command that takes a `[path|name]`, not just
+  `env`. An EXPLICIT path stays exact: the same resolver backs
+  `hkm install --owner`, and a command that chowns a tree must never quietly
+  retarget itself above where it was pointed.
+
+## [1.12.1] - 2026-09-02
+
+### Fixed
+- **A plugin fetch asked for a GitHub account, for a repo that is public.**
+  `FileManager` was the one hyphenated plugin missing from the slug override
+  table, so it resolved to `hkm-plugin-filemanager` — a repository that does not
+  exist. GitHub answers **404 for "does not exist" and "not yours" alike**; it
+  will not confirm a private repo to an anonymous request. Git cannot tell those
+  apart, assumed the second, and stopped to ask for a username and password that
+  no account could have satisfied. Added the override, plus tests pinning every
+  multi-word folder to its real hyphenated slug (and round-tripping back to the
+  PSR-4 folder name) so the next repo added with a hyphen cannot drift the same
+  way.
+- **Git could block a deploy on a credential prompt.** The plugin fetch inherited
+  the terminal, so an unreachable remote hung `hkm install` on a password box
+  until somebody killed it — on a deploy box or in CI, indefinitely. Every git
+  invocation now runs with `GIT_TERMINAL_PROMPT=0` and SSH `BatchMode=yes`: a bad
+  remote fails immediately and the call site names the plugin and URL, which is
+  the information actually needed. `HKM_GIT_INTERACTIVE=1` restores the prompt
+  for a genuinely private remote you intend to authenticate against by hand.
+
+## [1.12.0] - 2026-09-02
+
+### Fixed
+- **A project installed with `--production --owner=` still could not be served
+  by PHP-FPM.** The pass only ever touched `var/` and `userdata/`, so every
+  directory a request actually reads — `app/public_html`, `src/`, `vendor/`,
+  `plugins/` — kept the deploying user's ownership and whatever mode the clone
+  arrived with. The pool could write logs it was never going to reach the code
+  to produce. Three separate reasons a boot failed, each fixed:
+  - the pass now covers the WHOLE project tree, and runs LAST — after
+    `composer install` and the plugin fetch, both of which create `vendor/` and
+    `plugins/` as whoever ran the command. Running at step 3, as it did, meant
+    the two largest directories in the project were created *after* the
+    permissions were "fixed".
+  - `.env` was chmod'd `0600`. PHP-FPM running as another account cannot read
+    `APP_KEY` through that, and the boot fails on a file whose mode bits look
+    deliberate. It is now `0640` — group-readable, never group-writable, never
+    world-anything.
+  - nothing reported that the pool could not TRAVERSE to the project. Reaching
+    `app/public_html/index.php` needs execute on every parent directory, and a
+    home directory is `0700` on a stock Debian install — unfixable from inside
+    the project, so the offending parents are now named (reported only, never
+    changed).
+
+- **The installed kernel was left at whatever the installing account's umask
+  produced** (`tools/install.sh`). `/opt/hkm-kernel` is shared infrastructure —
+  every PHP-FPM pool on the box loads its PHP out of that one tree, and none of
+  those pools runs as the account that installed it. With `umask 027` or `077`
+  the whole tree landed 0750/0700 and every site died with "Permission denied"
+  on a kernel file, while the install reported success because the installer
+  could obviously read what it had just written. The installer now normalises
+  the tree it lays down: directories traversable, files readable, and anything
+  that WAS executable still executable.
+
+### Changed
+- `hkm install --production` / `--owner=` now apply a split-ownership model:
+  code owned by the deploy user and only READABLE through the web server's
+  group (`2750`/`0640`), `var/` and `userdata/` group-writable (`2770`/`0660`).
+  EVERY directory carries setgid, code included: the group is the only thing
+  granting the pool access, so a file created later — a log written at 3am, a
+  file a `git pull` lands — would otherwise take the creating account's primary
+  group and drop out of the share, and each deploy would silently un-share
+  whatever it touched.
+  Code is never group-writable in either profile — an FPM pool that can rewrite
+  the PHP it executes turns any file-write bug into code execution. An
+  already-executable file keeps its exec bit (re-granted only where the profile
+  grants read, so `bin/psp` and `vendor/bin/*` survive at `0750`, not `0751`),
+  and `.git` is skipped by both the chown and the chmod.
+- The pass re-stats what it changed and reports any mode the filesystem
+  refused, instead of reporting success for a chmod the kernel rejected.
+
+
 ## [1.11.0] - 2026-09-02
 
 ### Fixed

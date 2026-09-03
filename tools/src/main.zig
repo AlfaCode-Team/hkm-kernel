@@ -5,6 +5,7 @@ const update_cmd = @import("commands/update.zig");
 const run_cmd = @import("commands/run.zig");
 const list_cmd = @import("commands/list.zig");
 const discover_cmd = @import("commands/discover.zig");
+const env_cmd = @import("commands/env.zig");
 const plugins_cmd = @import("commands/plugins.zig");
 const module_cmd = @import("commands/module.zig");
 const ui_cmd = @import("commands/ui.zig");
@@ -32,6 +33,7 @@ fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
     prompt.item("hkm list", "list registered projects (alias: ls)");
     prompt.item("hkm discover [root]", "find projects on disk and register them (alias: scan)");
     prompt.item("hkm plugins [path|name]", "analyse a project's enabled plugins/modules");
+    prompt.item("hkm env [audit|dedupe|group]", "audit a project's .env: duplicate keys, grouping");
     prompt.item("hkm module [create|delete]", "scaffold a first-party kernel package (modules/)");
     prompt.item("hkm ui [sync|list|link|clean]", "federate enabled plugins' UIs into the frontend");
     prompt.item("hkm update <path|name>", "refresh a project's kernel registry entry");
@@ -384,6 +386,11 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         var scope = CmdScope.begin(mm, "discover");
         defer scope.end();
         return try discover_cmd.run(scope.allocator(), io, &env_map, args);
+    }
+    if (std.mem.eql(u8, cmd, "env")) {
+        var scope = CmdScope.begin(mm, "env");
+        defer scope.end();
+        return try env_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "module")) {
         var scope = CmdScope.begin(mm, "module");
