@@ -6,6 +6,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-09-05
+
+### Added
+- **`hkm service` — run a project's queue worker as a supervised service.**
+  `hkm worker --queue=mails` is a foreground process: it dies with the terminal,
+  it does not come back after a crash or a reboot, and nothing collects its
+  output. Every deployment therefore hand-wrote the same unit file. The command
+  generates it for whichever supervisor the host runs — systemd or launchd, with
+  `--platform` to override so a Mac can produce the Linux unit it will deploy —
+  in four verbs: preview (the default, which writes nothing), `write`,
+  `install [--start]` and `remove`. Scope is `--system` or `--user`, defaulting
+  to system on Linux and to a user agent on macOS, where a LaunchDaemon running
+  as root is the wrong answer on a developer machine. `--dry-run` (`-n`) reports
+  every write and every command for the three mutating verbs and performs none
+  of them.
+
+  Three things the generated unit gets right that a hand-written one usually
+  does not:
+
+  - **`ExecStart` runs the LAUNCHER** — `hkm worker -p <root>`, not `php` plus an
+    absolute `vendor/autoload.php`. The launcher self-locates the kernel, so a
+    kernel upgrade that moves a version-stamped install directory cannot
+    silently break the queue. `--exec=php` emits the direct form for a server
+    with no launcher installed, and states the pinned autoload's cost in the
+    unit itself.
+  - **`TimeoutStopSec` / `ExitTimeOut` is 90s.** The worker traps SIGTERM and
+    finishes the job in flight before exiting — that is what makes a redeploy
+    safe — and launchd's 20s default SIGKILLs it mid-transaction instead.
+  - **`PATH` and `HKM_PHP_BIN` are pinned.** A service inherits none of a login
+    shell's PATH, and `/opt/homebrew/bin` is on neither manager's default. The
+    entire diagnostic without the pin is `error: FileNotFound`, with nothing
+    anywhere naming php. Found by running the generated unit, not by reading it.
+
+  Values reaching the unit are validated rather than interpolated: a queue name
+  may hold only `[A-Za-z0-9._:-]`, so nothing can append an argument or a
+  directive; `ExecStart` tokens containing whitespace are quoted; plist strings
+  are XML-escaped.
+
+### Fixed
+- **The worker entry point ignored every command-line flag.** `hkm worker` and
+  `hkm run --worker` forward their arguments verbatim to `app/worker/run.php`,
+  which read only `WORKER_QUEUE` from the environment — so
+  `hkm worker --queue=mails` was accepted in silence and drained `default`
+  instead. That is the failure mode with no signal at all: no error, no warning,
+  a running worker, and the wrong queue. The entry point (and the scaffolding
+  template new projects get) now parses `-q/--queue`, `-n/--max-iterations`,
+  `--memory` and `-h/--help`, each overriding the matching environment variable,
+  and **rejects an argument it does not recognise** rather than ignoring it. The
+  environment fallbacks moved from `getenv()` to `env()` at the same time: the
+  loader injects `.env` into `$_ENV` and deliberately skips `putenv()`, so
+  `getenv('WORKER_QUEUE')` could not see a value set in the project's `.env`.
+
 ## [1.13.1] - 2026-09-04
 
 ### Changed
