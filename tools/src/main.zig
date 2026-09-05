@@ -10,6 +10,7 @@ const plugins_cmd = @import("commands/plugins.zig");
 const module_cmd = @import("commands/module.zig");
 const ui_cmd = @import("commands/ui.zig");
 const cli_cmd = @import("commands/cli.zig");
+const service_cmd = @import("commands/service.zig");
 const doctor_cmd = @import("commands/doctor.zig");
 const upgrade_cmd = @import("commands/upgrade.zig");
 const uninstall_cmd = @import("commands/uninstall.zig");
@@ -30,6 +31,7 @@ fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
     prompt.item("hkm run [path|name]", "run a project locally (PHP dev server)");
     prompt.item("hkm cli [command]", "run a project's console interactively");
     prompt.item("hkm worker [args]", "run a project's queue worker");
+    prompt.item("hkm service [verb]", "run that worker as a systemd/launchd service");
     prompt.item("hkm list", "list registered projects (alias: ls)");
     prompt.item("hkm discover [root]", "find projects on disk and register them (alias: scan)");
     prompt.item("hkm plugins [path|name]", "analyse a project's enabled plugins/modules");
@@ -416,6 +418,11 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         var scope = CmdScope.begin(mm, "worker");
         defer scope.end();
         return try cli_cmd.run(scope.allocator(), io, &env_map, args, true);
+    }
+    if (std.mem.eql(u8, cmd, "service")) {
+        var scope = CmdScope.begin(mm, "service");
+        defer scope.end();
+        return try service_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "doctor")) {
         var scope = CmdScope.begin(mm, "doctor");
