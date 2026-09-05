@@ -24,6 +24,7 @@ hkm install [path|name]      register a project, restore var/userdata/plugins af
 hkm run [path|name]          run a project locally (PHP dev server / Swoole)
 hkm cli [command]            run a project's console interactively
 hkm worker [args]            run a project's queue worker
+hkm service [verb]           run that worker as a systemd/launchd service
 hkm list                     list registered projects        (alias: ls)
 hkm update <path|name>       refresh a project's registry entry
 hkm plugins [subcommand]     analyse / manage plugins         (alias: modules)
@@ -243,7 +244,127 @@ hkm cli route:list --json       # machine-readable output
 hkm cli -p shop migrate:run     # target a registered project by name
 hkm worker
 hkm worker -p shop --queue=emails
+hkm worker --queue=emails --max-iterations=100 --memory=256
 ```
+
+The worker entry point parses its own flags — `-q/--queue`, `-n/--max-iterations`,
+`--memory`, `-h/--help` — and each one overrides the matching environment
+variable (`WORKER_QUEUE`, `WORKER_MAX_ITERATIONS`, `WORKER_MEMORY_LIMIT_MB`). An
+argument it does not recognise is an error, not something it ignores.
+
+---
+
+## hkm service — supervise the worker
+
+`hkm worker` is a foreground process: it dies with the terminal, it does not come
+back after a crash or a reboot, and nothing collects its output. `hkm service`
+generates the unit that fixes all three, for whichever supervisor the host runs.
+
+```
+hkm service [path|name]      show the unit that would be generated (writes nothing)
+hkm service write            write it to <project>/var/service/
+hkm service install          place it in the system and reload the manager
+hkm service remove           stop, disable and delete the installed unit
+
+-q, --queue=NAME             queue to drain (default: WORKER_QUEUE from .env, else 'default')
+    --name=UNIT              unit name (default: hkm-worker-<project>[-<queue>])
+    --run-as=USER[:GROUP]    systemd User=/Group= (system scope; default: the invoking user)
+    --max=N                  pass --max-iterations=N to the worker
+    --memory=MB              pass --memory=MB to the worker
+    --system | --user        install scope (default: system on Linux, user on macOS)
+    --platform=systemd|launchd   override host detection
+    --hkm-bin=PATH           launcher the unit executes (default: hkm on PATH)
+    --php-bin=PATH           php the unit pins (default: php on PATH)
+    --exec=hkm|php           ExecStart runs the launcher (default) or php directly
+    --out=DIR                write: put the file here instead of var/service/
+    --start                  install: enable and start it immediately
+    --force                  overwrite an existing unit file
+-y, --yes                    do not ask before writing to a system location
+-n, --dry-run                report every write and command, perform none of them
+```
+
+```bash
+hkm service --queue=mails                      # preview, change nothing
+hkm service install --queue=mails --start -n   # what install would do, done to nothing
+hkm service install --queue=mails --start      # install and run it now
+hkm service install shop --queue=mails --run-as=deploy:www-data
+hkm service write --platform=systemd --out=./deploy   # a Linux unit, from a Mac
+hkm service remove --queue=mails
+```
+
+`--dry-run` (`-n`) applies to `write`, `install` and `remove`: each reports every
+file it would write and every command it would run, and does none of it.
+
+```
+$ hkm service install --platform=systemd --queue=mails -n
+would write  /srv/shop/var/service/hkm-worker-shop-mails.service  (1104 bytes)
+would run    sudo mkdir -p /etc/systemd/system
+would run    sudo cp -f /srv/shop/var/service/… /etc/systemd/system/…
+would run    sudo chmod 644 /etc/systemd/system/hkm-worker-shop-mails.service
+would run    sudo systemctl daemon-reload
+```
+
+It still refuses over an existing unit without `--force`, because that is what
+the real run would do. The one filesystem touch it makes is a create-and-delete
+write probe in the destination directory — that is how it knows whether to tell
+you `sudo`, and on a directory needing root the probe writes nothing at all.
+
+| | systemd | launchd |
+|---|---|---|
+| `--system` | `/etc/systemd/system/<name>.service` | `/Library/LaunchDaemons/<label>.plist` |
+| `--user` | `~/.config/systemd/user/<name>.service` | `~/Library/LaunchAgents/<label>.plist` |
+| default scope | system | user |
+| logs | journal (`journalctl -u <name> -f`) | `<project>/var/log/<name>.{out,err}.log` |
+
+Three things the generated unit gets right that a hand-written one usually does
+not:
+
+- **`ExecStart` runs the launcher**, `hkm worker -p <root>`, not `php` plus an
+  absolute `vendor/autoload.php`. The launcher self-locates the kernel, so a
+  kernel upgrade that moves a version-stamped install directory cannot silently
+  break the queue.
+- **`TimeoutStopSec` / `ExitTimeOut` is 90s.** The worker traps SIGTERM and
+  finishes the job in flight before exiting — that is what makes a redeploy
+  safe — and a shorter timeout SIGKILLs it mid-transaction instead.
+- **`PATH` and `HKM_PHP_BIN` are pinned.** A service does not inherit a login
+  shell's PATH, and `/opt/homebrew/bin` is on neither systemd's nor launchd's
+  default. Without the pin the worker dies with `error: FileNotFound` and
+  nothing in the log names php.
+
+Nothing outside the project is touched unless the verb is `install` or `remove`;
+`install` always leaves a copy of the unit in `<project>/var/service/` so what
+was installed stays reviewable. A systemd `--user` unit stops when you log out —
+`loginctl enable-linger $USER` keeps it running.
+
+Run one unit per queue: repeat the command with a different `--queue`, or pass
+`--name` to run two units on the same one.
+
+### `--exec=php` — when the server has no launcher
+
+`--exec=hkm` (the default) is right whenever `hkm` is installed on the machine
+that runs the worker. When it is not — a deploy artefact, a container, a server
+where the kernel arrives only through composer — `--exec=php` puts php and the
+entry point in `ExecStart` instead:
+
+```bash
+hkm service write --platform=systemd --exec=php \
+  --name=hkmstd-worker --queue=mail \
+  --run-as=www-data:www-data --php-bin=/usr/bin/php
+```
+
+```ini
+ExecStart=/usr/bin/php /srv/hkmstd/app/worker/run.php --queue=mail
+Environment=HKM_GLOBAL_AUTOLOAD=/opt/hkm-kernel/vendor/autoload.php
+```
+
+The trade is stated in the unit itself: nothing in that command line can locate
+the kernel, so the autoload is pinned, and an upgrade that moves the kernel
+directory breaks the unit until `hkm service` is re-run. That is the whole reason
+the launcher is the default. Two smaller points the generated form also fixes:
+the script path is **absolute** (`app/worker/run.php` only resolves because
+`WorkingDirectory` happens to be set, and the two lines then depend on each other
+silently), and the queue is a command-line flag rather than
+`Environment=WORKER_QUEUE=…`, so `ps` shows which queue a given process is on.
 
 ---
 

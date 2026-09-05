@@ -223,6 +223,7 @@ tools/
     ├── commands/          # one file per subcommand — each exposes `run(...)`
     │   ├── new.zig        #   hkm new     — scaffold a project
     │   ├── run.zig        #   hkm run     — serve / swoole / cli / worker (+ --pick)
+    │   ├── service.zig    #   hkm service — worker as a systemd / launchd unit
     │   ├── list.zig       #   hkm list    — list registered projects
     │   └── update.zig     #   hkm update  — refresh a registry entry
     ├── lib/               # shared modules used by the commands
