@@ -102,6 +102,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default and re-raises, and registers once per process across dev-server
   restarts.
 
+### Security
+- **`composer/composer` 2.10.2 → 2.10.3** in the kernel's development
+  dependencies, for CVE-2026-84361 — arbitrary command execution through a
+  malicious package's Perforce source URL. It was never in a release bundle,
+  which installs without development dependencies, but `composer audit` failed
+  every build until it moved.
+
 ### Removed
 - `templates/app/apache.conf.example` and `templates/app/nginx.conf.example`,
   and `hkm new` no longer writes them into a new project. The nginx or Apache
