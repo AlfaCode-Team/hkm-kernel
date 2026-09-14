@@ -117,10 +117,23 @@ final class SeoHead
         return $this->hreflang('x-default', $url);
     }
 
-    /** Attach a prebuilt Open Graph / Twitter document. */
+    /**
+     * Attach a prebuilt Open Graph / Twitter document.
+     *
+     * SiteSEO's Type renders a "Primary Meta Tags" block — <title>, meta title
+     * and meta description — ahead of its og:/twitter: tags, for callers that
+     * use it on its own. This class writes its own title and description, so
+     * embedding that string whole put two <title> elements and two descriptions
+     * in every head, and left the search engine to pick one. Only the og: and
+     * twitter: tags are kept.
+     */
     public function openGraph(Type $type): self
     {
-        $this->ogTags = (string) $type;
+        $this->ogTags = trim((string) preg_replace(
+            '~^[ \t]*(?:<!-- Primary Meta Tags -->|<title>[^<]*</title>|<meta name="(?:title|description)"[^>]*>)[ \t]*\R?~mu',
+            '',
+            (string) $type,
+        ));
 
         return $this;
     }

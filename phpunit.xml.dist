@@ -13,6 +13,16 @@
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
+        <!--
+            Feature: boots a real kernel and pushes a real Request through the
+            real HttpPipeline. Catches the class of defect a unit test cannot —
+            a controller signature the stage no longer matches, a route that
+            resolves to nothing, a binding that is not reachable from the scope
+            that needs it.
+        -->
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
     </testsuites>
 
     <source>

@@ -35,6 +35,16 @@ export interface HkmPluginOptions {
 
 const PLACEHOLDER = "__hkm_vite_placeholder__";
 
+// The hot-file exit hooks below are PROCESS-level, so they must be registered
+// exactly once per process: `configureServer` runs again on every dev-server
+// restart (the `r` shortcut, a config edit), and Vite re-imports this module
+// when it does. The guard therefore lives on globalThis, where a fresh import
+// can still see it — a module-level Set would reset on re-import and leak one
+// more listener set per restart.
+const hookedHotFiles: Set<string> = ((globalThis as typeof globalThis & {
+  __hkmHookedHotFiles?: Set<string>;
+}).__hkmHookedHotFiles ??= new Set<string>());
+
 export function hkmPlugin(frontendRoot: string, surface: Surface, options: HkmPluginOptions = {}): Plugin {
   const project = resolve(frontendRoot, "..");
   const publicDir = resolve(project, "app", "public");
@@ -117,10 +127,40 @@ export function hkmPlugin(frontendRoot: string, surface: Surface, options: HkmPl
       server.watcher.on("change", reload);
       server.watcher.on("unlink", reload);
 
-      const clean = () => fs.existsSync(hotFile) && fs.rmSync(hotFile);
-      process.once("exit", clean);
-      process.once("SIGINT", clean);
-      process.once("SIGTERM", clean);
+      // Removing the hot file is how PHP learns the dev server is gone, so it
+      // has to happen on EVERY way out — Ctrl+C included.
+      //
+      // Vite owns SIGTERM: its handler closes the server and calls process.exit,
+      // which fires "exit", so the hook below already covers that path. It
+      // installs NOTHING for SIGINT or SIGHUP — those rely on Node's DEFAULT
+      // terminate, and Node REMOVES that default the instant any listener is
+      // installed. A handler that cleans up and returns therefore turns Ctrl+C
+      // into a silent no-op: yarn exits, the shell takes the terminal back, and
+      // this now-orphaned process still holds Vite's readline on stdin. Reading
+      // a terminal it no longer owns fails with EIO, which readline re-emits as
+      // an unhandled "error" — the `Error: read EIO` stack that lands on top of
+      // the next command you type, from a dev server that has also been sitting
+      // on the port ever since.
+      //
+      // So clean up, then put the default back and re-raise: the process dies
+      // exactly as it would without this plugin, and the shell still sees the
+      // 130 that a Ctrl+C is supposed to produce.
+      const clean = () => fs.rmSync(hotFile, { force: true });
+
+      if (!hookedHotFiles.has(hotFile)) {
+        hookedHotFiles.add(hotFile);
+        process.once("exit", clean);
+
+        for (const signal of ["SIGINT", "SIGHUP"] as const) {
+          const onSignal = () => {
+            clean();
+            process.stdin.pause(); // nothing may read the TTY on the way down
+            process.removeListener(signal, onSignal);
+            process.kill(process.pid, signal);
+          };
+          process.on(signal, onSignal);
+        }
+      }
     },
 
     transformIndexHtml(html) {

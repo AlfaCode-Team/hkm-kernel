@@ -58,8 +58,6 @@ const templates = [_]Template{
     .{ .dest = "app/bootstrap/app.php", .src = "app/bootstrap/app.php" },
     .{ .dest = "app/public/index.php", .src = "app/public/index.php" },
     .{ .dest = "app/public/.htaccess", .src = "app/public/.htaccess" },
-    .{ .dest = "app/nginx.conf.example", .src = "app/nginx.conf.example" },
-    .{ .dest = "app/apache.conf.example", .src = "app/apache.conf.example" },
     .{ .dest = "app/swoole/index.php", .src = "app/swoole/index.php" },
     .{ .dest = "app/cli/run.php", .src = "app/cli/run.php" },
     .{ .dest = "app/worker/run.php", .src = "app/worker/run.php" },

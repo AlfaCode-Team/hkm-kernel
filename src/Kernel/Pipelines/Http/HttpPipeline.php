@@ -9,9 +9,10 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Http\{Request, Response};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Loading\{DependencyGraphCalculator, OnDemandLoader};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Contracts\HttpStageContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Stages\{
-    CorrelationIdStage, SecurityStage, ResolveStage,
+    CorrelationIdStage, ObservabilityStage, SecurityStage, ResolveStage,
     LoadStage, RouteFilterStage, ExecuteStage, ErrorStage
 };
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\{MetricsPort, NullMetrics, NullTracer, TracerPort};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteIndex;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\SecurityGateway;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
@@ -20,15 +21,17 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
  * HttpPipeline — assembles and runs the complete HTTP request lifecycle.
  *
  * Fixed stages (in order):
- *   1. CorrelationIdStage      — generate/propagate X-Correlation-ID
- *   2. SecurityStage           — run SecurityGateway (pre-bootstrap)
+ *   1. CorrelationIdStage      — generate/propagate X-Correlation-ID (outermost:
+ *                                 an error response must carry the id too)
+ *   2. ErrorStage              — catch all Throwables → ErrorPipeline
+ *   3. ObservabilityStage      — RED metrics + root span (no-op unless a port is bound)
+ *   4. SecurityStage           — run SecurityGateway (pre-bootstrap)
  *      ↳ after.security hooks  — module-registered stages
  *   3. ResolveStage            — match route → service via RouteMatcher
  *   4. LoadStage               — dep graph → OnDemandLoader
  *      ↳ after.load hooks      — module-registered stages
  *   5. ExecuteStage            — resolve controller → run → Response
  *      ↳ after.execute hooks   — module-registered stages
- *   6. ErrorStage (wraps all)  — catch all Throwables → ErrorPipeline
  *
  * Hooks are registered ONCE during module boot() (at kernel build), so the
  * stage list is stable and is compiled exactly once on the first request, then
@@ -124,8 +127,33 @@ final class HttpPipeline
         }
 
         return [
-            new ErrorStage($this->errorPipeline), // outermost wrapper
+            // CORRELATION FIRST, ERROR SECOND — and the order is load-bearing.
+            //
+            // ErrorStage used to be outermost, which meant the request it holds
+            // when it catches a Throwable was the one from BEFORE
+            // CorrelationIdStage decorated it. Two things followed, and both were
+            // silent: every error envelope's "requestId" was '', and every
+            // ErrorContext handed to the notifiers carried an empty correlation
+            // id — so the id existed on every response EXCEPT the ones anyone
+            // would ever need it for. Worse, an exception propagating out of
+            // $next skipped CorrelationIdStage's own ->withHeader() on the way
+            // past, so error responses had no X-Correlation-ID header either.
+            //
+            // Inverting them fixes all three at once: the id is attached before
+            // ErrorStage can catch anything, and the error response travels back
+            // out THROUGH CorrelationIdStage, which stamps the header on it.
+            //
+            // What this gives up is ErrorStage catching a Throwable from
+            // CorrelationIdStage itself. That is four lines whose only fallible
+            // call is random_bytes(); if entropy is unavailable the process has
+            // larger problems than its error formatting.
             new CorrelationIdStage(),
+            new ErrorStage($this->errorPipeline),
+            // Inside the correlation id (so the span can carry it) and outside
+            // everything else, so a denied or unmatched request is still counted.
+            // Both ports fall back to shared no-ops, so an application that binds
+            // neither pays one hrtime() pair per request.
+            new ObservabilityStage($this->metrics(), $this->tracer()),
             new SecurityStage($this->gateway),
             ...$this->resolveHook('after.security'),
             new ResolveStage($this->matcher, self::flag('ROUTE_METHOD_NOT_ALLOWED', false)),
@@ -267,4 +295,25 @@ final class HttpPipeline
         };
     }
 
+    /**
+     * The bound metrics adapter, or the shared no-op.
+     *
+     * Resolved once at pipeline build rather than per request: the core container
+     * is frozen by then, so the answer cannot change, and `has()` on every request
+     * would be a container lookup bought for nothing.
+     */
+    private function metrics(): MetricsPort
+    {
+        return $this->core->has(MetricsPort::class)
+            ? $this->core->make(MetricsPort::class)
+            : NullMetrics::instance();
+    }
+
+    /** The bound tracer, or the shared no-op. See {@see metrics()}. */
+    private function tracer(): TracerPort
+    {
+        return $this->core->has(TracerPort::class)
+            ? $this->core->make(TracerPort::class)
+            : NullTracer::instance();
+    }
 }

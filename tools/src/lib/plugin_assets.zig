@@ -25,6 +25,75 @@ pub const subtrees = [_][]const u8{
     "resources",
 };
 
+/// Written BESIDE a project file that `enable`/`update` will not overwrite,
+/// holding the plugin's version of it. No compiler stage globs it — config,
+/// migration and view discovery all match `.php` — so it stays inert until it is
+/// merged by hand. It is deleted once the project file matches the plugin again.
+pub const plugin_new_suffix = ".plugin-new";
+
+/// One published file's fingerprint, as recorded in the manifest.
+pub const PathHash = struct {
+    path: []const u8,
+    /// Lowercase hex SHA-256 of the bytes last written, or confirmed identical.
+    hash: []const u8,
+};
+
+/// A file `enable`/`update` left alone: the project's copy differs from the
+/// plugin's and nothing proves it is the copy this plugin last published.
+pub const KeptAsset = struct {
+    path: []const u8,
+    /// Another plugin whose manifest entry also lists this path, if any.
+    also_published_by: ?[]const u8 = null,
+};
+
+/// Lowercase hex SHA-256 of `bytes`.
+pub fn contentHash(allocator: std.mem.Allocator, bytes: []const u8) ![]const u8 {
+    var digest: [32]u8 = undefined;
+    var h = std.crypto.hash.sha2.Sha256.init(.{});
+    h.update(bytes);
+    h.final(&digest);
+    return std.fmt.allocPrint(allocator, "{x}", .{digest[0..]});
+}
+
+/// What `enable`/`update` does with one publishable file.
+pub const AssetAction = enum {
+    /// The project has no copy: write it.
+    publish,
+    /// Byte-identical to the plugin's copy: nothing to write.
+    in_sync,
+    /// Differs, but is exactly what was last published (or overwrite was asked
+    /// for): replace it with the plugin's copy.
+    refresh,
+    /// Differs and was edited, never fingerprinted, or last written by another
+    /// plugin: keep it, and write the plugin's copy beside it.
+    keep,
+};
+
+/// The whole overwrite policy, as a pure function.
+///
+/// `recorded` is the fingerprint this plugin's manifest entry holds for the
+/// path. It is null for a manifest written before fingerprints existed, and that
+/// is why an unrecorded file that differs is KEPT rather than refreshed: nothing
+/// distinguishes a project's deliberate edit from a stale copy, and guessing
+/// wrong destroys the edit — which is exactly how a project's layout, view
+/// overrides and translations were being silently replaced on every update.
+pub fn decideAsset(
+    allocator: std.mem.Allocator,
+    have: ?[]const u8,
+    plugin_bytes: []const u8,
+    recorded: ?[]const u8,
+    overwrite: bool,
+) !AssetAction {
+    const current = have orelse return .publish;
+    if (std.mem.eql(u8, current, plugin_bytes)) return .in_sync;
+    if (overwrite) return .refresh;
+    const known = recorded orelse return .keep;
+
+    const actual = try contentHash(allocator, current);
+    defer allocator.free(actual);
+    return if (std.mem.eql(u8, actual, known)) .refresh else .keep;
+}
+
 /// Subtrees whose files are MIGRATIONS (applied to a DB), used when reconciling
 /// migration ownership after a plugin split. `database/migrations` runs on the
 /// central DB; `database/tenant-template` is provisioned into every tenant DB.
@@ -42,50 +111,58 @@ pub fn isMigrationPath(rel: []const u8) bool {
     return false;
 }
 
-/// Copy a plugin's publishable assets into the project (OVERWRITING existing
-/// files). Project-relative paths of every written file are appended to `out`.
+/// Copy a plugin's publishable assets into the project on ENABLE, under the
+/// decideAsset policy: a file the project lacks is written, an identical one is
+/// left as it is, and one that DIFFERS is kept — the plugin's version goes beside
+/// it as `<file>.plugin-new` — unless it is provably what this plugin last
+/// published, or `overwrite`. Paths this plugin now owns (written or already
+/// identical) go to `out`, files left alone to `kept_out`, and every owned
+/// file's fingerprint to `hashes_out` for recordHashes().
 pub fn publishAssets(
     allocator: std.mem.Allocator,
     io: Io,
+    pluginName: []const u8,
     pluginFolder: []const u8,
     projectRoot: []const u8,
+    overwrite: bool,
     out: *std.ArrayList([]const u8),
+    kept_out: *std.ArrayList(KeptAsset),
+    hashes_out: *std.ArrayList(PathHash),
 ) !void {
-    const cwd = Dir.cwd();
-    for (subtrees) |sub| {
-        const srcDir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pluginFolder, sub });
-        if (!util.dirExists(cwd, io, srcDir)) continue;
-
-        var rels: std.ArrayList([]const u8) = .empty;
-        try collectFiles(allocator, io, srcDir, "", &rels);
-        for (rels.items) |rel| {
-            const src = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srcDir, rel });
-            const relDest = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ sub, rel });
-            const dest = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ projectRoot, relDest });
-            const bytes = cwd.readFileAlloc(io, src, allocator, .limited(16 * 1024 * 1024)) catch continue;
-            if (util.parentOf(dest)) |parent| try cwd.createDirPath(io, parent);
-            try cwd.writeFile(io, .{ .sub_path = dest, .data = bytes });
-            try out.append(allocator, relDest);
-        }
-    }
+    var new_paths: std.ArrayList([]const u8) = .empty;
+    var changed_paths: std.ArrayList([]const u8) = .empty;
+    const first = hashes_out.items.len;
+    try syncAssets(allocator, io, pluginName, pluginFolder, projectRoot, false, overwrite, &new_paths, &changed_paths, kept_out, hashes_out);
+    // Every owned file — written or already identical — has exactly one fingerprint.
+    for (hashes_out.items[first..]) |h| try out.append(allocator, h.path);
 }
 
 /// Analyse a plugin's publishable subtrees (config, database, resources)
-/// against the project's published copies, then bring the project in sync:
-/// files the plugin gained are published (appended to `new_out`) and files
-/// whose CONTENT drifted from the plugin's version are overwritten with the
-/// plugin copy (appended to `changed_out`) — the plugin is the source of
-/// truth on `update`. Pass `dry_run` to detect without writing.
+/// against the project's copies and bring the project in sync under the
+/// decideAsset policy: a missing file is published (`new_out`); a file still
+/// exactly as this plugin last published it is refreshed (`changed_out`); and a
+/// file the project edited — or that no fingerprint vouches for, or that another
+/// plugin wrote — is KEPT, with the plugin's version written beside it as
+/// `<file>.plugin-new` (`kept_out`). Every file the plugin now owns, identical
+/// ones included, gets its fingerprint in `hashes_out`. Pass `dry_run` to detect
+/// without writing.
 pub fn syncAssets(
     allocator: std.mem.Allocator,
     io: Io,
+    pluginName: []const u8,
     pluginFolder: []const u8,
     projectRoot: []const u8,
     dry_run: bool,
+    overwrite: bool,
     new_out: *std.ArrayList([]const u8),
     changed_out: *std.ArrayList([]const u8),
+    kept_out: *std.ArrayList(KeptAsset),
+    hashes_out: *std.ArrayList(PathHash),
 ) !void {
     const cwd = Dir.cwd();
+    const manifest = try readManifest(allocator, io, projectRoot);
+    const own = entryFor(manifest.items, pluginName);
+
     for (subtrees) |sub| {
         const srcDir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pluginFolder, sub });
         if (!util.dirExists(cwd, io, srcDir)) continue;
@@ -97,21 +174,30 @@ pub fn syncAssets(
             const dest = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ projectRoot, relDest });
             const src = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srcDir, rel });
             const bytes = cwd.readFileAlloc(io, src, allocator, .limited(16 * 1024 * 1024)) catch continue;
+            const have = cwd.readFileAlloc(io, dest, allocator, .limited(16 * 1024 * 1024)) catch null;
+            const recorded = if (own) |e| hashIn(e.hashes, relDest) else null;
+            const beside = try std.fmt.allocPrint(allocator, "{s}{s}", .{ dest, plugin_new_suffix });
 
-            var kind: enum { new, changed } = .new;
-            if (cwd.readFileAlloc(io, dest, allocator, .limited(16 * 1024 * 1024)) catch null) |have| {
-                if (std.mem.eql(u8, have, bytes)) continue; // identical — in sync
-                kind = .changed;
+            const action = try decideAsset(allocator, have, bytes, recorded, overwrite);
+            if (action == .keep) {
+                if (!dry_run) try cwd.writeFile(io, .{ .sub_path = beside, .data = bytes });
+                try kept_out.append(allocator, .{
+                    .path = relDest,
+                    .also_published_by = otherOwner(manifest.items, pluginName, relDest),
+                });
+                continue;
             }
 
-            if (!dry_run) {
+            if (action != .in_sync and !dry_run) {
                 if (util.parentOf(dest)) |parent| try cwd.createDirPath(io, parent);
                 try cwd.writeFile(io, .{ .sub_path = dest, .data = bytes });
             }
-            switch (kind) {
-                .new => try new_out.append(allocator, relDest),
-                .changed => try changed_out.append(allocator, relDest),
-            }
+            if (action == .publish) try new_out.append(allocator, relDest);
+            if (action == .refresh) try changed_out.append(allocator, relDest);
+
+            // The project now holds the plugin's bytes, so a leftover side copy is stale.
+            if (!dry_run) cwd.deleteFile(io, beside) catch {};
+            try hashes_out.append(allocator, .{ .path = relDest, .hash = try contentHash(allocator, bytes) });
         }
     }
 }
@@ -174,6 +260,9 @@ const Entry = struct {
     name: []const u8,
     paths: []const []const u8,
     batch: ?i64 = null,
+    /// Fingerprint of each path as last published (see PathHash). Empty for a
+    /// manifest written before fingerprints existed.
+    hashes: []const PathHash = &.{},
 };
 
 fn manifestPath(allocator: std.mem.Allocator, projectRoot: []const u8) ![]const u8 {
@@ -181,9 +270,15 @@ fn manifestPath(allocator: std.mem.Allocator, projectRoot: []const u8) ![]const 
 }
 
 fn readManifest(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8) !std.ArrayList(Entry) {
-    var out: std.ArrayList(Entry) = .empty;
     const path = try manifestPath(allocator, projectRoot);
-    const content = Dir.cwd().readFileAlloc(io, path, allocator, .limited(8 * 1024 * 1024)) catch return out;
+    const content = Dir.cwd().readFileAlloc(io, path, allocator, .limited(8 * 1024 * 1024)) catch return .empty;
+    return parseManifest(allocator, content);
+}
+
+/// Parse manifest JSON. Empty or unexpected input yields an empty list: the
+/// manifest records what was published, and `recover` can rebuild it.
+fn parseManifest(allocator: std.mem.Allocator, content: []const u8) !std.ArrayList(Entry) {
+    var out: std.ArrayList(Entry) = .empty;
     const trimmed = std.mem.trim(u8, content, " \t\r\n");
     if (trimmed.len == 0) return out;
 
@@ -193,6 +288,7 @@ fn readManifest(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8) !
         const v = parsed.object.get(key) orelse continue;
 
         var paths: std.ArrayList([]const u8) = .empty;
+        var hashes: std.ArrayList(PathHash) = .empty;
         var batch: ?i64 = null;
 
         switch (v) {
@@ -202,7 +298,7 @@ fn readManifest(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8) !
                     if (item == .string) try paths.append(allocator, item.string);
                 }
             },
-            // Current shape: "Name": { "paths": [...], "batch": N }
+            // Current shape: "Name": { "paths": [...], "batch": N, "hashes": { "path": "sha256" } }
             .object => |obj| {
                 if (obj.get("paths")) |p| {
                     if (p == .array) {
@@ -214,11 +310,24 @@ fn readManifest(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8) !
                 if (obj.get("batch")) |b| {
                     if (b == .integer) batch = b.integer;
                 }
+                if (obj.get("hashes")) |hs| {
+                    if (hs == .object) {
+                        for (hs.object.keys()) |hp| {
+                            const hv = hs.object.get(hp) orelse continue;
+                            if (hv == .string) try hashes.append(allocator, .{ .path = hp, .hash = hv.string });
+                        }
+                    }
+                }
             },
             else => continue,
         }
 
-        try out.append(allocator, .{ .name = key, .paths = try paths.toOwnedSlice(allocator), .batch = batch });
+        try out.append(allocator, .{
+            .name = key,
+            .paths = try paths.toOwnedSlice(allocator),
+            .batch = batch,
+            .hashes = try hashes.toOwnedSlice(allocator),
+        });
     }
     return out;
 }
@@ -226,62 +335,153 @@ fn readManifest(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8) !
 fn writeManifest(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8, entries: []const Entry) !void {
     const path = try manifestPath(allocator, projectRoot);
     if (util.parentOf(path)) |parent| try Dir.cwd().createDirPath(io, parent);
+    try Dir.cwd().writeFile(io, .{ .sub_path = path, .data = try renderManifest(allocator, entries) });
+}
 
+/// Render manifest JSON: one object per plugin with `paths`, then `batch` and
+/// `hashes` when known, in a stable, diff-friendly layout.
+fn renderManifest(allocator: std.mem.Allocator, entries: []const Entry) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     if (entries.len == 0) {
         try out.appendSlice(allocator, "{}\n");
-    } else {
-        try out.appendSlice(allocator, "{\n");
-        for (entries, 0..) |e, i| {
-            try out.appendSlice(allocator, "    ");
-            try util.appendJsonString(allocator, &out, e.name);
-            try out.appendSlice(allocator, ": {\n");
-
-            // "paths": [ ... ]
-            try out.appendSlice(allocator, "        \"paths\": [");
-            if (e.paths.len == 0) {
-                try out.appendSlice(allocator, "]");
-            } else {
-                try out.appendSlice(allocator, "\n");
-                for (e.paths, 0..) |p, pi| {
-                    try out.appendSlice(allocator, "            ");
-                    try util.appendJsonString(allocator, &out, p);
-                    if (pi + 1 < e.paths.len) try out.appendSlice(allocator, ",");
-                    try out.appendSlice(allocator, "\n");
-                }
-                try out.appendSlice(allocator, "        ]");
-            }
-
-            // "batch": N   (only when known)
-            if (e.batch) |b| {
-                try out.appendSlice(allocator, ",\n        \"batch\": ");
-                try out.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{b}));
-                try out.appendSlice(allocator, "\n");
-            } else {
-                try out.appendSlice(allocator, "\n");
-            }
-
-            try out.appendSlice(allocator, "    }");
-            if (i + 1 < entries.len) try out.appendSlice(allocator, ",");
-            try out.appendSlice(allocator, "\n");
-        }
-        try out.appendSlice(allocator, "}\n");
+        return out.toOwnedSlice(allocator);
     }
-    try Dir.cwd().writeFile(io, .{ .sub_path = path, .data = out.items });
+
+    try out.appendSlice(allocator, "{\n");
+    for (entries, 0..) |e, i| {
+        try out.appendSlice(allocator, "    ");
+        try util.appendJsonString(allocator, &out, e.name);
+        try out.appendSlice(allocator, ": {\n");
+
+        // "paths": [ ... ]
+        try out.appendSlice(allocator, "        \"paths\": [");
+        if (e.paths.len == 0) {
+            try out.appendSlice(allocator, "]");
+        } else {
+            try out.appendSlice(allocator, "\n");
+            for (e.paths, 0..) |p, pi| {
+                try out.appendSlice(allocator, "            ");
+                try util.appendJsonString(allocator, &out, p);
+                if (pi + 1 < e.paths.len) try out.appendSlice(allocator, ",");
+                try out.appendSlice(allocator, "\n");
+            }
+            try out.appendSlice(allocator, "        ]");
+        }
+
+        // "batch": N   (only when known)
+        if (e.batch) |b| {
+            try out.appendSlice(allocator, ",\n        \"batch\": ");
+            try out.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{b}));
+        }
+
+        // "hashes": { "path": "sha256", ... }   (only when any are recorded)
+        if (e.hashes.len > 0) {
+            try out.appendSlice(allocator, ",\n        \"hashes\": {\n");
+            for (e.hashes, 0..) |h, hi| {
+                try out.appendSlice(allocator, "            ");
+                try util.appendJsonString(allocator, &out, h.path);
+                try out.appendSlice(allocator, ": ");
+                try util.appendJsonString(allocator, &out, h.hash);
+                if (hi + 1 < e.hashes.len) try out.appendSlice(allocator, ",");
+                try out.appendSlice(allocator, "\n");
+            }
+            try out.appendSlice(allocator, "        }");
+        }
+
+        try out.appendSlice(allocator, "\n    }");
+        if (i + 1 < entries.len) try out.appendSlice(allocator, ",");
+        try out.appendSlice(allocator, "\n");
+    }
+    try out.appendSlice(allocator, "}\n");
+    return out.toOwnedSlice(allocator);
 }
 
-/// Upsert (name → paths) in the manifest, preserving any recorded batch.
+/// Upsert (name → paths) in the manifest, preserving any recorded batch and the
+/// fingerprints of paths the plugin still owns.
 pub fn recordPublished(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8, name: []const u8, paths: []const []const u8) !void {
     var entries = try readManifest(allocator, io, projectRoot);
     for (entries.items) |*e| {
         if (util.eqlIgnoreCase(e.name, name)) {
             e.paths = paths;
+            e.hashes = try keepHashesFor(allocator, e.hashes, paths);
             try writeManifest(allocator, io, projectRoot, entries.items);
             return;
         }
     }
     try entries.append(allocator, .{ .name = name, .paths = paths });
     try writeManifest(allocator, io, projectRoot, entries.items);
+}
+
+/// Record the fingerprints of files a plugin now owns (from syncAssets or
+/// publishAssets), replacing any previous fingerprint for the same path. Only
+/// paths the plugin's entry lists are stored, so call it AFTER recordPublished.
+/// A no-op for an untracked plugin.
+pub fn recordHashes(allocator: std.mem.Allocator, io: Io, projectRoot: []const u8, name: []const u8, updates: []const PathHash) !void {
+    if (updates.len == 0) return;
+    const entries = try readManifest(allocator, io, projectRoot);
+    for (entries.items) |*e| {
+        if (!util.eqlIgnoreCase(e.name, name)) continue;
+
+        var merged: std.ArrayList(PathHash) = .empty;
+        for (e.hashes) |h| {
+            if (hashIn(updates, h.path) == null) try merged.append(allocator, h);
+        }
+        for (updates) |u| {
+            if (util.contains(e.paths, u.path)) try merged.append(allocator, u);
+        }
+        e.hashes = try merged.toOwnedSlice(allocator);
+        try writeManifest(allocator, io, projectRoot, entries.items);
+        return;
+    }
+}
+
+/// The manifest entry recorded for `name`, if any.
+fn entryFor(entries: []const Entry, name: []const u8) ?Entry {
+    for (entries) |e| {
+        if (util.eqlIgnoreCase(e.name, name)) return e;
+    }
+    return null;
+}
+
+/// The fingerprint recorded for `path`, if any.
+fn hashIn(hashes: []const PathHash, path: []const u8) ?[]const u8 {
+    for (hashes) |h| {
+        if (std.mem.eql(u8, h.path, path)) return h.hash;
+    }
+    return null;
+}
+
+/// Another plugin whose entry also lists `path` — two plugins publishing one
+/// file, where each update used to overwrite the other's copy.
+fn otherOwner(entries: []const Entry, name: []const u8, path: []const u8) ?[]const u8 {
+    for (entries) |e| {
+        if (util.eqlIgnoreCase(e.name, name)) continue;
+        if (util.contains(e.paths, path)) return e.name;
+    }
+    return null;
+}
+
+/// The fingerprints whose path is still in `paths`.
+fn keepHashesFor(allocator: std.mem.Allocator, hashes: []const PathHash, paths: []const []const u8) ![]const PathHash {
+    var kept: std.ArrayList(PathHash) = .empty;
+    for (hashes) |h| {
+        if (util.contains(paths, h.path)) try kept.append(allocator, h);
+    }
+    return kept.toOwnedSlice(allocator);
+}
+
+/// Set one path's fingerprint on `name`'s entry.
+fn putHash(allocator: std.mem.Allocator, entries: *std.ArrayList(Entry), name: []const u8, path: []const u8, hash: []const u8) !void {
+    for (entries.items) |*e| {
+        if (!util.eqlIgnoreCase(e.name, name)) continue;
+        var list: std.ArrayList(PathHash) = .empty;
+        for (e.hashes) |h| {
+            if (!std.mem.eql(u8, h.path, path)) try list.append(allocator, h);
+        }
+        try list.append(allocator, .{ .path = path, .hash = hash });
+        e.hashes = try list.toOwnedSlice(allocator);
+        return;
+    }
 }
 
 /// Record the central-DB migration batch a plugin was applied in (no-op when
@@ -660,6 +860,7 @@ fn removePathFromEntry(allocator: std.mem.Allocator, entries: *std.ArrayList(Ent
             if (!std.mem.eql(u8, p, path)) try kept.append(allocator, p);
         }
         e.paths = try kept.toOwnedSlice(allocator);
+        e.hashes = try keepHashesFor(allocator, e.hashes, e.paths);
         return;
     }
 }
@@ -716,8 +917,10 @@ pub fn reconcileMigrationOwnership(
     if (moves.items.len == 0 or dry_run) return;
 
     for (moves.items) |mv| {
+        const moved = if (entryFor(entries.items, mv.from)) |from| hashIn(from.hashes, mv.path) else null;
         try removePathFromEntry(allocator, &entries, mv.from, mv.path);
         try addPathToEntry(allocator, &entries, mv.to, mv.path);
+        if (moved) |h| try putHash(allocator, &entries, mv.to, mv.path, h);
     }
     try writeManifest(allocator, io, projectRoot, entries.items);
 }
@@ -742,9 +945,12 @@ pub fn publishEnabled(allocator: std.mem.Allocator, io: Io, env: *EnvMap, projec
             const folderPath = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir, e.name });
             if (!util.dirExists(Dir.cwd(), io, folderPath)) continue;
             var paths: std.ArrayList([]const u8) = .empty;
-            try publishAssets(allocator, io, folderPath, projectRoot, &paths);
+            var kept: std.ArrayList(KeptAsset) = .empty;
+            var hashes: std.ArrayList(PathHash) = .empty;
+            try publishAssets(allocator, io, e.name, folderPath, projectRoot, false, &paths, &kept, &hashes);
             if (paths.items.len > 0) {
                 try recordPublished(allocator, io, projectRoot, e.name, paths.items);
+                try recordHashes(allocator, io, projectRoot, e.name, hashes.items);
                 total += paths.items.len;
             }
             break;
@@ -835,10 +1041,15 @@ pub fn recoverEnabled(
         }
         if (present.items.len == 0) continue;
 
+        const present_paths = try present.toOwnedSlice(allocator);
         try entries.append(allocator, .{
             .name = e.name,
-            .paths = try present.toOwnedSlice(allocator),
+            .paths = present_paths,
             .batch = batchFor(old.items, e.name),
+            // A recovered file keeps the fingerprint it was published with. A path
+            // the old manifest never fingerprinted stays without one, so `update`
+            // keeps it when it differs instead of guessing it is unedited.
+            .hashes = if (entryFor(old.items, e.name)) |oe| try keepHashesFor(allocator, oe.hashes, present_paths) else &.{},
         });
         try found.append(allocator, .{ .name = e.name, .files = entries.items[entries.items.len - 1].paths.len, .source = src_kind });
         result.plugins += 1;
@@ -855,4 +1066,94 @@ fn batchFor(old: []const Entry, name: []const u8) ?i64 {
         if (util.eqlIgnoreCase(e.name, name)) return e.batch;
     }
     return null;
+}
+
+// ── tests ─────────────────────────────────────────────────────────────────────
+
+test "decideAsset: a missing file is published, an identical one is left alone" {
+    const a = std.testing.allocator;
+    try std.testing.expectEqual(AssetAction.publish, try decideAsset(a, null, "new", null, false));
+    try std.testing.expectEqual(AssetAction.in_sync, try decideAsset(a, "same", "same", null, false));
+}
+
+test "decideAsset: only a file still exactly as last published is refreshed" {
+    const a = std.testing.allocator;
+    const published = try contentHash(a, "v1 from the plugin");
+    defer a.free(published);
+
+    // Untouched since it was published: the plugin's new version replaces it.
+    try std.testing.expectEqual(AssetAction.refresh, try decideAsset(a, "v1 from the plugin", "v2 from the plugin", published, false));
+    // Edited in the project: kept.
+    try std.testing.expectEqual(AssetAction.keep, try decideAsset(a, "v1 plus the project's edit", "v2 from the plugin", published, false));
+}
+
+test "decideAsset: a differing file nothing fingerprinted is kept unless overwrite is asked for" {
+    const a = std.testing.allocator;
+    try std.testing.expectEqual(AssetAction.keep, try decideAsset(a, "project copy", "plugin copy", null, false));
+    try std.testing.expectEqual(AssetAction.refresh, try decideAsset(a, "project copy", "plugin copy", null, true));
+}
+
+test "contentHash is lowercase hex SHA-256" {
+    const a = std.testing.allocator;
+    const h = try contentHash(a, "abc");
+    defer a.free(h);
+    try std.testing.expectEqualStrings("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", h);
+}
+
+test "the manifest round-trips paths, batch and hashes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const entries = [_]Entry{
+        .{
+            .name = "Pageflow",
+            .paths = &.{ "resources/layouts/app.php", "resources/lang/en/messages.php" },
+            .batch = 3,
+            .hashes = &.{.{ .path = "resources/layouts/app.php", .hash = "abc123" }},
+        },
+        .{ .name = "Mail", .paths = &.{"config/mail.php"} },
+    };
+    const parsed = try parseManifest(a, try renderManifest(a, &entries));
+
+    try std.testing.expectEqual(@as(usize, 2), parsed.items.len);
+    const pageflow = entryFor(parsed.items, "Pageflow").?;
+    try std.testing.expectEqual(@as(?i64, 3), pageflow.batch);
+    try std.testing.expectEqualStrings("abc123", hashIn(pageflow.hashes, "resources/layouts/app.php").?);
+    try std.testing.expect(hashIn(pageflow.hashes, "resources/lang/en/messages.php") == null);
+
+    const mail = entryFor(parsed.items, "Mail").?;
+    try std.testing.expectEqual(@as(?i64, null), mail.batch);
+    try std.testing.expectEqual(@as(usize, 0), mail.hashes.len);
+}
+
+test "a legacy array-shaped manifest parses with no fingerprints" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const parsed = try parseManifest(a, "{ \"Audit\": [\"config/audit.php\"] }");
+    try std.testing.expectEqual(@as(usize, 1), parsed.items.len);
+    try std.testing.expectEqualStrings("config/audit.php", parsed.items[0].paths[0]);
+    try std.testing.expectEqual(@as(usize, 0), parsed.items[0].hashes.len);
+}
+
+test "otherOwner names another plugin publishing the same path" {
+    const entries = [_]Entry{
+        .{ .name = "Pageflow", .paths = &.{"resources/lang/en/messages.php"} },
+        .{ .name = "Settings", .paths = &.{ "resources/lang/en/messages.php", "config/settings.php" } },
+    };
+    try std.testing.expectEqualStrings("Settings", otherOwner(&entries, "Pageflow", "resources/lang/en/messages.php").?);
+    try std.testing.expect(otherOwner(&entries, "Settings", "config/settings.php") == null);
+}
+
+test "keepHashesFor drops fingerprints of paths no longer owned" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const hashes = [_]PathHash{ .{ .path = "config/a.php", .hash = "1" }, .{ .path = "config/b.php", .hash = "2" } };
+    const kept = try keepHashesFor(a, &hashes, &.{"config/b.php"});
+    try std.testing.expectEqual(@as(usize, 1), kept.len);
+    try std.testing.expectEqualStrings("config/b.php", kept[0].path);
 }

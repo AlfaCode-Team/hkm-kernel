@@ -49,6 +49,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+        # modules/hkm-ppkg is compiled INTO the launcher (tools/build.zig imports
+        # its src/root.zig), so a checkout without submodules cannot build hkm.
+        with: { submodules: recursive }
       - name: Setup Zig (self-hosted pinned toolchain)
         run: ./tools/ci/setup-zig.sh
         env:

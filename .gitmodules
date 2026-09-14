@@ -14,3 +14,7 @@
 	path = modules/http
 	url = git@github.com:AlfaCode-Team/http.git
 	branch = main
+[submodule "modules/hkm-ppkg"]
+	path = modules/hkm-ppkg
+	url = git@github.com:AlfaCode-Team/hkm-ppkg.git
+	branch = main

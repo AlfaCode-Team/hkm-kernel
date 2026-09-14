@@ -9,6 +9,28 @@ pub fn build(b: *std.Build) void {
 
     // Version stamped into the binary. `zig build -Dversion=1.0.0` (bundle.sh
     // passes the release VERSION); defaults to a dev marker for local builds.
+    // ── the package manager ─────────────────────────────────────────────────
+    //
+    // `hkm ppkg` is backed by a SEPARATE repository, modules/hkm-ppkg, wired in as
+    // a sibling checkout rather than a fetched dependency: it is a submodule of
+    // this one, so it is already on disk whenever this builds, and pinning it by
+    // hash as well as by submodule commit would be two sources of truth for the
+    // same pin.
+    //
+    // If this path does not exist the checkout is incomplete:
+    //     git submodule update --init modules/hkm-ppkg
+    const ppkg_root = "../modules/hkm-ppkg/src/root.zig";
+
+    const ppkgModule = struct {
+        fn create(bb: *std.Build, t: std.Build.ResolvedTarget, o: std.builtin.OptimizeMode) *std.Build.Module {
+            return bb.createModule(.{
+                .root_source_file = bb.path(ppkg_root),
+                .target = t,
+                .optimize = o,
+            });
+        }
+    }.create;
+
     const version = b.option([]const u8, "version", "Version string stamped into the binary") orelse "0.0.0-dev";
     const build_info = b.addOptions();
     build_info.addOption([]const u8, "version", version);
@@ -23,6 +45,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     launcher.root_module.addOptions("build_info", build_info);
+    launcher.root_module.addImport("ppkg", ppkgModule(b, target, optimize));
     b.installArtifact(launcher);
 
     const config_tool = b.addExecutable(.{
@@ -79,11 +102,22 @@ pub fn build(b: *std.Build) void {
         }),
     });
     unit_tests.root_module.addOptions("build_info", build_info);
+    unit_tests.root_module.addImport("ppkg", ppkgModule(b, target, optimize));
+
+    // modules/hkm-ppkg keeps its own suite (77 tests, including the 5881-row
+    // differential corpus against Composer's own Semver). Running it from here
+    // as well is deliberate: this is the tree that consumes it, so `zig build
+    // test` in tools/ should fail when the package it depends on is broken —
+    // not only when the seam between them is.
+    const ppkg_tests = b.addTest(.{
+        .root_module = ppkgModule(b, target, optimize),
+    });
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run the tools unit tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&b.addRunArtifact(stamp_tests).step);
+    test_step.dependOn(&b.addRunArtifact(ppkg_tests).step);
 
     // ── Stamp the version into composer.json ────────────────────────────────
     //

@@ -51,6 +51,28 @@ var out_cols: ?usize = null;
 ///
 /// Before this runs, output falls back to `std.debug.print` (stderr, coloured),
 /// which is what unit tests and any early-startup failure get.
+/// `-q` / `--quiet` — suppress everything written to stdout.
+var quiet_mode = false;
+/// `--ansi` / `--no-ansi` — force colour on or off, overriding tty detection.
+var color_choice: ?bool = null;
+
+pub fn setQuiet(on: bool) void {
+    quiet_mode = on;
+}
+
+/// Force colour on (`true`), off (`false`), or return to tty detection (null).
+///
+/// Called AFTER `init`, which is what computed the detected values this
+/// overrides. Colour on a non-tty is a legitimate request: it is how a CI log
+/// viewer that understands ANSI gets coloured output through a pipe.
+pub fn setColor(choice: ?bool) void {
+    color_choice = choice;
+    if (choice) |on| {
+        color_out = on;
+        color_err = on;
+    }
+}
+
 pub fn init(io: Io, env: *EnvMap) void {
     out_io = io;
 
@@ -68,8 +90,8 @@ pub fn init(io: Io, env: *EnvMap) void {
     const so_tty = so.isTty(io) catch false;
     const se_tty = se.isTty(io) catch false;
 
-    color_out = so_tty and !no_color and !dumb;
-    color_err = se_tty and !no_color and !dumb;
+    color_out = color_choice orelse (so_tty and !no_color and !dumb);
+    color_err = color_choice orelse (se_tty and !no_color and !dumb);
     out_cols = if (so_tty) termCols() else null;
 }
 
@@ -93,6 +115,12 @@ const gray = "\x1b[90m";
 /// runtime branch. Removing the sequences on the way out gets the same result
 /// from one place, and keeps the call sites readable.
 fn emit(to_err: bool, comptime fmt: []const u8, args: anytype) void {
+    // `-q` silences the report, not the diagnosis. A quiet run that fails
+    // still says why on stderr — suppressing that leaves a caller with an
+    // exit code and no way to find out what happened, which is not what
+    // asking for less output means.
+    if (quiet_mode and !to_err) return;
+
     const io = out_io orelse {
         std.debug.print(fmt, args); // pre-init: stderr, as before
         return;
@@ -354,14 +382,29 @@ pub fn select(label: []const u8, items: []const []const u8) ?usize {
         var moved = false;
         if (n >= 3 and buf[0] == 0x1b and buf[1] == '[') {
             switch (buf[2]) {
-                'A' => { cur = if (cur == 0) items.len - 1 else cur - 1; moved = true; },
-                'B' => { cur = (cur + 1) % items.len; moved = true; },
+                'A' => {
+                    cur = if (cur == 0) items.len - 1 else cur - 1;
+                    moved = true;
+                },
+                'B' => {
+                    cur = (cur + 1) % items.len;
+                    moved = true;
+                },
                 else => {},
             }
         } else switch (buf[0]) {
-            'k' => { cur = if (cur == 0) items.len - 1 else cur - 1; moved = true; },
-            'j' => { cur = (cur + 1) % items.len; moved = true; },
-            '\r', '\n' => { diag(bar ++ "\n", .{}); return cur; },
+            'k' => {
+                cur = if (cur == 0) items.len - 1 else cur - 1;
+                moved = true;
+            },
+            'j' => {
+                cur = (cur + 1) % items.len;
+                moved = true;
+            },
+            '\r', '\n' => {
+                diag(bar ++ "\n", .{});
+                return cur;
+            },
             'q', 0x1b, 3, 4 => return null, // q / Esc / Ctrl+C / Ctrl+D
             else => {},
         }

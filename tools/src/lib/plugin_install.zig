@@ -25,6 +25,10 @@ const prompt = @import("prompt.zig");
 const util = @import("util.zig");
 const store = @import("plugin_store.zig");
 const run_cmd = @import("../commands/run.zig");
+const testenv = @import("ppkg/testenv.zig");
+const pkg_manifest = @import("ppkg").manifest;
+const pkg_autoload = @import("ppkg").autoload;
+const pkg_layout = @import("ppkg").layout;
 const kernel = @import("kernel.zig");
 
 const Dir = std.Io.Dir;
@@ -233,7 +237,6 @@ fn gateMessage(allocator: std.mem.Allocator, env: *EnvMap, name: []const u8, con
     };
 }
 
-
 /// Outcome of running a freshly fetched plugin's own test suite.
 const Verdict = enum {
     passed,
@@ -249,13 +252,23 @@ const Verdict = enum {
 
 /// Install the plugin's dev dependencies and run its tests, in `dir`.
 ///
-/// A packaged kernel ships no phpunit — install.sh runs `composer install
-/// --no-dev` — so the runner has to come from the plugin itself. That costs a
-/// composer install per plugin, which is why `verify` is a switch rather than
-/// unconditional.
+/// Two routes to the same suite, and the fast one is tried first:
+///
+///   1. `pkg/testenv` writes a bootstrap that borrows the KERNEL's autoloader —
+///      which already holds phpunit and every Packagist package — and layers the
+///      plugin's own PSR-4 rules over it. No network, no resolution, ~0.1s.
+///   2. `composer install` inside the plugin, as before.
+///
+/// Route 1 is skipped, not forced, whenever it cannot be trusted: no kernel with
+/// a built vendor/, no phpunit in it, or a test dependency with no checkout on
+/// disk. Each of those would produce a suite that fails for want of a class,
+/// which reads as the PLUGIN being broken — the one outcome worse than being
+/// slow. Route 2 is unchanged and remains the fallback.
 fn runPluginTests(allocator: std.mem.Allocator, io: Io, env: *EnvMap, dir: []const u8, name: []const u8) Verdict {
     const tests_dir = std.fs.path.join(allocator, &.{ dir, "tests" }) catch return .unavailable;
     if (!util.dirExists(Dir.cwd(), io, tests_dir)) return .unavailable; // nothing to run
+
+    if (nativeTestRun(allocator, io, env, dir, name, tests_dir)) |verdict| return verdict;
 
     prompt.muted(std.fmt.allocPrint(allocator, "{s}: resolving test dependencies…", .{name}) catch name);
 
@@ -272,11 +285,86 @@ fn runPluginTests(allocator: std.mem.Allocator, io: Io, env: *EnvMap, dir: []con
     // hkm runs from wherever the user invoked it, so phpunit found neither a
     // phpunit.xml nor a test path and simply printed its own usage — which the
     // exit code then reported as a failure.
-    var run = [_][]const u8{ phpunit, "--no-coverage", "--do-not-cache-result", "--bootstrap", "", tests_dir };
     const autoload = std.fs.path.join(allocator, &.{ dir, "vendor", "autoload.php" }) catch return .unavailable;
-    run[4] = autoload;
-    const code = run_cmd.spawnWait(io, env, &run) catch return .unavailable;
+    return runSuite(allocator, io, env, phpunit, autoload, dir, tests_dir);
+}
+
+/// The offline route. Null means "not usable here" — never a verdict, so the
+/// caller falls through to Composer rather than reporting a failure this path
+/// was not entitled to decide.
+fn nativeTestRun(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    dir: []const u8,
+    name: []const u8,
+    tests_dir: []const u8,
+) ?Verdict {
+    if (util.envIsTruthy(env, "HKM_PLUGIN_TESTS_COMPOSER")) return null;
+
+    const built = testenv.build(allocator, io, env, dir) catch return null;
+    const phpunit = built.phpunit orelse return null;
+
+    if (built.missing.len > 0) {
+        prompt.muted(std.fmt.allocPrint(
+            allocator,
+            "{s}: {d} test dependency(ies) not on disk — falling back to composer",
+            .{ name, built.missing.len },
+        ) catch name);
+        return null;
+    }
+
+    prompt.muted(std.fmt.allocPrint(allocator, "{s}: running tests…", .{name}) catch name);
+    return runSuite(allocator, io, env, phpunit, built.autoload_path, dir, tests_dir);
+}
+
+/// Run phpunit against an explicit bootstrap and test directory.
+///
+/// The configuration is pinned rather than discovered: phpunit searches the
+/// WORKING directory for a phpunit.xml, and the working directory here is
+/// wherever the user happened to invoke `hkm` — which on the offline route is
+/// frequently the kernel checkout, whose phpunit.xml describes the kernel's own
+/// suite and not this plugin's.
+fn runSuite(
+    allocator: std.mem.Allocator,
+    io: Io,
+    env: *EnvMap,
+    phpunit: []const u8,
+    autoload: []const u8,
+    dir: []const u8,
+    tests_dir: []const u8,
+) Verdict {
+    var argv: std.ArrayList([]const u8) = .empty;
+    argv.appendSlice(allocator, &.{
+        phpunit,
+        "--no-coverage",
+        "--do-not-cache-result",
+        "--bootstrap",
+        autoload,
+    }) catch return .unavailable;
+
+    if (pluginPhpunitConfig(allocator, io, dir)) |path| {
+        argv.appendSlice(allocator, &.{ "--configuration", path }) catch return .unavailable;
+    } else {
+        argv.append(allocator, "--no-configuration") catch return .unavailable;
+    }
+
+    // The test path is passed even with a configuration: it narrows the run to
+    // THIS plugin's suite, and a plugin's phpunit.xml written for its own
+    // checkout may name paths that do not exist from here.
+    argv.append(allocator, tests_dir) catch return .unavailable;
+
+    const code = run_cmd.spawnWait(io, env, argv.items) catch return .unavailable;
     return if (code == 0) .passed else .failed;
+}
+
+/// The plugin's own phpunit configuration, if it ships one.
+fn pluginPhpunitConfig(allocator: std.mem.Allocator, io: Io, dir: []const u8) ?[]const u8 {
+    for ([_][]const u8{ "phpunit.xml", "phpunit.xml.dist" }) |candidate| {
+        const path = std.fs.path.join(allocator, &.{ dir, candidate }) catch continue;
+        if (util.fileExists(io, path)) return path;
+    }
+    return null;
 }
 
 /// Strip everything a consumer does not need from an installed plugin.
@@ -297,13 +385,32 @@ fn stripDevArtefacts(io: Io, allocator: std.mem.Allocator, dir: []const u8) void
 ///
 /// The kernel maps `Plugins\` to its plugins/ directory, so a new folder is only
 /// discoverable once the classmap is regenerated.
+///
+/// Generated natively when possible — `pkg/autoload` produces byte-identical
+/// output to `composer dump-autoload` for this tree and does it without starting
+/// a PHP process. Composer remains the fallback for a vendor/ this cannot read
+/// (no `installed.json`, e.g. a tree Composer has never built).
 pub fn refreshAutoload(allocator: std.mem.Allocator, io: Io, env: *EnvMap, pluginsDir: []const u8) void {
     const kernel_root = util.parentOf(pluginsDir) orelse return;
     const composer_json = std.fs.path.join(allocator, &.{ kernel_root, "composer.json" }) catch return;
     if (!util.fileExists(io, composer_json)) return;
 
+    if (nativeAutoload(allocator, io, kernel_root)) return;
+
     var argv = [_][]const u8{ "composer", "dump-autoload", "--no-interaction", "--working-dir", kernel_root };
     _ = run_cmd.spawnWait(io, env, &argv) catch {};
+}
+
+/// Regenerate `<root>/vendor/composer/autoload_*.php`. False when the tree does
+/// not have what the generator needs, so the caller can fall back.
+fn nativeAutoload(allocator: std.mem.Allocator, io: Io, root: []const u8) bool {
+    const manifest_root = (pkg_manifest.read(allocator, io, root) catch return false) orelse return false;
+    const lay = pkg_layout.resolve(allocator, null, root, manifest_root) catch return false;
+    const installed = pkg_manifest.readInstalled(allocator, io, lay.vendor) catch return false;
+
+    const plan = pkg_autoload.plan(allocator, io, lay, manifest_root, installed, .{}) catch return false;
+    pkg_autoload.write(allocator, io, lay.vendor, plan) catch return false;
+    return true;
 }
 
 /// Refresh every composer that could own a plugin directory for this project.

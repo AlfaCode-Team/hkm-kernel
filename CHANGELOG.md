@@ -6,6 +6,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-09-14
+
+### Added
+- **Scheduled tasks, declared in `module.json`.** A module lists `schedule[]`
+  entries — a `name`, a cron expression or alias such as `@hourly` in `at`, and
+  EITHER a `job` or a `command`, with optional `queue`, `timezone` and
+  `withoutOverlapping`. `CompileScheduleManifestStage` parses every expression
+  at boot, so an impossible schedule (`"0 25 * * *"`) fails the boot naming the
+  field instead of silently never running; naming both a job and a command, or
+  neither, fails it too. One crontab line drives the application:
+  `hkm cli schedule:run` every minute dispatches whatever is due — a `job` is
+  pushed onto the queue, so it gets the worker's retries and timeout, and a
+  `command` runs through the CLI pipeline exactly as if typed. `schedule:list`
+  shows what is declared. `withoutOverlapping` takes a `CachePort` lock keyed by
+  task name, which is what makes the scheduler safe on several servers at once;
+  with no cache bound, a guarded task is skipped and logged rather than run
+  unguarded.
+- **`MetricsPort` and `TracerPort`, and an `ObservabilityStage` on every
+  request.** The kernel already propagated a correlation id; it had no seam for
+  the aggregate numbers or for where a request's time went. Both ports are
+  StatsD/OpenTelemetry-shaped and dependency-free. The stage sits inside
+  `CorrelationIdStage` and outside security and routing, so a denied request and
+  an unmatched one (labelled `unmatched`) are still measured, and it labels by
+  route TEMPLATE, never by path, so a metric cannot mint one series per id. With
+  neither port bound, shared no-op implementations cost one `hrtime()` pair per
+  request. An adapter must not throw.
+- **`DriverAware`** — an optional interface a `DatabasePort` implements to name
+  the SQL dialect behind it. Checked with `instanceof`, like `RequestAware`, so
+  the many in-memory test fakes of the port need no change; a consumer falls
+  back to configuration when the bound port does not implement it.
+- **`hkm ppkg` — the native package manager.** The Composer-compatible package
+  manager from `modules/hkm-ppkg`, now a submodule, runs under the launcher:
+  `install`, `update`, `require`, `remove`, `autoload`, `audit`, `outdated` and
+  the rest, writing the same `composer.lock` and `vendor/` Composer does.
+  Composer PLUGINS are not run; `hkm ppkg compat` names each one a project uses
+  and what it would have done. `hkm ppkg test-env <dir>` builds a plugin's test
+  `vendor/` from the kernel's own and the checkouts already on disk.
+- **A feature test bench.** `tests/Feature` boots a real kernel and pushes real
+  Requests through the real `HttpPipeline` — manifests, matcher, dependency
+  graph, scoped containers and stages all real, only the database, cache and
+  queue faked — and runs as its own `Feature` suite. It exists for the class of
+  defect a unit test cannot see: a controller signature a stage no longer
+  matches, or a route that resolves to nothing.
+
+### Changed
+- **The route compiler is split into `Kernel\Boot\Routing`.**
+  `CompileRouteManifestStage` was 1,200 lines doing six jobs and could only be
+  tested by compiling a whole manifest. The jobs now live in `RouteNormalizer`,
+  `DomainComposer`, `GroupExpander`, `RouteCompiler` and `RoutePolicy`, each
+  tested on its own, and the stage keeps only their order. The public shape of
+  `route-manifest.php` is unchanged; each dynamic route in `route-index.php` now
+  also carries its route key, which is what lets a metric be labelled by
+  template. An index compiled by an older kernel still serves.
+- **A fetched plugin is verified without Composer when that is possible.**
+  `hkm plugins install` used to run `composer install` inside every plugin to
+  reach phpunit — a dependency resolution across a few dozen `vcs` repositories,
+  throttled by GitHub's anonymous rate limit. It now first builds the test
+  environment from the kernel's own `vendor/` plus the sibling checkouts on
+  disk, and falls back to Composer whenever that cannot be trusted: no phpunit,
+  or a test dependency with no checkout. `HKM_PLUGIN_TESTS_COMPOSER=1` forces the
+  Composer route.
+- **`RichGraph` articles take `inLanguage`** — the language of the CONTENT,
+  which can differ from the page's — and an article with no `authorName` names
+  the publishing Organization as its author, as Google recommends for content
+  that is contributed rather than bylined.
+
+### Fixed
+- **Error responses had no correlation id.** `ErrorStage` wrapped
+  `CorrelationIdStage`, so the request it caught an exception on was the one from
+  before the id was attached: every error envelope's `requestId` was empty,
+  every notifier received an empty correlation id, and error responses carried
+  no `X-Correlation-ID` header — the id was on every response except the ones
+  anyone would need it for. The two stages now run the other way round.
+- **`hkm plugins update` overwrote files a project had edited.** It replaced
+  every published file whose bytes differed from the plugin's copy, with no way
+  to tell a project's customisation from a stale copy — a customised layout, view
+  override or translation was lost on the next update — and when two plugins
+  published the same path, each update overwrote the other's. The installer now
+  records a SHA-256 of every file it publishes in `var/plugin-assets.json`. A
+  file still exactly as published is refreshed; one that was edited, never
+  recorded, or written by another plugin is KEPT, and the plugin's version is
+  written beside it as `<file>.plugin-new`, listed with the other plugin named.
+  `--overwrite` restores the old behaviour for one run, and `enable` never
+  overwrites. A manifest written before this release has no hashes, so its first
+  update keeps every file that differs rather than guessing.
+- **Every page head carried two `<title>` elements and two descriptions** when
+  `SeoHead` embedded a SiteSEO Open Graph document, which renders its own. Only
+  that document's `og:` and `twitter:` tags are kept.
+- **Ctrl+C left the Vite dev server running.** The frontend template's hot-file
+  cleanup installed `SIGINT`/`SIGHUP` listeners, and Node removes its default
+  terminate the moment one exists — so the shell got its prompt back while the
+  orphaned server kept the port, and its readline failed with `Error: read EIO`
+  on top of the next command typed. The handler now cleans up, restores the
+  default and re-raises, and registers once per process across dev-server
+  restarts.
+
+### Security
+- **`composer/composer` 2.10.2 → 2.10.3** in the kernel's development
+  dependencies, for CVE-2026-84361 — arbitrary command execution through a
+  malicious package's Perforce source URL. It was never in a release bundle,
+  which installs without development dependencies, but `composer audit` failed
+  every build until it moved.
+
+### Removed
+- `templates/app/apache.conf.example` and `templates/app/nginx.conf.example`,
+  and `hkm new` no longer writes them into a new project. The nginx or Apache
+  configuration a deployment runs is generated by the Edge plugin
+  (`hkm edge:apply`).
+
 ## [1.14.0] - 2026-09-05
 
 ### Added

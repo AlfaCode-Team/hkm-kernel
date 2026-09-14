@@ -156,7 +156,13 @@ final class RichGraph
     /**
      * An Article node, fully wired to the page, organization and author.
      *
+     * With no $authorName the author is the publishing Organization: Google
+     * recommends an author on every article, and a site whose documents are
+     * contributed rather than bylined has no Person to name.
+     *
      * @param list<string> $tags
+     * @param ?string      $inLanguage BCP 47 code of the CONTENT (e.g. 'fr'),
+     *                                 which can differ from the page UI language.
      */
     public function article(
         string $url,
@@ -168,8 +174,9 @@ final class RichGraph
         ?string $authorName = null,
         ?string $authorUrl = null,
         array $tags = [],
+        ?string $inLanguage = null,
     ): self {
-        return $this->articleLike('Article', $url, $headline, $description, $image, $datePublished, $dateModified, $authorName, $authorUrl, $tags);
+        return $this->articleLike('Article', $url, $headline, $description, $image, $datePublished, $dateModified, $authorName, $authorUrl, $tags, $inLanguage);
     }
 
     /** A NewsArticle node (Article subtype Google treats as news). */
@@ -183,8 +190,9 @@ final class RichGraph
         ?string $authorName = null,
         ?string $authorUrl = null,
         array $tags = [],
+        ?string $inLanguage = null,
     ): self {
-        return $this->articleLike('NewsArticle', $url, $headline, $description, $image, $datePublished, $dateModified, $authorName, $authorUrl, $tags);
+        return $this->articleLike('NewsArticle', $url, $headline, $description, $image, $datePublished, $dateModified, $authorName, $authorUrl, $tags, $inLanguage);
     }
 
     /** A BlogPosting node (Article subtype for blog posts). */
@@ -198,8 +206,9 @@ final class RichGraph
         ?string $authorName = null,
         ?string $authorUrl = null,
         array $tags = [],
+        ?string $inLanguage = null,
     ): self {
-        return $this->articleLike('BlogPosting', $url, $headline, $description, $image, $datePublished, $dateModified, $authorName, $authorUrl, $tags);
+        return $this->articleLike('BlogPosting', $url, $headline, $description, $image, $datePublished, $dateModified, $authorName, $authorUrl, $tags, $inLanguage);
     }
 
     /** @param list<string> $tags */
@@ -214,6 +223,7 @@ final class RichGraph
         ?string $authorName,
         ?string $authorUrl,
         array $tags,
+        ?string $inLanguage = null,
     ): self {
         $data = [
             '@id'              => $this->absolute($url) . '#article',
@@ -242,9 +252,14 @@ final class RichGraph
                 $author['url'] = $this->absolute($authorUrl);
             }
             $data['author'] = $author;
+        } else {
+            $data['author'] = ['@id' => $this->baseUrl . '/#organization'];
         }
         if ($tags !== []) {
             $data['keywords'] = implode(', ', $tags);
+        }
+        if ($inLanguage !== null && $inLanguage !== '') {
+            $data['inLanguage'] = $inLanguage;
         }
 
         return $this->push($type, $data);
