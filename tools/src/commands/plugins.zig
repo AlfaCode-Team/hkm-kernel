@@ -74,6 +74,9 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     // of every plugin. The opposite of the default, which is reproducibility.
     var want_latest = false;
     var migrate_store = false;
+    // --overwrite: `update`/`upgrade` replace published files that differ from
+    // the plugin's copy, instead of keeping them and writing <file>.plugin-new.
+    var overwrite_assets = false;
 
     var operands: std.ArrayList([]const u8) = .empty;
     var saw_action = false;
@@ -109,6 +112,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
             set_store = a["--set=".len..];
         } else if (std.mem.eql(u8, a, "--migrate")) {
             migrate_store = true;
+        } else if (std.mem.eql(u8, a, "--overwrite")) {
+            overwrite_assets = true;
         } else if (std.mem.eql(u8, a, "--latest") or std.mem.eql(u8, a, "--upgrade")) {
             want_latest = true;
         } else if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
@@ -200,14 +205,14 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
             // Disambiguate: if operand 0 resolves to a project root, treat it as
             // the target and update all; otherwise it is a plugin name.
             if (ops.len == 0) {
-                return updatePlugins(allocator, io, env, "", "", dry_run);
+                return updatePlugins(allocator, io, env, "", "", dry_run, overwrite_assets);
             }
             if ((try services.resolveRoot(allocator, io, env, op(ops, 0))) != null) {
-                return updatePlugins(allocator, io, env, "", op(ops, 0), dry_run);
+                return updatePlugins(allocator, io, env, "", op(ops, 0), dry_run, overwrite_assets);
             }
-            return updatePlugins(allocator, io, env, op(ops, 0), op(ops, 1), dry_run);
+            return updatePlugins(allocator, io, env, op(ops, 0), op(ops, 1), dry_run, overwrite_assets);
         },
-        .upgrade => return upgradeProject(allocator, io, env, op(ops, 0), dry_run),
+        .upgrade => return upgradeProject(allocator, io, env, op(ops, 0), dry_run, overwrite_assets),
         .create => {
             if (ops.len == 0) {
                 prompt.err("Usage: hkm plugins create <name> [path|name] [--kernel] [--dry-run]");
@@ -640,7 +645,7 @@ fn verifyPlugins(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []c
             "Fixing (dry run) — what would be published and wired"
         else
             "Fixing — publishing missing assets + wiring Support requires");
-        _ = try updatePlugins(allocator, io, env, "", target, dry_run);
+        _ = try updatePlugins(allocator, io, env, "", target, dry_run, false);
         prompt.note("Re-run `hkm plugins verify` to confirm; unmet requires need `hkm plugins enable <dep>`.");
         return 0;
     }
@@ -1170,9 +1175,15 @@ fn enableOne(
 
         const fp = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ cd, folder });
         var published: std.ArrayList([]const u8) = .empty;
-        try assets.publishAssets(allocator, io, fp, root, &published);
+        var kept: std.ArrayList(assets.KeptAsset) = .empty;
+        var hashes: std.ArrayList(assets.PathHash) = .empty;
+        // Never overwrites: a project file that already differs from the plugin's
+        // copy is kept, and the plugin's version is written beside it.
+        try assets.publishAssets(allocator, io, folder, fp, root, false, &published, &kept, &hashes);
+        reportKept(allocator, kept.items, false, folder);
         if (published.items.len > 0) {
             try assets.recordPublished(allocator, io, root, folder, published.items);
+            try assets.recordHashes(allocator, io, root, folder, hashes.items);
             prompt.ok(try std.fmt.allocPrint(allocator, "Published {d} asset(s) into the project", .{published.items.len}));
             for (published.items) |p| prompt.muted(try std.fmt.allocPrint(allocator, "    {s}", .{p}));
 
@@ -1338,6 +1349,7 @@ fn updatePlugins(
     only: []const u8,
     target: []const u8,
     dry_run: bool,
+    overwrite: bool,
 ) !u8 {
     const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
 
@@ -1373,6 +1385,7 @@ fn updatePlugins(
     var touched: usize = 0;
     var new_total: usize = 0;
     var changed_total: usize = 0;
+    var kept_total: usize = 0;
     var ui_synced: usize = 0;
     var matched = false;
 
@@ -1419,7 +1432,11 @@ fn updatePlugins(
         // are refreshed with the plugin's version.
         var new_paths: std.ArrayList([]const u8) = .empty;
         var changed_paths: std.ArrayList([]const u8) = .empty;
-        try assets.syncAssets(allocator, io, fp, root, dry_run, &new_paths, &changed_paths);
+        var kept_paths: std.ArrayList(assets.KeptAsset) = .empty;
+        var hashes: std.ArrayList(assets.PathHash) = .empty;
+        try assets.syncAssets(allocator, io, e.name, fp, root, dry_run, overwrite, &new_paths, &changed_paths, &kept_paths, &hashes);
+        kept_total += kept_paths.items.len;
+        reportKept(allocator, kept_paths.items, dry_run, e.name);
 
         // Analyse the plugin's ui/ mirror (frontend/plugins/<slug>) the same
         // way — re-sync when it drifted; a symlinked mirror is always current.
@@ -1431,7 +1448,10 @@ fn updatePlugins(
         }
 
         if (new_paths.items.len == 0 and changed_paths.items.len == 0 and ui_dirty == null) {
-            prompt.muted(try std.fmt.allocPrint(allocator, "{s}: up to date — config, database, resources and ui all match.", .{e.name}));
+            // Nothing to write, but record the fingerprints of files already in
+            // sync, so a later update can tell an unedited file from an edited one.
+            if (!dry_run) try assets.recordHashes(allocator, io, root, e.name, hashes.items);
+            if (kept_paths.items.len == 0) prompt.muted(try std.fmt.allocPrint(allocator, "{s}: up to date — config, database, resources and ui all match.", .{e.name}));
             continue;
         }
 
@@ -1478,6 +1498,7 @@ fn updatePlugins(
             if (!containsStr(merged.items, p)) try merged.append(allocator, p);
         }
         try assets.recordPublished(allocator, io, root, e.name, merged.items);
+        try assets.recordHashes(allocator, io, root, e.name, hashes.items);
 
         if (migrations_dirty) {
             try assets.runPluginMigrations(allocator, io, env, root, autoload, e.name, merged.items);
@@ -1495,11 +1516,11 @@ fn updatePlugins(
     }
 
     if (dry_run) {
-        prompt.outro(try std.fmt.allocPrint(allocator, "Dry run — {d} plugin(s): {d} new · {d} changed asset(s) · {d} ui mirror(s) to sync · {d} Support require(s) to wire", .{ touched, new_total, changed_total, ui_synced, wired }));
+        prompt.outro(try std.fmt.allocPrint(allocator, "Dry run — {d} plugin(s): {d} new · {d} changed asset(s) · {d} kept (differ from the plugin) · {d} ui mirror(s) to sync · {d} Support require(s) to wire", .{ touched, new_total, changed_total, kept_total, ui_synced, wired }));
         return 0;
     }
     if (wired > 0) try Dir.cwd().writeFile(io, .{ .sub_path = bootstrap, .data = bootstrap_src });
-    prompt.outro(try std.fmt.allocPrint(allocator, "Updated {d} plugin(s) · {d} new · {d} refreshed asset(s) · {d} ui mirror(s) synced · {d} Support require(s) wired", .{ touched, new_total, changed_total, ui_synced, wired }));
+    prompt.outro(try std.fmt.allocPrint(allocator, "Updated {d} plugin(s) · {d} new · {d} refreshed asset(s) · {d} kept (differ from the plugin) · {d} ui mirror(s) synced · {d} Support require(s) wired", .{ touched, new_total, changed_total, kept_total, ui_synced, wired }));
     return 0;
 }
 
@@ -1519,7 +1540,7 @@ fn updatePlugins(
 ///      still marks the migration applied, so the table + its data are preserved.
 ///      This is the data-safety step — it prevents a later disable of the OLD
 ///      plugin from dropping a table the NEW plugin now owns.
-fn upgradeProject(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []const u8, dry_run: bool) !u8 {
+fn upgradeProject(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []const u8, dry_run: bool, overwrite: bool) !u8 {
     const root = (try requireRoot(allocator, io, env, target)) orelse return 1;
 
     const bootstrap = try std.fmt.allocPrint(allocator, "{s}/app/bootstrap/app.php", .{root});
@@ -1584,7 +1605,7 @@ fn upgradeProject(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []
 
     // ── Phase 2: publish NEW assets + run pending migrations for every plugin ────
     prompt.section("Assets + migrations");
-    _ = try updatePlugins(allocator, io, env, "", target, dry_run);
+    _ = try updatePlugins(allocator, io, env, "", target, dry_run, overwrite);
 
     // ── Phase 3: reconcile migration ownership across plugin splits ─────────────
     prompt.section("Split reconciliation (migration ownership)");
@@ -1628,6 +1649,26 @@ fn upgradeProject(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []
     }
     prompt.outro("Upgrade complete");
     return 0;
+}
+
+/// Report the published files `enable`/`update` left alone because they differ
+/// from the plugin's copy and nothing proves they are unedited.
+fn reportKept(allocator: std.mem.Allocator, kept: []const assets.KeptAsset, dry_run: bool, plugin: []const u8) void {
+    if (kept.len == 0) return;
+    prompt.warn(std.fmt.allocPrint(allocator, "{s} {d} file(s) that differ from {s}'s copy — its version {s} beside each as *{s} (--overwrite replaces them)", .{
+        if (dry_run) "Would keep" else "Kept",
+        kept.len,
+        plugin,
+        if (dry_run) "would be written" else "is",
+        assets.plugin_new_suffix,
+    }) catch return);
+    for (kept) |k| {
+        const line = if (k.also_published_by) |other|
+            std.fmt.allocPrint(allocator, "    = {s}  (also published by {s})", .{ k.path, other })
+        else
+            std.fmt.allocPrint(allocator, "    = {s}", .{k.path});
+        prompt.muted(line catch k.path);
+    }
 }
 
 fn containsStr(haystack: []const []const u8, needle: []const u8) bool {
@@ -2015,7 +2056,7 @@ fn printHelp() void {
     prompt.item("hkm plugins recover [proj]", "rebuild var/plugin-assets.json from on-disk assets (aliases: rebuild/reindex)");
     prompt.item("hkm plugins enable <plugin> [proj]", "wire a plugin into the project bootstrap");
     prompt.item("hkm plugins disable <plugin> [proj]", "remove a plugin from the project bootstrap");
-    prompt.item("hkm plugins update [plugin] [proj]", "analyse enabled plugin(s) vs the project (config/database/resources/ui): publish new + refresh changed assets, re-sync a drifted ui mirror, migrate central + tenant DBs; wire any missing Support/helpers.php require");
+    prompt.item("hkm plugins update [plugin] [proj]", "analyse enabled plugin(s) vs the project (config/database/resources/ui): publish new assets, refresh unedited ones, keep edited ones (plugin copy → *.plugin-new), re-sync a drifted ui mirror, migrate central + tenant DBs; wire any missing Support/helpers.php require");
     prompt.item("hkm plugins upgrade [proj]", "full upgrade after plugins changed: heal new deps, publish/migrate, reconcile plugin SPLITS (moves migration ownership without dropping data)");
     prompt.item("hkm plugins create <name> [proj]", "scaffold a new plugin (project, or --kernel)");
     prompt.item("hkm plugins delete <name> [proj]", "delete a plugin folder from disk");
@@ -2040,6 +2081,7 @@ fn printHelp() void {
     prompt.item("--essential, -e", "enable into withEssentialModules() (default: on-demand)");
     prompt.item("--kernel, -k", "create/delete a KERNEL plugin (kernel monorepo only)");
     prompt.item("--dry-run, -n", "preview the change without writing");
+    prompt.item("--overwrite", "update/upgrade: replace published files that differ from the plugin's copy (default: keep them + write <file>.plugin-new)");
     prompt.item("--version=<tag>", "install/update to a specific release instead of the newest");
     prompt.item("--force", "overwrite a plugin working copy that has uncommitted changes");
     prompt.item("--full", "clone full history instead of a shallow --depth 1");

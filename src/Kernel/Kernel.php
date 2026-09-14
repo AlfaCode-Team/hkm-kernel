@@ -13,8 +13,10 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\KernelException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\{WorkerLoop, WorkerPipeline};
-use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\{CachePort, ClockPort, LoggerPort, QueuePort, SystemClock};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\{RouteIndex, UrlGenerator};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Scheduling\Scheduler;
+use AlfacodeTeam\PhpServicePlatform\Commands\Schedule\{ScheduleListCommand, ScheduleRunCommand};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\SecurityLayerContract};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
@@ -620,11 +622,38 @@ final class Kernel
             UrlGenerator::class,
             static fn(): UrlGenerator => UrlGenerator::fromManifest((string) (env('APP_URL') ?: '')),
         );
+        // The scheduler is a lazy singleton: it reads schedule-manifest.php on
+        // first use, so an HTTP process that never schedules anything never
+        // touches the file. Ports are optional — an application with no queue
+        // still gets `schedule:list`, and a task it cannot dispatch is reported
+        // as skipped rather than failing the boot.
+        $this->core->singleton(
+            Scheduler::class,
+            fn(): Scheduler => new Scheduler(
+                queue:  $this->core->has(QueuePort::class) ? $this->core->make(QueuePort::class) : null,
+                cache:  $this->core->has(CachePort::class) ? $this->core->make(CachePort::class) : null,
+                logger: $this->core->has(LoggerPort::class) ? $this->core->make(LoggerPort::class) : null,
+                clock:  $this->core->has(ClockPort::class) ? $this->core->make(ClockPort::class) : new SystemClock(),
+                // Routing a `command` task back through the CLI pipeline is what
+                // makes "run this command on a schedule" mean the same thing as
+                // typing it — same resolution, same container, same output.
+                commandRunner: fn(string $line): int => $this->cli->run(
+                    ['hkm', ...preg_split('/\s+/', trim($line)) ?: []],
+                ),
+            ),
+        );
+
         $this->core->instance(EventBus::class, $this->eventBus);
         $this->core->instance(WorkerPipeline::class, $this->workerPipe);
         $this->core->instance(HttpPipeline::class, $this->http);
         $this->core->instance(CliPipeline::class, $this->cli);
         $this->core->instance(ErrorPipeline::class, $errorPipeline);
+
+        // The scheduler's own commands. Registered as class-strings so
+        // CliPipeline builds them through the core container, which is what
+        // injects the Scheduler above.
+        $this->cli->command(ScheduleRunCommand::class);
+        $this->cli->command(ScheduleListCommand::class);
 
         // Wire each module ONCE — hooks + event subscriptions on live instances.
         foreach ($this->moduleClasses as $moduleClass) {

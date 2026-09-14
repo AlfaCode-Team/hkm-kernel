@@ -33,6 +33,7 @@ test {
     _ = @import("commands/list.zig");
     _ = @import("commands/module.zig");
     _ = @import("commands/new.zig");
+    _ = @import("commands/ppkg.zig");
     _ = @import("commands/plugins.zig");
     _ = @import("commands/run.zig");
     _ = @import("commands/service.zig");
@@ -52,6 +53,10 @@ test {
     _ = @import("lib/inspector/tracked.zig");
     _ = @import("lib/kernel.zig");
     _ = @import("lib/memory.zig");
+    // The package manager proper lives in its own repository — modules/hkm-ppkg —
+    // and runs its own suite (`zig build test` there, and via build.zig here).
+    // Only the hkm-specific half of it is tested from this file.
+    _ = @import("lib/ppkg/testenv.zig");
     _ = @import("lib/plugin_assets.zig");
     _ = @import("lib/plugin_bootstrap.zig");
     _ = @import("lib/plugin_env.zig");

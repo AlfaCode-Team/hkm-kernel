@@ -15,6 +15,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages\{
     CompileViewManifestStage,
     CompileLangManifestStage,
     CompileJobManifestStage,
+    CompileScheduleManifestStage,
     CompileCommandManifestStage,
     CompileConfigManifestStage,
     CompileModuleFilesStage,
@@ -117,8 +118,9 @@ final class BootPipeline
             new CompileLangManifestStage($moduleClasses, reader: $reader),    // 7. lang[] → lang-manifest.php (project-first cascade)
             new CompileJobManifestStage($moduleClasses, reader: $reader),     // 8. jobs[] → job-manifest.php
             new CompileCommandManifestStage($moduleClasses, reader: $reader), // 9. commands[] → command-manifest.php
-            new CompileConfigManifestStage($moduleClasses),                   // 10. config/*.php → config-manifest.php (project over plugin)
-            new CompileModuleFilesStage($moduleClasses, reader: $reader),     // 11. files[] / composer autoload.files → files-manifest.php
+            new CompileScheduleManifestStage($moduleClasses, reader: $reader),// 10. schedule[] → schedule-manifest.php (cron parsed HERE)
+            new CompileConfigManifestStage($moduleClasses),                   // 11. config/*.php → config-manifest.php (project over plugin)
+            new CompileModuleFilesStage($moduleClasses, reader: $reader),     // 12. files[] / composer autoload.files → files-manifest.php
         ];
 
         $this->alwaysStages = [
@@ -126,8 +128,8 @@ final class BootPipeline
         ];
 
         $this->validateStages = [
-            new RegisterPortsStage($core),                   // 12. Port → Adapter bindings validated
-            new BindSecurityStage($securityLayers),          // 13. SecurityGateway layers validated
+            new RegisterPortsStage($core),                   // 13. Port → Adapter bindings validated
+            new BindSecurityStage($securityLayers),          // 14. SecurityGateway layers validated
         ];
     }
 

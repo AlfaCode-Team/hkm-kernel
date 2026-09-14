@@ -6,6 +6,7 @@ const run_cmd = @import("commands/run.zig");
 const list_cmd = @import("commands/list.zig");
 const discover_cmd = @import("commands/discover.zig");
 const env_cmd = @import("commands/env.zig");
+const ppkg_cmd = @import("commands/ppkg.zig");
 const plugins_cmd = @import("commands/plugins.zig");
 const module_cmd = @import("commands/module.zig");
 const ui_cmd = @import("commands/ui.zig");
@@ -20,6 +21,7 @@ const util = @import("lib/util.zig");
 const userconfig = @import("lib/userconfig.zig");
 const banner = @import("lib/banner.zig");
 const prompt = @import("lib/prompt.zig");
+const ppkg = @import("ppkg");
 const memory = @import("lib/memory.zig");
 
 fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ.Map) void {
@@ -38,6 +40,7 @@ fn printHelp(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
     prompt.item("hkm env [audit|dedupe|group]", "audit a project's .env: duplicate keys, grouping");
     prompt.item("hkm module [create|delete]", "scaffold a first-party kernel package (modules/)");
     prompt.item("hkm ui [sync|list|link|clean]", "federate enabled plugins' UIs into the frontend");
+    prompt.item("hkm ppkg [install|autoload|…]", "native package manager — Composer without the PHP");
     prompt.item("hkm update <path|name>", "refresh a project's kernel registry entry");
     prompt.item("hkm upgrade [--check]", "update YOUR install; sudo hkm upgrade updates the system one");
     prompt.item("hkm upgrade --local", "install THIS checkout over an installed kernel");
@@ -136,6 +139,26 @@ fn phpBin(allocator: std.mem.Allocator, env_map: *std.process.Environ.Map) ![]co
         return v;
     }
     return try allocator.dupe(u8, "php");
+}
+
+/// Does the command being invoked define `--dev` itself?
+///
+/// True only when the flag appears AFTER the subcommand that owns it, so the
+/// kernel-selecting `hkm --dev ppkg require x` is unaffected. The list is
+/// deliberately tiny: it names the commands that mirror a Composer flag, and
+/// nothing is added to it without that reason.
+fn ownsDevFlag(args: []const []const u8) bool {
+    if (args.len < 3) return false;
+    if (!std.mem.eql(u8, args[1], "ppkg")) return false;
+
+    const sub = args[2];
+    const owns = std.mem.eql(u8, sub, "require") or std.mem.eql(u8, sub, "req") or
+        std.mem.eql(u8, sub, "r") or std.mem.eql(u8, sub, "remove") or
+        std.mem.eql(u8, sub, "rm");
+    if (!owns) return false;
+
+    for (args[3..]) |a| if (std.mem.eql(u8, a, "--dev")) return true;
+    return false;
 }
 
 /// Entry point.
@@ -254,6 +277,29 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
     // runs, prompt falls back to stderr, so it must come first.
     prompt.init(io, &env_map);
 
+    // modules/hkm-ppkg prints nothing on its own — a library that writes to a
+    // host's stdout has decided the host's interface for it. Hand it this
+    // tool's output style so `hkm ppkg` looks like every other hkm command.
+    // Must follow prompt.init, whose streams these close over.
+    ppkg.report.use(.{
+        .intro = prompt.intro,
+        .outro = prompt.outro,
+        .section = prompt.section,
+        .item = prompt.item,
+        .note = prompt.note,
+        .ok = prompt.ok,
+        .muted = prompt.muted,
+        .warn = prompt.warn,
+        .err = prompt.err,
+        .blank = prompt.blank,
+        .raw = prompt.raw,
+        // `-q` / `--ansi` are parsed by the package's command line and reach
+        // this tool's renderer through here. Leaving them out would not fail —
+        // it would make both flags silently do nothing under `hkm ppkg`.
+        .quiet = prompt.setQuiet,
+        .color = prompt.setColor,
+    });
+
     // Load persistent config (~/.config/hkm/config.env) so values written by
     // `hkm-config` take effect. Real environment variables always win.
     userconfig.load(allocator, io, &env_map);
@@ -272,8 +318,17 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
     defer args_list.deinit(allocator);
     memory_inspect_requested = util.envIsTruthy(&env_map, "HKM_MEM_INSPECT");
     memory_strict = util.envIsTruthy(&env_map, "HKM_MEM_STRICT");
+
+    // …EXCEPT where `--dev` already means something else to the command being
+    // run. `hkm ppkg require --dev phpunit/phpunit` is the spelling every PHP
+    // developer already has in their fingers, and swallowing it here put the
+    // package in `require` instead of `require-dev` — silently, with a success
+    // message. A subcommand that owns the flag keeps it; `hkm --dev ppkg …`
+    // still selects the development kernel, because the flag comes first.
+    const dev_is_subcommand_flag = ownsDevFlag(raw_args);
+
     for (raw_args) |a| {
-        if (std.mem.eql(u8, a, "--dev")) {
+        if (std.mem.eql(u8, a, "--dev") and !dev_is_subcommand_flag) {
             dev_mode = true;
             continue;
         }
@@ -398,6 +453,11 @@ fn dispatch(init: std.process.Init.Minimal, mm: *memory.Manager) !u8 {
         var scope = CmdScope.begin(mm, "module");
         defer scope.end();
         return try module_cmd.run(scope.allocator(), io, &env_map, args);
+    }
+    if (std.mem.eql(u8, cmd, "ppkg")) {
+        var scope = CmdScope.begin(mm, "ppkg");
+        defer scope.end();
+        return try ppkg_cmd.run(scope.allocator(), io, &env_map, args);
     }
     if (std.mem.eql(u8, cmd, "plugins") or std.mem.eql(u8, cmd, "modules")) {
         var scope = CmdScope.begin(mm, "plugins");

@@ -1,0 +1,20 @@
+{
+  "name":    "scheduled",
+  "version": "1.0.0",
+  "solves":  "schedule.demo",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "schedule": [
+    { "name": "reports.nightly", "at": "0 2 * * *",
+      "job": "App\\Jobs\\NightlyReport", "queue": "reports",
+      "payload": { "format": "pdf" },
+      "withoutOverlapping": true, "expiresAfter": 7200,
+      "timezone": "Africa/Nairobi" },
+
+    { "name": "cache.prune", "at": "@hourly", "command": "cache:prune --stale" },
+
+    { "name": "clamped.expiry", "at": "@daily", "job": "App\\Jobs\\X",
+      "withoutOverlapping": true, "expiresAfter": 5 }
+  ]
+}

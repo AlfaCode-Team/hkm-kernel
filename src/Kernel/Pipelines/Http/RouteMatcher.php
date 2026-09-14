@@ -120,7 +120,7 @@ final class RouteMatcher
      *        applied to the request host. Empty means only the shared group,
      *        which is every route in an application that groups nothing.
      *
-     * @return array{entry: array<string, mixed>, params: array<string, string>}|null
+     * @return array{entry: array<string, mixed>, params: array<string, string>, key: string}|null
      */
     public function match(string $method, string $path, array $domains = []): ?array
     {
@@ -208,7 +208,7 @@ final class RouteMatcher
      * `GET /` under `organizer` overrides the shared `GET /` on that host only.
      *
      * @param list<string> $domains most specific first
-     * @return array{entry: array<string, mixed>, params: array<string, string>}|null
+     * @return array{entry: array<string, mixed>, params: array<string, string>, key: string}|null
      */
     private function lookup(string $method, string $path, array $domains = []): ?array
     {
@@ -219,13 +219,13 @@ final class RouteMatcher
         if ($this->grouped) {
             foreach ($domains as $domain) {
                 if (isset($this->static[$domain][$key])) {
-                    return ['entry' => $this->static[$domain][$key], 'params' => []];
+                    return ['entry' => $this->static[$domain][$key], 'params' => [], 'key' => $key];
                 }
             }
         }
 
         if (isset($this->static[''][$key])) {
-            return ['entry' => $this->static[''][$key], 'params' => []];
+            return ['entry' => $this->static[''][$key], 'params' => [], 'key' => $key];
         }
 
         if ($this->grouped) {
@@ -244,7 +244,7 @@ final class RouteMatcher
      * Scan one domain+method's dynamic candidates in declaration order.
      *
      * @param array{buckets?: array<string, list<array<string, mixed>>>, wild?: list<array<string, mixed>>}|null $bucketed
-     * @return array{entry: array<string, mixed>, params: array<string, string>}|null
+     * @return array{entry: array<string, mixed>, params: array<string, string>, key: string}|null
      */
     private function scan(?array $bucketed, string $path): ?array
     {
@@ -298,7 +298,7 @@ final class RouteMatcher
      * identical to how a value that never matched the pattern behaves.
      *
      * @param array<string, mixed> $route
-     * @return array{entry: array<string, mixed>, params: array<string, string>}|null
+     * @return array{entry: array<string, mixed>, params: array<string, string>, key: string}|null
      */
     private function test(array $route, string $path): ?array
     {
@@ -334,7 +334,7 @@ final class RouteMatcher
             $params[$name] = $value;
         }
 
-        return ['entry' => $route['entry'], 'params' => $params];
+        return ['entry' => $route['entry'], 'params' => $params, 'key' => $route['key'] ?? ''];
     }
 
     /** '/users/' <-> '/users'. The root path has no alternate form. */

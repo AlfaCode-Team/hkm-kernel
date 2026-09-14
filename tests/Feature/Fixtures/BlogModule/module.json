@@ -1,0 +1,22 @@
+{
+  "name":    "blog",
+  "version": "1.0.0",
+  "solves":  "blog.publishing",
+  "type":    "module",
+
+  "requires": [],
+  "exposes":  ["PostServiceContract"],
+
+  "routePrefix": "/posts",
+
+  "routes": [
+    { "method": "GET",    "path": "",           "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@index", "name": "post.index" },
+    { "method": "GET",    "path": "/{id:num}",  "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@show",  "name": "post.show" },
+    { "method": "GET",    "path": "/me",        "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@mine",  "name": "post.mine" },
+    { "method": "POST",   "path": "",           "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@create", "name": "post.create" },
+    { "method": "DELETE", "path": "/{id:num}",  "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@destroy", "name": "post.destroy" },
+    { "method": "GET",    "path": "/boom",      "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@boom", "name": "post.boom" },
+    { "method": "GET",    "path": "/file/{path:path}", "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@file", "name": "post.file" },
+    { "method": "GET",    "path": "/internal",  "handler": "Tests\\Feature\\Fixtures\\BlogModule\\Infrastructure\\Http\\Controllers\\PostController@internal", "name": "post.internal" }
+  ]
+}

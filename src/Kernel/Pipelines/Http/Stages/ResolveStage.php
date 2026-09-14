@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Stages;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Http\{Request, Response};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Observability\RequestTelemetry;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Contracts\HttpStageContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\RouteMatcher;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteIndex;
@@ -48,6 +49,20 @@ final class ResolveStage implements HttpStageContract
 
         if (!$this->faceAllows($request, $match['entry'])) {
             return Response::notFound();
+        }
+
+        // Report the matched route TEMPLATE to the telemetry sink, if the
+        // observability stage put one on the request. This is the only place the
+        // template is known: ObservabilityStage runs OUTSIDE the router (so a
+        // denied or unmatched request still produces a metric), and an immutable
+        // attribute cannot carry a value back outward. See RequestTelemetry for
+        // why one deliberately mutable object is threaded through here.
+        $telemetry = $request->attribute('telemetry');
+        if ($telemetry instanceof RequestTelemetry) {
+            $telemetry->matched(
+                self::template($match['key'] ?? '', $method, $path),
+                (string) ($match['entry']['solves'] ?? ''),
+            );
         }
 
         // One clone, not three: chaining withAttribute() would build two
@@ -130,5 +145,23 @@ final class ResolveStage implements HttpStageContract
         }
 
         return in_array(strtolower($face), $faces, true);
+    }
+
+    /**
+     * The route TEMPLATE from a matched route key, for use as a metric label.
+     *
+     * A key is "METHOD /path" or "METHOD@domain /path", where the path still
+     * carries its `{id}` placeholders — which is exactly what a label needs. The
+     * domain is kept: two brands serving `GET /` are different routes, and
+     * collapsing them would merge their graphs.
+     *
+     * Falls back to "METHOD /path" built from the request only when the key is
+     * absent (a manifest compiled by an older kernel, where dynamic candidates
+     * carried no key). That fallback CAN be high-cardinality, so it is reached
+     * only on that legacy path and never in a freshly compiled application.
+     */
+    private static function template(string $key, string $method, string $path): string
+    {
+        return $key !== '' ? $key : $method . ' ' . $path;
     }
 }
