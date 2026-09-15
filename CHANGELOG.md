@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-09-15
+
+### Added
+- **`RangeReadableStorage`** — an optional interface a `StoragePort` implements
+  to report an object's `size()` and open part of it with `readRange()`.
+  `readStream()` was the only read the port declared, and on S3 it returns a
+  network body that can be neither stat'ed nor seeked, so a consumer honouring
+  `Range` (a PDF reader paging a large document) served ranges on the local
+  driver and silently sent whole objects on S3. Checked with `instanceof`, like
+  `DriverAware`, so existing `StoragePort` fakes need no change; a consumer
+  falls back to `readStream()` when the bound port does not implement it.
+
 ## [1.15.0] - 2026-09-14
 
 ### Added
