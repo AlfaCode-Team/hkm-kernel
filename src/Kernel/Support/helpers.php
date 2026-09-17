@@ -5,6 +5,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\ManifestReader;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Config\Repository;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\UrlGenerator;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Plugins;
 use Project\Support\Collection;
 
 /**
@@ -182,5 +183,44 @@ if (!function_exists('signed_route')) {
         bool $absolute = false,
     ): string {
         return url()->signedRoute($name, $parameters, $expiresIn, $absolute);
+    }
+}
+if (!function_exists('plugin_installed')) {
+    /**
+     * Is a plugin installed in THIS application?
+     *
+     *     plugin_installed('tenancy.routing')          // by solves domain
+     *     plugin_installed('tenancy')                  // or by module.json name
+     *     plugin_installed('tenancy.routing', 'audit.trail')   // all of them
+     *
+     * Read from the compiled service manifest — the kernel's own record of what
+     * withModules([...]) registered. With no arguments, returns false: "every
+     * plugin in an empty list is installed" is never what a caller meant.
+     *
+     * Prefer declaring a hard dependency in the module's own module.json
+     * requires[] — that fails the BOOT with a descriptive message instead of
+     * failing a request. Use this for OPTIONAL integrations, and for code with
+     * no module.json of its own (a standalone CLI entry point, a bootstrap
+     * file, a template). {@see Plugins::ensure()} to fail loudly instead.
+     */
+    function plugin_installed(string ...$domainsOrNames): bool
+    {
+        if ($domainsOrNames === []) {
+            return false;
+        }
+
+        return Plugins::missing(...$domainsOrNames) === [];
+    }
+}
+
+if (!function_exists('installed_plugins')) {
+    /**
+     * Every installed module, `solves` domain => module.json `name`.
+     *
+     * @return array<string, string>
+     */
+    function installed_plugins(): array
+    {
+        return Plugins::all();
     }
 }
