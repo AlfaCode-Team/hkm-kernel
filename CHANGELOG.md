@@ -6,6 +6,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-09-17
+
+### Added
+- **`Plugins` and `plugin_installed()`** — is a module actually installed in
+  this application? Answered from the compiled `service-manifest.php`, whose
+  keys are the `solves` domains of everything the project passed to
+  `withModules([...])`, so it needs no knowledge of any particular plugin and no
+  directory scan. `plugin_installed('tenancy.routing')` takes a domain or a
+  module.json `name`, and several at once; `installed_plugins()` returns the
+  whole map; `Plugins::ensure(...)` throws a `KernelException` naming what is
+  missing AND what IS registered, because the usual cause is a domain spelled
+  differently from the plugin's `solves` rather than a plugin that is really
+  absent.
+
+  A module that cannot work without another one should still declare it in its
+  own `module.json` `requires[]` — `CompileServiceManifestStage` fails the BOOT
+  there, which an operator sees at deploy time instead of when a request happens
+  to reach the feature. This is for what `requires[]` cannot cover: an OPTIONAL
+  integration that should light up when a plugin is present and degrade quietly
+  when it is not, and code running outside the module graph — a standalone CLI
+  entry point, a bootstrap file, a template — which has no `module.json` to
+  declare anything in. An absent plugin is therefore a `false`, never a throw,
+  unless `ensure()` is the call.
+
 ## [1.16.0] - 2026-09-15
 
 ### Added
