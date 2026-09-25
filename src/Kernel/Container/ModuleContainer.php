@@ -179,6 +179,7 @@ final class ModuleContainer extends Container
     {
         try {
             return parent::resolveClass($parameter);
+        /** @phpstan-ignore-next-line thrown by this container's make(), which bind-it calls polymorphically and does not declare */
         } catch (EntryNotFoundException $e) {
             if ($parameter->isDefaultValueAvailable() && !$parameter->isVariadic()) {
                 return $parameter->getDefaultValue();
