@@ -4,7 +4,18 @@ All notable changes to the AlfacodeTeam PhpServicePlatform (Sentinel) kernel are
 documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.17.1] - 2026-09-25
+
+### Fixed
+- **An optional constructor dependency now receives its default when nothing
+  binds it.** A parameter written `?SomeContract $x = null` threw
+  `EntryNotFoundException` from `ModuleContainer` whenever the module providing
+  `SomeContract` was not in the request's dependency graph. bind-it falls back
+  to a parameter's default only on its own `BindingResolutionException`, and
+  `ModuleContainer` signals "unbound" with `EntryNotFoundException`, so the
+  fallback never fired. `ModuleContainer::resolveClass()` now applies the same
+  fallback to its own exception. A parameter with no default still fails
+  loudly, unchanged.
 
 ## [1.17.0] - 2026-09-17
 

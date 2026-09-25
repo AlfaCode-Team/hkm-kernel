@@ -161,6 +161,33 @@ final class ModuleContainer extends Container
         }
     }
 
+    /**
+     * Honour a constructor parameter's DEFAULT when its type is unbound here.
+     *
+     * bind-it falls back to `$parameter->getDefaultValue()` only when resolution
+     * throws its own BindingResolutionException. This container signals
+     * "nothing bound" with EntryNotFoundException instead, which bind-it does
+     * not catch — so `?SomeContract $x = null`, the idiomatic way to declare an
+     * optional collaborator, threw rather than receiving null whenever the
+     * module providing the contract was not in this request's graph.
+     *
+     * A parameter with no default still throws, unchanged: a required
+     * dependency that is missing must fail loudly. No `with` stack to unwind —
+     * the EntryNotFoundException is raised in make() before bind-it pushes one.
+     */
+    protected function resolveClass(\ReflectionParameter $parameter): mixed
+    {
+        try {
+            return parent::resolveClass($parameter);
+        } catch (EntryNotFoundException $e) {
+            if ($parameter->isDefaultValueAvailable() && !$parameter->isVariadic()) {
+                return $parameter->getDefaultValue();
+            }
+
+            throw $e;
+        }
+    }
+
     public function has(string $id): bool
     {
         $resolved = $this->getAlias($id);
