@@ -2,8 +2,10 @@ name: Docs
 
 # Builds the documentation site in website/ and publishes it to GitHub Pages.
 # One-time setup: Settings → Pages → Source: "GitHub Actions".
-# The site is served at https://alfacode-team.github.io/hkm-kernel/ — hence
-# DOCS_BASE. With a custom domain, set DOCS_BASE to "/" (or drop the line).
+# The site is served from the root of its custom domain (Settings → Pages →
+# Custom domain: hkm-kernel.hkmcode.com), hence DOCS_BASE "/". Without a custom
+# domain it would live under /hkm-kernel/, and DOCS_BASE must say so — a wrong
+# base still serves the HTML but 404s every stylesheet and script.
 "on":
   push:
     branches: [main]
@@ -39,7 +41,7 @@ jobs:
       # Fails on any dead internal link (ignoreDeadLinks: false).
       - run: npm run build
         env:
-          DOCS_BASE: /hkm-kernel/
+          DOCS_BASE: /
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
