@@ -55,7 +55,12 @@ pub const Info = struct {
 /// Reached per platform, like `install_scope.isRoot`: the raw statx syscall on
 /// Linux (no libc needed for a static launcher), fstatat through libc elsewhere.
 pub fn lstat(allocator: std.mem.Allocator, path: []const u8) ?Info {
-    const z = allocator.dupeZ(u8, path) catch return null;
+    // Copied by hand: Allocator.dupeZ is gone in the Zig CI pins (0.17-dev).
+    const path_buf = allocator.alloc(u8, path.len + 1) catch return null;
+    defer allocator.free(path_buf);
+    @memcpy(path_buf[0..path.len], path);
+    path_buf[path.len] = 0;
+    const z: [:0]const u8 = path_buf[0..path.len :0];
     switch (builtin.os.tag) {
         .windows => return null,
         .linux => {
