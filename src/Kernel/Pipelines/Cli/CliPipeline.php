@@ -51,6 +51,8 @@ final class CliPipeline
      */
     private bool $materialized = false;
 
+    private bool $declaredRegistered = false;
+
     public function __construct(
         private readonly CoreContainer $core,
         private readonly ErrorPipeline $errorPipeline,
@@ -157,6 +159,15 @@ final class CliPipeline
         }
     }
 
+    /** Add module.json `commands[]` that boot() did not register — see DeclaredCommands. */
+    private function registerDeclaredCommands(): void
+    {
+        if (!$this->declaredRegistered) {
+            $this->declaredRegistered = true;
+            DeclaredCommands::register($this->app, $this->commands(), $this->instantiate(...));
+        }
+    }
+
     /** @return list<class-string<AbstractCommand>> */
     public function commands(): array
     {
@@ -170,6 +181,7 @@ final class CliPipeline
     public function application(): CLIApplication
     {
         $this->materialize();
+        $this->registerDeclaredCommands();
         return $this->app;
     }
 
@@ -196,6 +208,13 @@ final class CliPipeline
         // Build commands now — deferred from registration so non-CLI entry
         // points never pay for them.
         $this->materialize();
+
+        // Declared-only commands are needed only when the requested name is not
+        // already registered — `list`, `help`, or a command boot() never added.
+        // The usual case, running a registered command, never reads the manifest.
+        if (!$this->app->has($argv[1] ?? '')) {
+            $this->registerDeclaredCommands();
+        }
 
         // We own error handling so failures reach the ErrorPipeline.
         $this->app->catchExceptions(false);

@@ -69,10 +69,13 @@ jobs:
     permissions:
       contents: read
       security-events: write   # upload SARIF to code scanning
-    container:
-      image: semgrep/semgrep
+    # Installed from PyPI, not run in the semgrep/semgrep container: the
+    # runner pulls that image from Docker Hub unauthenticated, and Docker
+    # Hub's anonymous rate limit failed the job before Semgrep ever started.
     steps:
       - uses: actions/checkout@v7
+      - name: Install Semgrep
+        run: pipx install semgrep
       - name: Run Semgrep (PHP + security rulesets)
         run: semgrep scan --sarif --output=semgrep.sarif --config=p/php --config=p/security-audit --config=p/secrets
         env:

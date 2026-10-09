@@ -13,11 +13,11 @@
         "service-platform",
         "ddd"
     ],
-    "homepage": "https://github.com/AlfaCode-Team/php-service-platform",
+    "homepage": "https://github.com/AlfaCode-Team/hkm-kernel",
     "support": {
-        "issues": "https://github.com/AlfaCode-Team/php-service-platform/issues",
-        "source": "https://github.com/AlfaCode-Team/php-service-platform",
-        "security": "https://github.com/AlfaCode-Team/php-service-platform/security/policy"
+        "issues": "https://github.com/AlfaCode-Team/hkm-kernel/issues",
+        "source": "https://github.com/AlfaCode-Team/hkm-kernel",
+        "security": "https://github.com/AlfaCode-Team/hkm-kernel/security/policy"
     },
     "require": {
         "alfacode-team/http": "^1.0",

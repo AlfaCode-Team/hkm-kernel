@@ -39,6 +39,7 @@ const plugin_provision = @import("../lib/plugin_provision.zig");
 const plugins_cmd = @import("plugins.zig");
 const installer = @import("../lib/plugin_install.zig");
 const pstore = @import("../lib/plugin_store.zig");
+const project_perms = @import("../lib/project_perms.zig");
 
 const Dir = std.Io.Dir;
 const Io = std.Io;
@@ -85,6 +86,14 @@ const Options = struct {
     /// unless the process already owns the target files. Setting it triggers
     /// the hardening pass on its own, independent of --production.
     owner: ?[]const u8 = null,
+    /// --check: report whether the web server's account can use the gitignored
+    /// runtime paths (.env*, var/, userdata/) — and change nothing. For a tree
+    /// deployed by pushing git (git-ftp, rsync), where those are the only paths
+    /// the deploy never touches and so the ones whose ownership drifts.
+    check: bool = false,
+    /// --as=<user> (also HKM_POOL_USER, default www-data) — the account --check
+    /// judges access for: the one PHP-FPM runs as.
+    as: ?[]const u8 = null,
 };
 
 fn parse(args: []const []const u8) ?Options {
@@ -114,6 +123,14 @@ fn parse(args: []const []const u8) ?Options {
             if (i + 1 >= args.len) return null;
             i += 1;
             o.owner = args[i];
+        } else if (std.mem.eql(u8, a, "--check")) {
+            o.check = true;
+        } else if (std.mem.startsWith(u8, a, "--as=")) {
+            o.as = a["--as=".len..];
+        } else if (std.mem.eql(u8, a, "--as")) {
+            if (i + 1 >= args.len) return null;
+            i += 1;
+            o.as = args[i];
         } else if (std.mem.startsWith(u8, a, "--")) {
             // unknown flag — ignore so future flags don't hard-fail. Nothing
             // this command does is destructive enough to warrant rejecting one
@@ -146,22 +163,27 @@ fn printHelp() void {
     prompt.item("--verify-plugins", "run each plugin's own test suite while installing (slow)");
     prompt.item("--production, --prod", "harden the WHOLE tree: code 0750/0640, var+userdata 2770/0660");
     prompt.item("--owner=<user>[:<group>]", "chown the project AND its linked plugin store entries to this user[:group] (needs root/sudo)");
+    prompt.item("--check", "REPORT ONLY: can the web server use .env*, var/ and userdata/? changes nothing");
+    prompt.item("--as=<user>", "with --check: the account PHP-FPM runs as (default www-data)");
     prompt.item("--help, -h", "show this help");
     prompt.blank();
     prompt.section("Environment");
     prompt.item("HKM_PROD_OWNER", "default --owner when it is not passed explicitly");
+    prompt.item("HKM_POOL_USER", "default --as for --check");
     prompt.item("HKM_CHOWN_BIN", "override the chown binary (default: chown)");
     prompt.blank();
     prompt.section("Examples");
     prompt.note("cd my-shop && hkm install");
     prompt.note("sudo hkm install --production --owner=deploy:www-data");
     prompt.muted("code readable+traversable by the pool's group, var/ and userdata/ writable, .env 0640.");
+    prompt.note("sudo hkm install --check --as=www-data --owner=:www-data");
+    prompt.muted("after a git-ftp/rsync deploy: are the files the deploy does not ship usable by the pool?");
     prompt.outro("Run this once after `git clone` / `git pull` on a machine new to the project");
 }
 
 pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []const u8) !u8 {
     var opts = parse(args) orelse {
-        prompt.err("--owner needs a value.");
+        prompt.err("--owner and --as need a value.");
         printHelp();
         return 2;
     };
@@ -186,6 +208,18 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
         ));
         return 1;
     };
+
+    // --check is read-only and stands alone: none of the steps below run.
+    if (opts.check) {
+        const as = opts.as orelse (if (env.get("HKM_POOL_USER")) |v| (if (v.len > 0) v else null) else null) orelse "www-data";
+        return project_perms.check(allocator, io, env, root, .{
+            .as = as,
+            .owner = opts.owner,
+            .runtime_dirs = &runtime_dirs,
+            .writable_subdirs = &writable_subdirs,
+            .secret_mode = Modes.of(true).secret,
+        });
+    }
 
     const manifest = try readManifest(allocator, io, root);
     prompt.intro(try std.fmt.allocPrint(allocator, "Install project '{s}'", .{manifest.name}));
@@ -589,7 +623,7 @@ fn applyTree(allocator: std.mem.Allocator, io: Io, path: []const u8, dir_mode: u
 /// chmod one regular file to `mode`, KEEPING it executable if it already was.
 ///
 /// A flat `chmod 0640` over the tree is the obvious implementation and it
-/// breaks the install: `bin/psp`, `vendor/bin/*` and every shipped shell script
+/// breaks the install: `vendor/bin/*` launchers and every shipped shell script
 /// lose their exec bit, and the failure surfaces as "command not found" long
 /// after this command reported success. The exec bit is re-granted exactly
 /// where `mode` grants read, so it never widens access beyond the profile.

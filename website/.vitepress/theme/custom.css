@@ -1,0 +1,25 @@
+/* Brand: the green of the HKM Kernel feature graphic. */
+:root {
+  --vp-c-brand-1: #2f6b4a;
+  --vp-c-brand-2: #3d7a57;
+  --vp-c-brand-3: #4a8a65;
+  --vp-c-brand-soft: rgba(61, 122, 87, 0.14);
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #2f6b4a 20%, #6fae86);
+  --vp-home-hero-image-background-image: linear-gradient(-45deg, #3d7a57 40%, #8cc5a1 60%);
+  --vp-home-hero-image-filter: blur(56px);
+}
+
+.dark {
+  --vp-c-brand-1: #7cc199;
+  --vp-c-brand-2: #67ad85;
+  --vp-c-brand-3: #4f9570;
+  --vp-c-brand-soft: rgba(124, 193, 153, 0.16);
+}
+
+/* Wide reference tables stay readable on phones. */
+.vp-doc table {
+  display: block;
+  overflow-x: auto;
+}

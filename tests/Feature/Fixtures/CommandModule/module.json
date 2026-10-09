@@ -1,0 +1,15 @@
+{
+  "name":    "commands-fixture",
+  "version": "1.0.0",
+  "solves":  "test.commands",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "commands": [
+    { "name": "fixture:declared", "handler": "Tests\\Feature\\Fixtures\\CommandModule\\DeclaredCommand" },
+    { "name": "fixture:both",     "handler": "Tests\\Feature\\Fixtures\\CommandModule\\BothCommand" },
+    { "name": "fixture:wired",    "handler": "Tests\\Feature\\Fixtures\\CommandModule\\WiredCommand" },
+    { "name": "fixture:optional", "handler": "Tests\\Feature\\Fixtures\\CommandModule\\OptionalWiredCommand" },
+    "InventoryOnlyCommand"
+  ]
+}

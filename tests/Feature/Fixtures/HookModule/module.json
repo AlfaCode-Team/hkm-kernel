@@ -1,0 +1,11 @@
+{
+  "name":    "hooks",
+  "version": "1.0.0",
+  "solves":  "test.hooks",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "routes": [
+    { "method": "POST", "path": "/hooked", "handler": "Tests\\Feature\\Fixtures\\HookModule\\HookedController@create", "name": "hooks.create" }
+  ]
+}

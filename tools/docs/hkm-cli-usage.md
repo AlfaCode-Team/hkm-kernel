@@ -84,6 +84,8 @@ hkm install [path|name] [options]
 --verify-plugins           run each plugin's own test suite while installing (slow)
 --production, --prod       harden the WHOLE tree: code 0750/0640, var+userdata 2770/0660
 --owner=<user>[:<group>]   chown the whole project to this user[:group] (needs root/sudo)
+--check                    REPORT ONLY: can the web server use .env*, var/ and userdata/?
+--as=<user>                with --check: the account PHP-FPM runs as (default www-data)
 ```
 
 What it does, in order: registers the project in the kernel registry; recreates
@@ -191,6 +193,54 @@ hkm install shop                # by registered name
 hkm install --no-install        # vendor/ already cached — skip composer
 sudo hkm install --production --owner=deploy:www-data     # on a server
 HKM_PROD_OWNER=deploy:www-data sudo hkm install --production
+```
+
+### `--check` — is it right? (read-only)
+
+A project deployed by pushing its git tree (git-ftp, rsync, a CI job) only
+ever uploads what git tracks. What git ignores is created ON the server by
+whoever happened to create it: `.env` and its per-domain siblings written over
+SSH as root, `var/` and `userdata/` made by the first request or by a CLI run
+under sudo. Those are the paths whose ownership drifts, and the failure is
+quiet: the env loader skips an unreadable `.env.*` without a word, so a key
+"set" in it simply is not.
+
+`--check` inspects exactly those paths and **changes nothing**. It runs on its
+own, and none of the install steps above run with it:
+
+| Checked | Problem when |
+|---|---|
+| every parent of the project | the pool account cannot pass through it |
+| `.env`, `.env.<domain>`, `.env.local`, … (not `.env.example`) | the pool cannot read it, it is readable by every account, or it is group-writable |
+| `var/logs`, `var/cache/manifests`, … `userdata/storage` | missing |
+| everything under `var/` and `userdata/` | the pool cannot read+write a file, or create files in a directory |
+| with `--owner=` | owner or group differs |
+| directories under `var/`/`userdata/` without setgid | reported as a warning, not a failure |
+
+Access is evaluated the way the kernel does it: owner class, then group
+membership, then other, from the file's real owner and group, for the account
+named by `--as` (else `HKM_POOL_USER`, else `www-data`). Comparing mode bits
+alone cannot do this: `0640 root:root` and `0640 deploy:www-data` look the
+same, and only the second is readable by `www-data`. ACLs and SELinux labels
+are not modelled.
+
+Exit code `0` = correct, `1` = problems (the fix is printed), `2` = could not
+check (unknown account). Run it with `sudo` if the account you are logged in as
+cannot list `var/`: a directory the check cannot open is reported as not
+inspected, never as fine.
+
+```bash
+cd /var/www/hkmvote
+sudo hkm install --check --as=www-data                  # the pool's access only
+sudo hkm install --check --as=www-data --owner=:www-data # and the expected group
+```
+
+When it reports problems, the fixer is the hardening pass above. After a
+git-ftp deploy, keep the FTP account as owner and grant the pool through the
+group:
+
+```bash
+sudo hkm install --production --owner=:www-data --no-register --no-key --no-install --no-plugins
 ```
 
 ---
