@@ -69,6 +69,7 @@ test {
     _ = @import("lib/plugin_sources.zig");
     _ = @import("lib/plugin_store.zig");
     _ = @import("lib/plugin_ui.zig");
+    _ = @import("lib/project_perms.zig");
     _ = @import("lib/prompt.zig");
     _ = @import("lib/registry.zig");
     _ = @import("lib/semver.zig");
