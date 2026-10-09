@@ -27,11 +27,13 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
  *   3. ObservabilityStage      — RED metrics + root span (no-op unless a port is bound)
  *   4. SecurityStage           — run SecurityGateway (pre-bootstrap)
  *      ↳ after.security hooks  — module-registered stages
- *   3. ResolveStage            — match route → service via RouteMatcher
- *   4. LoadStage               — dep graph → OnDemandLoader
+ *   5. ResolveStage            — match route → service via RouteMatcher
+ *   6. LoadStage               — dep graph → OnDemandLoader
  *      ↳ after.load hooks      — module-registered stages
- *   5. ExecuteStage            — resolve controller → run → Response
- *      ↳ after.execute hooks   — module-registered stages
+ *   7. RouteFilterStage        — the matched route's declared filters[]
+ *      ↳ after.execute hooks   — module-registered stages; each calls $next()
+ *                                 and post-processes the controller's Response
+ *   8. ExecuteStage            — resolve controller → run → Response (terminal)
  *
  * Hooks are registered ONCE during module boot() (at kernel build), so the
  * stage list is stable and is compiled exactly once on the first request, then
@@ -164,8 +166,13 @@ final class HttpPipeline
             ),
             ...$this->resolveHook('after.load'),
             new RouteFilterStage($this->filters, $this->core),
-            new ExecuteStage(),
+            // after.execute hooks sit IN FRONT of ExecuteStage, not behind it.
+            // ExecuteStage is terminal — it returns the controller's Response and
+            // never calls $next — so a stage placed after it was never reached.
+            // Placed here, each hook calls $next() and receives the controller's
+            // Response on the way back out: "after execute" in an onion pipeline.
             ...$this->resolveHook('after.execute'),
+            new ExecuteStage(),
         ]; 
     }
 
