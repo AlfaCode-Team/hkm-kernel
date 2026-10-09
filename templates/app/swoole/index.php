@@ -85,6 +85,23 @@ $workers = (int) (env('HKM_WORKERS') ?: (function_exists('swoole_cpu_num') ? swo
 $env = (string) (env('HKM_ENV') ?: 'production');
 $coroutine = filter_var(env('SWOOLE_COROUTINE') ?: 'false', FILTER_VALIDATE_BOOLEAN);
 
+// Trusted proxies (opt-in). Behind nginx / a load balancer / a CDN the TCP
+// peer is the proxy, so Request::ip() returns the proxy's address for every
+// client — rate limits and audit trails then see one user. List the proxies in
+// TRUSTED_PROXIES (comma-separated IPs/CIDRs, or PRIVATE_SUBNETS — REMOTE_ADDR
+// does not work here: it is resolved once, from a $_SERVER with no peer), and
+// X-Forwarded-For/-Proto/-Port are honoured FROM THEM ONLY. Empty = trust
+// nobody: a forged X-Forwarded-For is ignored. Prefer the proxies' real
+// addresses: PRIVATE_SUBNETS is wider than RFC 1918 (it includes carrier-grade
+// NAT 100.64.0.0/10 and reserved ranges).
+$trustedProxies = trim((string) (env('TRUSTED_PROXIES') ?: ''));
+if ($trustedProxies !== '') {
+    Request::setTrustedProxies(
+        array_values(array_filter(array_map('trim', explode(',', $trustedProxies)))),
+        Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_PROTO | Request::HEADER_X_FORWARDED_PORT,
+    );
+}
+
 $server = new SwooleServer($host, $port);
 $server->set([
     'worker_num' => $workers,
@@ -224,6 +241,9 @@ function buildRequest(SwooleRequest $req): Request
         rawBody: $rawBody,
         cookies: $req->cookie ?? [],
         files: $files,
+        // The TCP peer. Without it Request::ip() is null under OpenSwoole, so
+        // nothing request-scoped (audit trail, client.ip) knows who called.
+        server: ['REMOTE_ADDR' => (string) ($req->server['remote_addr'] ?? '')],
     );
 }
 

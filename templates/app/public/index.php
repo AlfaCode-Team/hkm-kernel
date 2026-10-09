@@ -55,6 +55,24 @@ $kernel = require __DIR__ . '/../bootstrap/app.php';
 //    process, so this second call reads no files.
 $domain = EntryHelpers::resolveDomain(dirname(__DIR__, 2), $_SERVER['HTTP_HOST'] ?? null);
 
+// Trusted proxies (opt-in). Behind nginx / a load balancer / a CDN the TCP
+// peer is the proxy, so Request::ip() returns the proxy's address for every
+// client — rate limits and audit trails then see one user. List the proxies in
+// TRUSTED_PROXIES (comma-separated IPs/CIDRs, PRIVATE_SUBNETS, or REMOTE_ADDR to
+// trust the immediate peer) and X-Forwarded-For/-Proto/-Port are honoured FROM
+// THEM ONLY. Empty = trust nobody: a forged X-Forwarded-For is ignored.
+// Prefer the proxies' real addresses: PRIVATE_SUBNETS is wider than RFC 1918
+// (it includes carrier-grade NAT 100.64.0.0/10 and reserved ranges), and
+// REMOTE_ADDR is safe only when nothing but the proxy can reach PHP.
+$trustedProxies = trim((string) (env('TRUSTED_PROXIES') ?: ''));
+if ($trustedProxies !== '') {
+    Request::setTrustedProxies(
+        array_values(array_filter(array_map('trim', explode(',', $trustedProxies)))),
+        Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_PROTO | Request::HEADER_X_FORWARDED_PORT,
+    );
+}
+
+
 try {
     // 4. Build an immutable Request from the SAPI globals ($_SERVER, $_GET,
     //    $_POST, php://input, ...) and ride the resolved domain on it as an
