@@ -22,7 +22,7 @@ The build output (`.vitepress/dist`) is plain static files. Any static host work
 
 | Host | Setting |
 |---|---|
-| GitHub Pages | `.github/workflows/docs.yml` (enable Pages → Source: GitHub Actions). Serves under `/hkm-kernel/`, so it builds with `DOCS_BASE=/hkm-kernel/`. |
+| GitHub Pages | `.github/workflows/docs.yml` (enable Pages → Source: GitHub Actions). Served at the root of the custom domain `hkm-kernel.hkmcode.com`, so it builds with `DOCS_BASE=/`. Without a custom domain it would be `DOCS_BASE=/hkm-kernel/`. |
 | Netlify / Vercel / Cloudflare Pages | base dir `website`, build `npm run build`, output `.vitepress/dist` |
 | Your own server | upload `.vitepress/dist`; serve `foo.html` for `/foo` (clean URLs) |
 
