@@ -4,6 +4,90 @@ All notable changes to the AlfacodeTeam PhpServicePlatform (Sentinel) kernel are
 documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-10-10
+
+### Added
+- **`hkm install --check` reports whether the web server can use the files a
+  deploy does not ship, and changes nothing.** A tree pushed by git-ftp or
+  rsync only ever receives what git tracks. The gitignored paths (`.env` and
+  its per-domain siblings such as `.env.ekkula.ateiug`, `var/`, `userdata/`)
+  are created on the server by whoever happened to create them, and their
+  ownership drifts. The failure is quiet: `LoadEnvironment` skips an
+  unreadable `.env.*` without a word.
+- **What it checks**, for the account PHP-FPM runs as (`--as=<user>`,
+  `HKM_POOL_USER`, default `www-data`):
+  - that the account can reach the project through every parent directory;
+  - that it can read each env file;
+  - that no env file is world-readable or group-writable;
+  - that every runtime directory exists;
+  - that everything under `var/` and `userdata/` is writable by it.
+- Access is evaluated the way the kernel evaluates it (owner class, then
+  group membership, then other) from the file's real owner and group, not by
+  comparing mode bits: `0640 root:root` and `0640 deploy:www-data` look
+  identical in a mode table and only one of them works.
+- `--owner=` adds an ownership comparison, and directories without setgid are
+  reported as a warning. The command exits 1 when anything is wrong and names
+  `hkm install --production` as the fix.
+- **`TRUSTED_PROXIES` in the generated entry points.** `app/public/index.php`
+  and `app/swoole/index.php` register the listed proxies (IPs/CIDRs,
+  `PRIVATE_SUBNETS`, or under FPM `REMOTE_ADDR`) with
+  `Request::setTrustedProxies()`, so `Request::ip()` and `isSecure()` reflect
+  the real client behind nginx or a load balancer. Empty, the default, trusts
+  nobody, so a forged `X-Forwarded-For` is still ignored.
+
+### Changed
+- **A kernel `DomainException` now answers 422, not 500.** It is the
+  client-correctable business-rule failure the exception hierarchy documents as
+  422, but `ErrorStage` had no rule for it, so it fell through to 500.
+- **`OptimisticLockException` and `LockTimeoutException` now answer 409 and
+  are classified warning.** A lost optimistic-lock race and a lock wait that
+  timed out are concurrency outcomes the client can retry, not faults.
+  `OptimisticLockException` extends `RepositoryException`, so it was answered
+  500 and classified critical, paging someone over a race. `LockTimeoutException`
+  had no rule at all, despite its own docblock describing it as warning-level.
+  The 409 carries a fixed message ("The resource is busy…" / "This record was
+  changed by someone else…"), not the exception's own: a lock timeout's names
+  the internal lock key. The original message still reaches the log, and
+  `APP_DEBUG` still shows it.
+- **`ERROR_STATUS_LEGACY=true` keeps the previous mapping** for both changes
+  above: the three exceptions answer 500 again and the lock exceptions are
+  critical again. Status and severity are switched together, so a 500 is never
+  logged as a warning. It exists for clients and alert rules that branch on the
+  old codes and will be removed in 2.0.
+
+### Fixed
+- **`--help` no longer runs the command.** php-io-cli's `CLIApplication`
+  handled `<command> --help`, `-h` and `help <command>` by calling `execute()`
+  (the only way to give the command an IO) and printing help afterwards, so
+  `migrate:fresh --help` dropped every table and `migrate:run --help` applied
+  pending migrations. `printHelp()` now takes the IO directly and nothing
+  executes. Requires the php-io-cli submodule bump that carries the fix.
+- **`after.execute` hooks run.** They were appended behind `ExecuteStage`,
+  which is terminal and never calls `$next`, so a stage registered there was
+  never reached. They now sit directly in front of it, call `$next()`, and
+  receive the controller's response on the way out. A hook already registered
+  at `after.execute` starts running with this release.
+- **Commands declared in `module.json` `commands[]` are registered.**
+  `CompileCommandManifestStage` compiled them into `command-manifest.php`, but
+  nothing read it, so a command declared there and not also registered in
+  `Provider::boot()` did not exist. `CliPipeline` now adds every declared
+  `AbstractCommand` handler whose constructor takes no parameters, not even
+  optional ones, and that is not already registered by class or name;
+  registration in `boot()` still wins. A command with constructor parameters
+  is still left to `boot()`, because autowiring it from the core container
+  could build it against the wrong `DatabasePort`. The core container fills an
+  optional typed parameter from its bindings rather than leaving the default.
+  The manifest is read only for `list`/`help` or a command name `boot()` did
+  not register, so running an ordinary command costs what it did before.
+- **`Request::ip()` works under OpenSwoole.** The generated `app/swoole/index.php`
+  built its `Request` without the peer address, so `ip()` was null and
+  `client.ip` was never bound.
+
+### Security
+- **`composer.lock` pins `league/flysystem` 3.36.0** (was 3.35.2), fixing
+  CVE-2026-102601: the whitespace path normaliser's control-character check
+  could be bypassed with malformed UTF-8 in a path, on every adapter.
+
 ## [1.17.1] - 2026-09-25
 
 ### Fixed
