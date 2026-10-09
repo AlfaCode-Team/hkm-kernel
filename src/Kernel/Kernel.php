@@ -739,7 +739,7 @@ final class Kernel
      * before the coroutine yields back to the event loop:
      *
      *   $server->on('request', function ($req, $res) use ($kernel) {
-     *       $response = $kernel->http()->handle(Request::fromSwoole($req));
+     *       $response = $kernel->http()->handle($request);   // built with Request::build(...)
      *       $res->end($response->body());
      *       $kernel->requestTeardown(); // ← always call after each request
      *   });
