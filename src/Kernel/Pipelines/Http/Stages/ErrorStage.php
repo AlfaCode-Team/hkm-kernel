@@ -5,8 +5,11 @@ namespace AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Stages;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Error\{DebugPageRenderer, ErrorClassifier, ErrorContext, ErrorPipeline};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\{
+    DomainException,
     FrameworkException,
     GatewayException,
+    LockTimeoutException,
+    OptimisticLockException,
     HttpStatusAware,
     SecurityException,
     ServiceException,
@@ -113,9 +116,17 @@ final class ErrorStage implements HttpStageContract
             return in_array($code, [401, 403, 429], true) ? $code : 403;
         }
 
+        // ERROR_STATUS_LEGACY keeps the 1.17 codes (DomainException and
+        // the lock exceptions → 500) — see ErrorClassifier::legacyMapping().
+        $legacy = ErrorClassifier::legacyMapping();
+
         return match (true) {
-            $e instanceof ValidationException => 422,
+            $e instanceof ValidationException,
             $e instanceof ServiceException => 422,
+            $e instanceof DomainException && !$legacy => 422,
+            // A lost optimistic-lock race or a lock wait that timed out is a
+            // conflict the client can retry, not a server fault.
+            ($e instanceof OptimisticLockException || $e instanceof LockTimeoutException) && !$legacy => 409,
             $e instanceof GatewayException => 502,
             default => 500,
         };
@@ -128,6 +139,21 @@ final class ErrorStage implements HttpStageContract
 
         if ($e instanceof ValidationException) {
             return ['code' => 'validation_failed', 'message' => $e->getMessage(), 'fields' => $e->errors];
+        }
+
+        // The concurrency exceptions are warning severity, so the rule below
+        // would expose their message — and neither message is written for a
+        // client: LockTimeoutException's names the internal lock key (often a
+        // tenant or record id), an OptimisticLockException's is whatever the
+        // repository wrote. Answer with a fixed one; the log keeps the original.
+        // Under ERROR_STATUS_LEGACY they are critical again, so the generic
+        // masking below applies, exactly as it did before.
+        $mask = !$debug && !ErrorClassifier::legacyMapping();
+        if ($mask && $e instanceof LockTimeoutException) {
+            return ['code' => $e->layer ?: 'conflict', 'message' => 'The resource is busy. Try again shortly.'];
+        }
+        if ($mask && $e instanceof OptimisticLockException) {
+            return ['code' => $e->layer ?: 'conflict', 'message' => 'This record was changed by someone else. Reload and try again.'];
         }
 
         if ($e instanceof FrameworkException) {
