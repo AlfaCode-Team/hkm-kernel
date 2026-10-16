@@ -172,8 +172,16 @@ final class RouteCompiler
      * the last declaration win would make route('user.show') resolve to whichever
      * plugin happened to load last.
      *
+     * ONE exception: the copies a domain list fans a single declaration out
+     * into. `"domain": ["a.com", "b.com"]` on a group whose routes are named
+     * yields `GET@a.com /x` and `GET@b.com /x`, both called `x`. They share the
+     * method and the path and differ only in host, so the name still means one
+     * URL path and is not ambiguous. Those copies carry the same `decl` (see
+     * GroupExpander), and only a matching `decl` may re-claim a name. Two
+     * SEPARATE declarations reusing a name still fail, even on the same path.
+     *
      * @param array<string, mixed>  $route
-     * @param array<string, string> $names  claimed names => owning route key
+     * @param array<string, array{key: string, decl: string}> $names  claimed names => first route key + declaration
      */
     public function claimName(array $route, string $key, array &$names, string $owner): ?string
     {
@@ -187,14 +195,20 @@ final class RouteCompiler
             throw new BootException("Route [{$key}] in {$owner} has a non-string name.");
         }
 
+        $decl = (string) ($route['decl'] ?? '');
+
         if (isset($names[$name])) {
+            if ($decl !== '' && $names[$name]['decl'] === $decl) {
+                return $name;
+            }
+
             throw new BootException(
-                "Duplicate route name [{$name}] in {$owner} - already claimed by [{$names[$name]}]. "
+                "Duplicate route name [{$name}] in {$owner} - already claimed by [{$names[$name]['key']}]. "
                 . 'Route names are application-wide and must be unique.'
             );
         }
 
-        $names[$name] = $key;
+        $names[$name] = ['key' => $key, 'decl' => $decl];
 
         return $name;
     }

@@ -279,6 +279,11 @@ final class RouteIndex
      * domain it is generating for, and it deliberately holds no request state so
      * that CLI commands and queue workers can build links at all.
      *
+     * A name a domain LIST fanned out over several hosts (same method, same
+     * path) is indexed under the FIRST host it was declared for, so list the
+     * canonical host first: that is the host an absolute route() link points at.
+     * A relative route() is the same path on every host, so it is unaffected.
+     *
      * @param array<string, array<string, mixed>> $routes
      * @return array<string, array{path: string, method: string, domain: string}>
      */
@@ -288,7 +293,7 @@ final class RouteIndex
 
         foreach ($routes as $key => $entry) {
             $name = $entry['name'] ?? null;
-            if (!is_string($name) || $name === '') {
+            if (!is_string($name) || $name === '' || isset($names[$name])) {
                 continue;
             }
             ['method' => $method, 'domain' => $domain, 'path' => $path] = self::parseKey((string) $key);

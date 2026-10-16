@@ -4,6 +4,39 @@ All notable changes to the AlfacodeTeam PhpServicePlatform (Sentinel) kernel are
 documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-10-16
+
+### Changed
+- **A group or route with a LIST of domains keeps its route names.** Until now
+  `"domain": ["brand.com", "vote.brand.com", "brand.local"]` failed the boot as
+  soon as any route under it had a name, because each host's copy claimed the
+  name again. A project serving one brand on several hosts therefore had to copy
+  the whole group once per host, with a different name prefix on each copy.
+  Every copy now carries the name. Copies of one declaration differ only in host
+  (same method, same path), so the name still means one URL path, and a relative
+  `route()` is correct on every host.
+- The same holds for a `subdomain` list, alone or combined with a `domain`
+  list, at every level that can name a host: module-wide
+  (`routeDomain`/`routeSubdomain`), group, and route.
+  `{"domain": ["brand.com", "brand.local"], "subdomain": ["app", "organizer"]}`
+  gives six hosts and one set of names.
+- An **absolute** `route()` for such a name points at the **first** host: the
+  first `domain` when one is declared, otherwise the first bare label. A bare
+  label names no single host, so the link falls back to `APP_URL` exactly as a
+  single bare subdomain always has. Put the canonical host first.
+- Two **separate** declarations claiming one name still fail the boot, even when
+  their paths match. Only the copies a domain list makes of a single
+  declaration share a name.
+- Disabling one host's copy through `routePolicy.disable` no longer releases the
+  name while the other hosts' copies still hold it. A name is released only when
+  no surviving route carries it.
+
+### Security
+- `symfony/http-foundation` 8.1.9 (CVE-2026-108082, ReDoS in
+  `HeaderUtils::split()`) and `symfony/expression-language` 7.4.21
+  (CVE-2026-109449, unbounded nesting in the expression parser). Both were
+  failing the required `composer audit` check.
+
 ## [1.18.0] - 2026-10-10
 
 ### Added

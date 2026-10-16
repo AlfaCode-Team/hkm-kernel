@@ -170,4 +170,37 @@ final class RouteNameCompilationTest extends TestCase
         self::assertArrayNotHasKey('GET /register', $manifest);
         self::assertSame('auth.register', $manifest['GET /signup']['name']);
     }
+
+    public function test_disabling_one_host_of_a_domain_list_keeps_the_name_held(): void
+    {
+        // The name is still carried by the b.test copy, so a project claiming it
+        // for a different route is a real collision, not a reuse.
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/Duplicate route name \[x\]/');
+
+        $this->compile(
+            [$this->plugin([
+                ['method' => 'GET', 'path' => '/x', 'handler' => 'P\\C@show', 'name' => 'x', 'domain' => ['a.test', 'b.test']],
+            ])],
+            projectRoutes: [
+                ['method' => 'GET', 'path' => '/elsewhere', 'handler' => 'App\\C@show', 'name' => 'x'],
+            ],
+            disabled: ['GET@a.test /x'],
+        );
+    }
+
+    public function test_disabling_every_host_of_a_domain_list_releases_the_name(): void
+    {
+        $manifest = $this->compile(
+            [$this->plugin([
+                ['method' => 'GET', 'path' => '/x', 'handler' => 'P\\C@show', 'name' => 'x', 'domain' => ['a.test', 'b.test']],
+            ])],
+            projectRoutes: [
+                ['method' => 'GET', 'path' => '/elsewhere', 'handler' => 'App\\C@show', 'name' => 'x'],
+            ],
+            disabled: ['GET@a.test /x', 'GET@b.test /x'],
+        );
+
+        self::assertSame('x', $manifest['GET /elsewhere']['name']);
+    }
 }

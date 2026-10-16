@@ -684,17 +684,120 @@ final class RouteGroupTest extends TestCase
         ]]], domains: ['a.test', 'b.test']);
     }
 
-    public function test_a_named_route_may_not_span_several_domains(): void
+    public function test_a_named_route_may_span_several_domains(): void
     {
-        // Names are one flat namespace; one name cannot mean a different URL
-        // per host, because UrlGenerator holds no request state.
-        $this->expectException(BootException::class);
-        $this->expectExceptionMessageMatches('/one flat namespace/');
-
+        // The copies differ only in host — same method, same path — so the one
+        // name still means one URL path. It is indexed under the FIRST host.
         $this->compile(domains: ['a.test', 'b.test'], projectRoutes: [
             ['method' => 'GET', 'path' => '/p', 'handler' => 'A\\A@h',
              'name' => 'p', 'domain' => ['a.test', 'b.test']],
         ]);
+
+        self::assertSame('p', $this->manifest()['GET@a.test /p']['name']);
+        self::assertSame('p', $this->manifest()['GET@b.test /p']['name']);
+        self::assertSame(
+            ['p' => ['path' => '/p', 'method' => 'GET', 'domain' => 'a.test']],
+            $this->manifest('route-names.php'),
+        );
+    }
+
+    public function test_a_group_with_a_domain_list_keeps_its_route_names(): void
+    {
+        // The case a list exists for: one brand served on its dev host and its
+        // production hosts, written once instead of once per host.
+        $this->compile(['groups' => [[
+            'domain' => ['brand.com', 'vote.brand.com', 'brand.local'],
+            'name'   => 'brand.',
+            'routes' => [
+                ['method' => 'GET', 'path' => '/',                     'handler' => 'A\\B@home',    'name' => 'home'],
+                ['method' => 'GET', 'path' => '/editions/{slug:slug}', 'handler' => 'A\\B@edition', 'name' => 'editions.show'],
+            ],
+        ]]], domains: ['brand.com', 'vote.brand.com', 'brand.local']);
+
+        self::assertCount(6, $this->manifest());
+        self::assertNotNull($this->matchHost('/editions/2026', 'vote.brand.com'));
+        self::assertNotNull($this->matchHost('/', 'brand.local'));
+
+        $names = $this->manifest('route-names.php');
+        self::assertSame(['brand.home', 'brand.editions.show'], array_keys($names));
+        self::assertSame('brand.com', $names['brand.home']['domain']);
+    }
+
+    public function test_a_name_fanned_out_by_an_outer_list_survives_a_nested_group(): void
+    {
+        $this->compile(['groups' => [[
+            'domain' => ['a.test', 'b.test'],
+            'groups' => [[
+                'name'   => 'admin.',
+                'routes' => [['method' => 'GET', 'path' => '/x', 'handler' => 'A\\A@h', 'name' => 'x']],
+            ]],
+        ]]], domains: ['a.test', 'b.test']);
+
+        self::assertSame('admin.x', $this->manifest()['GET@b.test /x']['name']);
+    }
+
+    public function test_a_subdomain_list_keeps_its_route_names(): void
+    {
+        // Bare labels span every domain. The name is indexed under the first
+        // label, which names no single host, so an absolute route() falls back
+        // to APP_URL exactly as a single bare subdomain always has.
+        $this->compile(['groups' => [[
+            'subdomain' => ['organizer', 'staff'],
+            'name'      => 'console.',
+            'routes'    => [['method' => 'GET', 'path' => '/dashboard', 'handler' => 'A\\A@h', 'name' => 'home']],
+        ]]], domains: ['a.test', 'b.test']);
+
+        self::assertSame('console.home', $this->manifest()['GET@organizer /dashboard']['name']);
+        self::assertSame('console.home', $this->manifest()['GET@staff /dashboard']['name']);
+        self::assertNotNull($this->matchHost('/dashboard', 'staff.b.test'));
+        self::assertSame(
+            ['console.home' => ['path' => '/dashboard', 'method' => 'GET', 'domain' => 'organizer']],
+            $this->manifest('route-names.php'),
+        );
+    }
+
+    public function test_a_domain_list_with_a_subdomain_list_keeps_its_route_names(): void
+    {
+        // 2 domains x (itself + 2 labels) = 6 hosts, one name. The first host is
+        // the first DOMAIN, so that is where an absolute link points.
+        $this->compile(['groups' => [[
+            'domain'    => ['brand.com', 'brand.local'],
+            'subdomain' => ['app', 'organizer'],
+            'name'      => 'brand.',
+            'routes'    => [['method' => 'GET', 'path' => '/', 'handler' => 'A\\A@h', 'name' => 'home']],
+        ]]], domains: ['brand.com', 'brand.local']);
+
+        $manifest = $this->manifest();
+        self::assertCount(6, $manifest);
+        foreach (['brand.com', 'app.brand.com', 'organizer.brand.com', 'brand.local', 'app.brand.local', 'organizer.brand.local'] as $host) {
+            self::assertSame('brand.home', $manifest["GET@{$host} /"]['name'], $host);
+            self::assertNotNull($this->matchHost('/', $host), $host);
+        }
+        self::assertSame('brand.com', $this->manifest('route-names.php')['brand.home']['domain']);
+    }
+
+    public function test_a_route_level_subdomain_list_keeps_its_name(): void
+    {
+        $this->compile(domains: ['a.test'], projectRoutes: [
+            ['method' => 'GET', 'path' => '/p', 'handler' => 'A\\A@h', 'name' => 'p',
+             'domain' => 'a.test', 'subdomain' => ['api', 'auth']],
+        ]);
+
+        self::assertSame(['GET@a.test /p', 'GET@api.a.test /p', 'GET@auth.a.test /p'], array_keys($this->manifest()));
+        self::assertSame('a.test', $this->manifest('route-names.php')['p']['domain']);
+    }
+
+    public function test_two_declarations_still_cannot_share_a_name_on_the_same_path(): void
+    {
+        // Only copies of ONE declaration may share a name. Two separate entries
+        // that happen to agree on the path are still a collision.
+        $this->expectException(BootException::class);
+        $this->expectExceptionMessageMatches('/Duplicate route name \[home\]/');
+
+        $this->compile(['groups' => [
+            ['domain' => 'a.test', 'routes' => [['method' => 'GET', 'path' => '/', 'handler' => 'A\\A@h', 'name' => 'home']]],
+            ['domain' => 'b.test', 'routes' => [['method' => 'GET', 'path' => '/', 'handler' => 'A\\B@h', 'name' => 'home']]],
+        ]], domains: ['a.test', 'b.test']);
     }
 
     // ── domain AND subdomain together (subdomain is RELATIVE to domain) ────

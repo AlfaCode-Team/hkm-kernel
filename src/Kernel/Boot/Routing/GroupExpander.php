@@ -55,8 +55,13 @@ final readonly class GroupExpander
      * removal is the project's prerogative and lives in routePolicy.disable, which
      * is the single place authorised to veto.
      *
+     * Each route carries `decl`: where in the source it was DECLARED. A domain
+     * list fans one declaration out into one route per host, and every copy
+     * shares that `decl`, which is how the name guard tells a fan-out (one name,
+     * one path, several hosts) from two declarations colliding on a name.
+     *
      * @param array<string, mixed> $source
-     * @return list<array{method: string, path: string, handler: string, name: ?string, filters: list<string>, requires: list<string>, domain: string, faces: list<string>}>
+     * @return list<array{method: string, path: string, handler: string, name: ?string, filters: list<string>, requires: list<string>, domain: string, faces: list<string>, decl: string}>
      */
     public function flatten(array $source, string $owner): array
     {
@@ -76,7 +81,7 @@ final readonly class GroupExpander
         $flat = [];
         foreach ($this->domains->domainsFor($source, $scope, $owner, 'routeDomain', 'routeSubdomain') as $domain) {
             $scope['domain'] = $domain;
-            $flat = [...$flat, ...$this->expand($source, $scope, $owner, 0)];
+            $flat = [...$flat, ...$this->expand($source, $scope, $owner, 0, $owner)];
         }
 
         return $flat;
@@ -87,7 +92,7 @@ final readonly class GroupExpander
      * @param array{prefix: string, name: string, filters: list<string>, requires: list<string>, domain: string, faces: list<string>} $inherited
      * @return list<array<string, mixed>>
      */
-    private function expand(array $source, array $inherited, string $owner, int $depth): array
+    private function expand(array $source, array $inherited, string $owner, int $depth, string $at): array
     {
         if ($depth > self::MAX_GROUP_DEPTH) {
             throw new BootException(
@@ -98,7 +103,7 @@ final readonly class GroupExpander
 
         $flat = [];
 
-        foreach ($source['routes'] ?? [] as $route) {
+        foreach ($source['routes'] ?? [] as $index => $route) {
             if (!is_array($route) || !isset($route['method'], $route['path'], $route['handler'])) {
                 throw new BootException(
                     "Invalid route in {$owner} - each route needs method, path and handler."
@@ -129,38 +134,24 @@ final readonly class GroupExpander
                 ),
                 'domain'   => $inherited['domain'],
                 'faces'    => RouteNormalizer::faces($route['faces'] ?? []) ?: $inherited['faces'],
+                'decl'     => "{$at} routes[{$index}]",
             ];
-
-            $domains = $this->domains->domainsFor($route, $inherited, "Route in {$owner}");
-
-            // A NAMED route on several domains would claim one name several
-            // times. Names are a flat, application-wide namespace on purpose —
-            // UrlGenerator holds no request state, so it cannot pick a host —
-            // and the duplicate-name guard would otherwise report this later
-            // without explaining the cause.
-            if ($name !== '' && count($domains) > 1) {
-                throw new BootException(sprintf(
-                    'Route [%s] in %s names itself [%s] while declaring %d domains. '
-                    . 'Route names are one flat namespace, so one name cannot mean a '
-                    . 'different URL per host. Give each domain its own entry with a '
-                    . 'distinct name, or drop the name.',
-                    $path,
-                    $owner,
-                    $inherited['name'] . $name,
-                    count($domains),
-                ));
-            }
 
             // One flat route per domain. A single string yields one, exactly as
             // before; a list yields one copy per host, each with its own route
             // key, which is what makes them independently overridable.
-            foreach ($domains as $domain) {
+            //
+            // A NAMED route keeps its name on every copy. That is safe because
+            // the copies differ ONLY in host — same method, same path — so the
+            // name still means exactly one URL path, and a relative route() is
+            // right on all of them. See RouteCompiler::claimName().
+            foreach ($this->domains->domainsFor($route, $inherited, "Route in {$owner}") as $domain) {
                 $entry['domain'] = $domain;
                 $flat[] = $entry;
             }
         }
 
-        foreach ($source['groups'] ?? [] as $group) {
+        foreach ($source['groups'] ?? [] as $index => $group) {
             if (!is_array($group)) {
                 throw new BootException("Invalid route group in {$owner} - a group must be an object.");
             }
@@ -186,10 +177,11 @@ final readonly class GroupExpander
 
             // Expand the WHOLE subtree once per domain. Nested groups and routes
             // inherit the one host they are being expanded for, so a list at any
-            // level composes with a list at any other.
+            // level composes with a list at any other. `$at` does not change per
+            // host: each copy of the subtree is the SAME declaration.
             foreach ($this->domains->domainsFor($group, $inherited, $context) as $domain) {
                 $scope['domain'] = $domain;
-                $flat = [...$flat, ...$this->expand($group, $scope, $owner, $depth + 1)];
+                $flat = [...$flat, ...$this->expand($group, $scope, $owner, $depth + 1, "{$at} groups[{$index}]")];
             }
         }
 
