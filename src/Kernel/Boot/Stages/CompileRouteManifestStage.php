@@ -102,12 +102,14 @@ final class CompileRouteManifestStage implements BootStageContract
         $routes = [];
 
         /**
-         * Declared route names => the route key that claimed them. Names must be
-         * unique across the whole application (they are a flat namespace, like
-         * filter aliases), so a collision is a BOOT failure rather than a
-         * last-one-wins surprise at URL-generation time.
+         * Declared route names => the route key that first claimed them and the
+         * declaration it came from. Names must be unique across the whole
+         * application (they are a flat namespace, like filter aliases), so a
+         * collision is a BOOT failure rather than a last-one-wins surprise at
+         * URL-generation time. The one route that may hold a name on several
+         * keys is a single declaration fanned out by a domain list.
          *
-         * @var array<string, string>
+         * @var array<string, array{key: string, decl: string}>
          */
         $names = [];
 
@@ -183,8 +185,17 @@ final class CompileRouteManifestStage implements BootStageContract
         // A disabled plugin route releases its name. Otherwise a project that
         // vetoes GET /register and declares its own named 'auth.register' would
         // collide with the very route it just removed.
-        foreach ($names as $name => $owningKey) {
-            if (!isset($routes[$owningKey])) {
+        // A domain list puts one name on several keys, so the name is released
+        // only when NO surviving route still carries it: disabling one host's
+        // copy must leave the name to the others.
+        $liveNames = [];
+        foreach ($routes as $entry) {
+            if (is_string($entry['name'] ?? null)) {
+                $liveNames[$entry['name']] = true;
+            }
+        }
+        foreach (array_keys($names) as $name) {
+            if (!isset($liveNames[$name])) {
                 unset($names[$name]);
             }
         }
