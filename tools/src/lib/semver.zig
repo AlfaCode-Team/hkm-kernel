@@ -5,7 +5,8 @@
 //!
 //!   "kernel": "^1.2"
 //!
-//! and the tooling refuses to install it into a kernel that does not satisfy it.
+//! and the tooling refuses to install it into a kernel OLDER than that floor
+//! (meetsFloor). A kernel newer than the range is allowed, with a warning.
 //! Getting this wrong is worse than having no check at all: a plugin that boots
 //! against an incompatible kernel fails at request time, deep inside a pipeline,
 //! with an error that points at the plugin rather than at the version mismatch.
@@ -278,6 +279,66 @@ fn wildcard(version: Version, clause: []const u8, precision: usize) MatchError!b
     };
 }
 
+/// Is `version` at or above every LOWER bound of `constraint`, whatever its
+/// upper bounds say?
+///
+/// The kernel gate uses this rather than `satisfies`. A plugin's constraint has
+/// two halves that mean different things: the floor is a fact (the plugin calls
+/// something the kernel only gained in that release, so an older kernel cannot
+/// run it), while the ceiling — `^1.13` stopping at 2.0, `~1.17` at 1.18 — is
+/// only the range the plugin was released against. Refusing a NEWER kernel for
+/// the ceiling blocked plugins that would have run, every time the kernel moved
+/// on before the plugin re-tagged.
+///
+///   ^1.2.3, ~1.2.3, >=1.2.3, =1.2.3, 1.2.3   floor 1.2.3
+///   >1.2.3                                 strictly above 1.2.3
+///   1.x, 1.2.*                             floor 1.0.0, 1.2.0
+///   <2.0, <=2.0, *, any                    no floor
+pub fn meetsFloor(version: Version, constraint: []const u8) MatchError!bool {
+    const trimmed = std.mem.trim(u8, constraint, " \t\r\n");
+    if (trimmed.len == 0) return true;
+    if (std.mem.eql(u8, trimmed, "*") or std.ascii.eqlIgnoreCase(trimmed, "any")) return true;
+
+    var clauses = std.mem.tokenizeAny(u8, trimmed, ", \t");
+    var saw_clause = false;
+    while (clauses.next()) |raw| {
+        saw_clause = true;
+        const clause = std.mem.trim(u8, raw, " \t");
+        const ok = if (std.mem.startsWith(u8, clause, ">="))
+            try cmp(version, clause[2..], .gte)
+        else if (std.mem.startsWith(u8, clause, "<")) blk: {
+            // An upper bound: still validated, never a reason to refuse.
+            const bound = if (std.mem.startsWith(u8, clause, "<=")) clause[2..] else clause[1..];
+            _ = Version.parse(bound) orelse return MatchError.BadConstraint;
+            break :blk true;
+        } else if (std.mem.startsWith(u8, clause, ">"))
+            try cmp(version, clause[1..], .gt)
+        else if (std.mem.startsWith(u8, clause, "=") or std.mem.startsWith(u8, clause, "^") or std.mem.startsWith(u8, clause, "~"))
+            try cmp(version, clause[1..], .gte)
+        else if (wildcardPrecision(clause)) |prec|
+            try wildcardFloor(version, clause, prec)
+        else
+            try cmp(version, clause, .gte);
+        if (!ok) return false;
+    }
+    if (!saw_clause) return MatchError.BadConstraint;
+    return true;
+}
+
+/// The floor of a wildcard: `1.x` → >=1.0.0, `1.2.*` → >=1.2.0, `*` → none.
+fn wildcardFloor(version: Version, clause: []const u8, precision: usize) MatchError!bool {
+    if (precision == 0) return true;
+    var s = clause;
+    if (s.len > 0 and (s[0] == 'v' or s[0] == 'V')) s = s[1..];
+    var it = std.mem.splitScalar(u8, s, '.');
+    const major = std.fmt.parseInt(u32, it.next() orelse return MatchError.BadConstraint, 10) catch return MatchError.BadConstraint;
+    const minor: u32 = if (precision >= 2)
+        std.fmt.parseInt(u32, it.next() orelse return MatchError.BadConstraint, 10) catch return MatchError.BadConstraint
+    else
+        0;
+    return version.order(.{ .major = major, .minor = minor }) != .lt;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -418,4 +479,30 @@ test "describe detection does not fire on lookalikes" {
     try std.testing.expectEqualStrings("1-gz", parseDescribed("1.0.0-1-gz").?.pre);
     try std.testing.expectEqualStrings("beta-g1", parseDescribed("1.0.0-beta-g1").?.pre);
     try std.testing.expectEqualStrings("138", parseDescribed("1.0.21-138").?.pre);
+}
+
+test "meetsFloor: an older kernel misses the floor, a newer one always clears it" {
+    const v = struct {
+        fn of(raw: []const u8) Version {
+            return Version.parse(raw).?;
+        }
+    };
+    // Below the floor: refused, as before.
+    try std.testing.expect(!try meetsFloor(v.of("1.18.0"), "^1.19.0"));
+    try std.testing.expect(!try meetsFloor(v.of("1.16.0"), "~1.17"));
+    try std.testing.expect(!try meetsFloor(v.of("1.2.0"), ">=1.2.3 <2.0"));
+    try std.testing.expect(!try meetsFloor(v.of("1.2.3"), ">1.2.3"));
+    try std.testing.expect(!try meetsFloor(v.of("0.9.0"), "1.x"));
+
+    // Above the ceiling: not a reason to refuse.
+    try std.testing.expect(try meetsFloor(v.of("2.0.0"), "^1.13.1"));
+    try std.testing.expect(try meetsFloor(v.of("1.19.0"), "~1.17"));
+    try std.testing.expect(try meetsFloor(v.of("3.0.0"), ">=1.2 <2.0"));
+    try std.testing.expect(try meetsFloor(v.of("1.19.0"), "1.14.0"));
+    try std.testing.expect(try meetsFloor(v.of("2.1.0"), "1.2.x"));
+    try std.testing.expect(try meetsFloor(v.of("1.0.0"), "<2.0"));
+
+    // Still an error, never a silent yes.
+    try std.testing.expectError(MatchError.BadConstraint, meetsFloor(v.of("1.0.0"), ">=banana"));
+    try std.testing.expectError(MatchError.BadConstraint, meetsFloor(v.of("1.0.0"), "<banana"));
 }

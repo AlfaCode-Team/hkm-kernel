@@ -468,29 +468,32 @@ hkm plugins make:factory   <plugin> <name> add a factory into a plugin
 --help, -h           show command help
 ```
 
-### Published files you edited are kept
+### Project files are never replaced
 
-`enable`, `update` and `upgrade` copy a plugin's `config/`, `database/` and
-`resources/` files into the project, and `var/plugin-assets.json` records a
-SHA-256 of every file as it was published. On the next `update`, each file is
+`install`, `enable`, `update` and `upgrade` copy a plugin's `config/`,
+`database/` and `resources/` files into the project, and
+`var/plugin-assets.json` records which plugin published which file. Each file is
 compared with the plugin's current copy:
 
 | Project file | What happens |
 |---|---|
 | missing | published |
-| identical to the plugin's copy | nothing (its hash is recorded) |
-| unchanged since it was published | refreshed with the plugin's new version |
-| edited, or never recorded | **kept**; the plugin's version is written beside it as `<file>.plugin-new` |
+| identical to the plugin's copy | nothing |
+| differs, edited or not | **kept**; the plugin's version is suggested beside it as `<file>.updated` |
 
-A kept file is listed in the output, with the other plugin named when two
-plugins publish the same path. Merge the `.plugin-new` by hand and delete it; it
-is removed automatically once the file matches the plugin again. No compiler
-stage reads it — config, migration and view globs all match `.php` only.
+A file the project already has is the project's: its configuration, views and
+layout were built around it, so a plugin release (`hkm plugins install --latest`
+included) never rewrites it. Before 1.20 a file still exactly as last published
+was refreshed in place; that is now a suggestion too.
 
-`--overwrite` restores the old behaviour for one run: every differing file is
-replaced with the plugin's copy. A manifest written before hashes existed
-records none, so on its first update every file that differs is kept, never
-overwritten.
+Every kept file is listed in the output, with the other plugin named when two
+plugins publish the same path. Merge what you want from the `.updated` copy and
+delete it; it is removed automatically once the file matches the plugin again.
+No compiler stage reads it — config, migration and view globs all match `.php`
+only. A `<file>.plugin-new` left by an older release is removed the same way.
+
+`--overwrite` replaces every differing file with the plugin's copy, for one
+run (`update`/`upgrade`).
 
 ### Command aliases
 

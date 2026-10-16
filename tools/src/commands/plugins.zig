@@ -75,7 +75,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, env: *EnvMap, args: []const []c
     var want_latest = false;
     var migrate_store = false;
     // --overwrite: `update`/`upgrade` replace published files that differ from
-    // the plugin's copy, instead of keeping them and writing <file>.plugin-new.
+    // the plugin's copy, instead of keeping them and writing <file>.updated.
     var overwrite_assets = false;
 
     var operands: std.ArrayList([]const u8) = .empty;
@@ -1449,7 +1449,7 @@ fn updatePlugins(
 
         if (new_paths.items.len == 0 and changed_paths.items.len == 0 and ui_dirty == null) {
             // Nothing to write, but record the fingerprints of files already in
-            // sync, so a later update can tell an unedited file from an edited one.
+            // sync: the manifest's record of which files this plugin published.
             if (!dry_run) try assets.recordHashes(allocator, io, root, e.name, hashes.items);
             if (kept_paths.items.len == 0) prompt.muted(try std.fmt.allocPrint(allocator, "{s}: up to date — config, database, resources and ui all match.", .{e.name}));
             continue;
@@ -1651,16 +1651,16 @@ fn upgradeProject(allocator: std.mem.Allocator, io: Io, env: *EnvMap, target: []
     return 0;
 }
 
-/// Report the published files `enable`/`update` left alone because they differ
-/// from the plugin's copy and nothing proves they are unedited.
+/// Report the project files `enable`/`update` left alone because they differ
+/// from the plugin's copy: the plugin's version is only suggested beside them.
 fn reportKept(allocator: std.mem.Allocator, kept: []const assets.KeptAsset, dry_run: bool, plugin: []const u8) void {
     if (kept.len == 0) return;
-    prompt.warn(std.fmt.allocPrint(allocator, "{s} {d} file(s) that differ from {s}'s copy — its version {s} beside each as *{s} (--overwrite replaces them)", .{
+    prompt.warn(std.fmt.allocPrint(allocator, "{s} {d} project file(s) that differ from {s}'s copy — its version {s} beside each as *{s}; merge what you want and delete it (--overwrite replaces them)", .{
         if (dry_run) "Would keep" else "Kept",
         kept.len,
         plugin,
         if (dry_run) "would be written" else "is",
-        assets.plugin_new_suffix,
+        assets.updated_suffix,
     }) catch return);
     for (kept) |k| {
         const line = if (k.also_published_by) |other|
@@ -2056,7 +2056,7 @@ fn printHelp() void {
     prompt.item("hkm plugins recover [proj]", "rebuild var/plugin-assets.json from on-disk assets (aliases: rebuild/reindex)");
     prompt.item("hkm plugins enable <plugin> [proj]", "wire a plugin into the project bootstrap");
     prompt.item("hkm plugins disable <plugin> [proj]", "remove a plugin from the project bootstrap");
-    prompt.item("hkm plugins update [plugin] [proj]", "analyse enabled plugin(s) vs the project (config/database/resources/ui): publish new assets, refresh unedited ones, keep edited ones (plugin copy → *.plugin-new), re-sync a drifted ui mirror, migrate central + tenant DBs; wire any missing Support/helpers.php require");
+    prompt.item("hkm plugins update [plugin] [proj]", "analyse enabled plugin(s) vs the project (config/database/resources/ui): publish new assets, keep every file the project already has (a differing plugin copy → *.updated), re-sync a drifted ui mirror, migrate central + tenant DBs; wire any missing Support/helpers.php require");
     prompt.item("hkm plugins upgrade [proj]", "full upgrade after plugins changed: heal new deps, publish/migrate, reconcile plugin SPLITS (moves migration ownership without dropping data)");
     prompt.item("hkm plugins create <name> [proj]", "scaffold a new plugin (project, or --kernel)");
     prompt.item("hkm plugins delete <name> [proj]", "delete a plugin folder from disk");
@@ -2081,7 +2081,7 @@ fn printHelp() void {
     prompt.item("--essential, -e", "enable into withEssentialModules() (default: on-demand)");
     prompt.item("--kernel, -k", "create/delete a KERNEL plugin (kernel monorepo only)");
     prompt.item("--dry-run, -n", "preview the change without writing");
-    prompt.item("--overwrite", "update/upgrade: replace published files that differ from the plugin's copy (default: keep them + write <file>.plugin-new)");
+    prompt.item("--overwrite", "update/upgrade: replace published files that differ from the plugin's copy (default: keep them + write <file>.updated)");
     prompt.item("--version=<tag>", "install/update to a specific release instead of the newest");
     prompt.item("--force", "overwrite a plugin working copy that has uncommitted changes");
     prompt.item("--full", "clone full history instead of a shallow --depth 1");
