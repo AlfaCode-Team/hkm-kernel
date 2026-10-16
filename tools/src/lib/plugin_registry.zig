@@ -226,7 +226,11 @@ pub fn kernelVersion() ?semver.Version {
 pub const Compat = union(enum) {
     /// No constraint declared, or it is satisfied.
     ok,
-    /// Declared and NOT satisfied. Carries both sides for the message.
+    /// The kernel is NEWER than the constraint's upper bound. Installed — the
+    /// plugin was only released before this kernel — with a warning.
+    newer_kernel: struct { required: []const u8, kernel: []const u8 },
+    /// The kernel is OLDER than the plugin's floor: it lacks something the
+    /// plugin calls. Refused. Carries both sides for the message.
     incompatible: struct { required: []const u8, kernel: []const u8 },
     /// The constraint string is malformed — refuse rather than guess.
     bad_constraint: []const u8,
@@ -235,6 +239,11 @@ pub const Compat = union(enum) {
 };
 
 /// Check a plugin's declared kernel constraint against this kernel.
+///
+/// Only the FLOOR refuses (semver.meetsFloor). A plugin needing a newer
+/// kernel than the one running cannot work and is stopped; a kernel newer than
+/// the plugin's range is the normal state of a project that upgraded its kernel
+/// first, and blocking it there stopped plugins that would have run.
 ///
 /// An EMPTY constraint returns `.ok`. That is deliberate: every plugin written
 /// before this field existed declares nothing, and failing closed would make
@@ -250,6 +259,9 @@ pub fn checkKernel(constraint: ?[]const u8) Compat {
 
     const okay = semver.satisfies(kv, trimmed) catch return .{ .bad_constraint = trimmed };
     if (okay) return .ok;
+
+    const floor = semver.meetsFloor(kv, trimmed) catch return .{ .bad_constraint = trimmed };
+    if (floor) return .{ .newer_kernel = .{ .required = trimmed, .kernel = banner.version() } };
 
     return .{ .incompatible = .{ .required = trimmed, .kernel = banner.version() } };
 }

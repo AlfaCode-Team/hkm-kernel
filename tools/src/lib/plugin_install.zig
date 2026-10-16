@@ -219,6 +219,16 @@ fn gateMessage(allocator: std.mem.Allocator, env: *EnvMap, name: []const u8, con
 
     return switch (pregistry.checkKernel(constraint)) {
         .ok => null,
+        .newer_kernel => |i| blk: {
+            // Not a refusal: a newer kernel is only outside the range the
+            // plugin was released against. Say so, and install it.
+            prompt.warn(try std.fmt.allocPrint(
+                allocator,
+                "{s} was released for kernel {s}; this kernel is {s}, newer — installing it anyway.",
+                .{ name, i.required, i.kernel },
+            ));
+            break :blk null;
+        },
         .unknown_kernel => try std.fmt.allocPrint(
             allocator,
             "{s} declares a kernel requirement but this kernel's version ('{s}') could not be parsed.",
@@ -231,7 +241,7 @@ fn gateMessage(allocator: std.mem.Allocator, env: *EnvMap, name: []const u8, con
         ),
         .incompatible => |i| try std.fmt.allocPrint(
             allocator,
-            "{s} requires kernel {s} but this kernel is {s}. Upgrade the kernel (hkm upgrade), install an older plugin release (--version=…), or override with HKM_PLUGIN_IGNORE_KERNEL=1.",
+            "{s} requires kernel {s} but this kernel is {s}, older. Upgrade the kernel (hkm upgrade), install an older plugin release (--version=…), or override with HKM_PLUGIN_IGNORE_KERNEL=1.",
             .{ name, i.required, i.kernel },
         ),
     };

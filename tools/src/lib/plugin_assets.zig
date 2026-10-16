@@ -25,11 +25,16 @@ pub const subtrees = [_][]const u8{
     "resources",
 };
 
-/// Written BESIDE a project file that `enable`/`update` will not overwrite,
-/// holding the plugin's version of it. No compiler stage globs it — config,
-/// migration and view discovery all match `.php` — so it stays inert until it is
-/// merged by hand. It is deleted once the project file matches the plugin again.
-pub const plugin_new_suffix = ".plugin-new";
+/// Written BESIDE a project file that `install`/`enable`/`update` will not
+/// overwrite, holding the plugin's version of it: a suggestion to merge by hand.
+/// No compiler stage globs it — config, migration and view discovery all match
+/// `.php` — so it stays inert until it is merged. It is deleted once the project
+/// file matches the plugin again.
+pub const updated_suffix = ".updated";
+
+/// The suffix releases before 1.20 wrote beside a kept file. Still removed once
+/// the project file matches the plugin again, so no stale copy outlives a merge.
+pub const legacy_suffix = ".plugin-new";
 
 /// One published file's fingerprint, as recorded in the manifest.
 pub const PathHash = struct {
@@ -61,37 +66,26 @@ pub const AssetAction = enum {
     publish,
     /// Byte-identical to the plugin's copy: nothing to write.
     in_sync,
-    /// Differs, but is exactly what was last published (or overwrite was asked
-    /// for): replace it with the plugin's copy.
+    /// Differs, and `--overwrite` was asked for: replace it with the plugin's copy.
     refresh,
-    /// Differs and was edited, never fingerprinted, or last written by another
-    /// plugin: keep it, and write the plugin's copy beside it.
+    /// Differs: keep the project's file, and suggest the plugin's copy beside it
+    /// as `<file>.updated`.
     keep,
 };
 
-/// The whole overwrite policy, as a pure function.
+/// The whole overwrite policy, as a pure function: a file the project already
+/// has is the PROJECT's, and only `--overwrite` replaces it.
 ///
-/// `recorded` is the fingerprint this plugin's manifest entry holds for the
-/// path. It is null for a manifest written before fingerprints existed, and that
-/// is why an unrecorded file that differs is KEPT rather than refreshed: nothing
-/// distinguishes a project's deliberate edit from a stale copy, and guessing
-/// wrong destroys the edit — which is exactly how a project's layout, view
-/// overrides and translations were being silently replaced on every update.
-pub fn decideAsset(
-    allocator: std.mem.Allocator,
-    have: ?[]const u8,
-    plugin_bytes: []const u8,
-    recorded: ?[]const u8,
-    overwrite: bool,
-) !AssetAction {
+/// It used to replace a differing file when its fingerprint showed it was still
+/// exactly what the plugin last published. That is still a project file: the
+/// project committed it, its layout and views were built around it, and a
+/// plugin release rewriting it underneath them is what scrambled a project's
+/// configuration, views and layout on `hkm plugins install --latest`. The new
+/// version is now a suggestion, never a replacement.
+pub fn decideAsset(have: ?[]const u8, plugin_bytes: []const u8, overwrite: bool) AssetAction {
     const current = have orelse return .publish;
     if (std.mem.eql(u8, current, plugin_bytes)) return .in_sync;
-    if (overwrite) return .refresh;
-    const known = recorded orelse return .keep;
-
-    const actual = try contentHash(allocator, current);
-    defer allocator.free(actual);
-    return if (std.mem.eql(u8, actual, known)) .refresh else .keep;
+    return if (overwrite) .refresh else .keep;
 }
 
 /// Subtrees whose files are MIGRATIONS (applied to a DB), used when reconciling
@@ -114,8 +108,7 @@ pub fn isMigrationPath(rel: []const u8) bool {
 /// Copy a plugin's publishable assets into the project on ENABLE, under the
 /// decideAsset policy: a file the project lacks is written, an identical one is
 /// left as it is, and one that DIFFERS is kept — the plugin's version goes beside
-/// it as `<file>.plugin-new` — unless it is provably what this plugin last
-/// published, or `overwrite`. Paths this plugin now owns (written or already
+/// it as `<file>.updated` — unless `overwrite`. Paths this plugin now owns (written or already
 /// identical) go to `out`, files left alone to `kept_out`, and every owned
 /// file's fingerprint to `hashes_out` for recordHashes().
 pub fn publishAssets(
@@ -139,11 +132,10 @@ pub fn publishAssets(
 
 /// Analyse a plugin's publishable subtrees (config, database, resources)
 /// against the project's copies and bring the project in sync under the
-/// decideAsset policy: a missing file is published (`new_out`); a file still
-/// exactly as this plugin last published it is refreshed (`changed_out`); and a
-/// file the project edited — or that no fingerprint vouches for, or that another
-/// plugin wrote — is KEPT, with the plugin's version written beside it as
-/// `<file>.plugin-new` (`kept_out`). Every file the plugin now owns, identical
+/// decideAsset policy: a missing file is published (`new_out`); a file that
+/// differs is KEPT, with the plugin's version written beside it as
+/// `<file>.updated` (`kept_out`) — or, with `overwrite`, replaced
+/// (`changed_out`). Every file the plugin now owns, identical
 /// ones included, gets its fingerprint in `hashes_out`. Pass `dry_run` to detect
 /// without writing.
 pub fn syncAssets(
@@ -161,7 +153,6 @@ pub fn syncAssets(
 ) !void {
     const cwd = Dir.cwd();
     const manifest = try readManifest(allocator, io, projectRoot);
-    const own = entryFor(manifest.items, pluginName);
 
     for (subtrees) |sub| {
         const srcDir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pluginFolder, sub });
@@ -175,12 +166,16 @@ pub fn syncAssets(
             const src = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ srcDir, rel });
             const bytes = cwd.readFileAlloc(io, src, allocator, .limited(16 * 1024 * 1024)) catch continue;
             const have = cwd.readFileAlloc(io, dest, allocator, .limited(16 * 1024 * 1024)) catch null;
-            const recorded = if (own) |e| hashIn(e.hashes, relDest) else null;
-            const beside = try std.fmt.allocPrint(allocator, "{s}{s}", .{ dest, plugin_new_suffix });
+            const beside = try std.fmt.allocPrint(allocator, "{s}{s}", .{ dest, updated_suffix });
+            const legacy = try std.fmt.allocPrint(allocator, "{s}{s}", .{ dest, legacy_suffix });
 
-            const action = try decideAsset(allocator, have, bytes, recorded, overwrite);
+            const action = decideAsset(have, bytes, overwrite);
             if (action == .keep) {
-                if (!dry_run) try cwd.writeFile(io, .{ .sub_path = beside, .data = bytes });
+                if (!dry_run) {
+                    try cwd.writeFile(io, .{ .sub_path = beside, .data = bytes });
+                    // The suggestion now lives under its new name only.
+                    cwd.deleteFile(io, legacy) catch {};
+                }
                 try kept_out.append(allocator, .{
                     .path = relDest,
                     .also_published_by = otherOwner(manifest.items, pluginName, relDest),
@@ -196,7 +191,10 @@ pub fn syncAssets(
             if (action == .refresh) try changed_out.append(allocator, relDest);
 
             // The project now holds the plugin's bytes, so a leftover side copy is stale.
-            if (!dry_run) cwd.deleteFile(io, beside) catch {};
+            if (!dry_run) {
+                cwd.deleteFile(io, beside) catch {};
+                cwd.deleteFile(io, legacy) catch {};
+            }
             try hashes_out.append(allocator, .{ .path = relDest, .hash = try contentHash(allocator, bytes) });
         }
     }
@@ -926,7 +924,10 @@ pub fn reconcileMigrationOwnership(
 }
 
 /// Publish every plugin currently enabled in a project's bootstrap (copy only,
-/// no auto-migrate). Used by `hkm new`. Safe to call repeatedly.
+/// no auto-migrate). Used by `hkm new` and after `hkm plugins install`. Safe to
+/// call repeatedly: a file the project lacks is written, and one it has that
+/// differs from the plugin's is left alone, with the plugin's copy suggested
+/// beside it as `<file>.updated` — listed here, so the suggestion is never silent.
 pub fn publishEnabled(allocator: std.mem.Allocator, io: Io, env: *EnvMap, projectRoot: []const u8) !void {
     const bootstrap = try std.fmt.allocPrint(allocator, "{s}/app/bootstrap/app.php", .{util.trimSlash(projectRoot)});
     const source = Dir.cwd().readFileAlloc(io, bootstrap, allocator, .limited(4 * 1024 * 1024)) catch return;
@@ -938,25 +939,32 @@ pub fn publishEnabled(allocator: std.mem.Allocator, io: Io, env: *EnvMap, projec
     if (enabled.items.len == 0) return;
 
     const srcs = try sources.discoverSources(allocator, io, env, projectRoot);
-    var total: usize = 0;
+    var written: usize = 0;
+    var suggested: std.ArrayList(KeptAsset) = .empty;
     for (enabled.items) |e| {
         for ([_]sources.Source{ .project, .kernel }) |src| {
             const dir = srcs.dirFor(src) orelse continue;
             const folderPath = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir, e.name });
             if (!util.dirExists(Dir.cwd(), io, folderPath)) continue;
-            var paths: std.ArrayList([]const u8) = .empty;
-            var kept: std.ArrayList(KeptAsset) = .empty;
+            var new_paths: std.ArrayList([]const u8) = .empty;
+            var changed: std.ArrayList([]const u8) = .empty;
             var hashes: std.ArrayList(PathHash) = .empty;
-            try publishAssets(allocator, io, e.name, folderPath, projectRoot, false, &paths, &kept, &hashes);
-            if (paths.items.len > 0) {
-                try recordPublished(allocator, io, projectRoot, e.name, paths.items);
+            try syncAssets(allocator, io, e.name, folderPath, projectRoot, false, false, &new_paths, &changed, &suggested, &hashes);
+            if (hashes.items.len > 0) {
+                var owned: std.ArrayList([]const u8) = .empty;
+                for (hashes.items) |h| try owned.append(allocator, h.path);
+                try recordPublished(allocator, io, projectRoot, e.name, owned.items);
                 try recordHashes(allocator, io, projectRoot, e.name, hashes.items);
-                total += paths.items.len;
             }
+            written += new_paths.items.len;
             break;
         }
     }
-    if (total > 0) prompt.muted(try std.fmt.allocPrint(allocator, "published {d} plugin asset(s)", .{total}));
+    if (written > 0) prompt.muted(try std.fmt.allocPrint(allocator, "published {d} new plugin asset(s)", .{written}));
+    if (suggested.items.len > 0) {
+        prompt.warn(try std.fmt.allocPrint(allocator, "Kept {d} project file(s) that differ from the plugin's copy — its version is beside each as *{s}; merge what you want and delete it", .{ suggested.items.len, updated_suffix }));
+        for (suggested.items) |k| prompt.muted(try std.fmt.allocPrint(allocator, "    = {s}", .{k.path}));
+    }
 }
 
 /// The result of a manifest recovery pass.
@@ -1071,26 +1079,19 @@ fn batchFor(old: []const Entry, name: []const u8) ?i64 {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 test "decideAsset: a missing file is published, an identical one is left alone" {
-    const a = std.testing.allocator;
-    try std.testing.expectEqual(AssetAction.publish, try decideAsset(a, null, "new", null, false));
-    try std.testing.expectEqual(AssetAction.in_sync, try decideAsset(a, "same", "same", null, false));
+    try std.testing.expectEqual(AssetAction.publish, decideAsset(null, "new", false));
+    try std.testing.expectEqual(AssetAction.in_sync, decideAsset("same", "same", false));
 }
 
-test "decideAsset: only a file still exactly as last published is refreshed" {
-    const a = std.testing.allocator;
-    const published = try contentHash(a, "v1 from the plugin");
-    defer a.free(published);
-
-    // Untouched since it was published: the plugin's new version replaces it.
-    try std.testing.expectEqual(AssetAction.refresh, try decideAsset(a, "v1 from the plugin", "v2 from the plugin", published, false));
-    // Edited in the project: kept.
-    try std.testing.expectEqual(AssetAction.keep, try decideAsset(a, "v1 plus the project's edit", "v2 from the plugin", published, false));
+test "decideAsset: a file the project has is kept even when it is what the plugin last published" {
+    // Untouched since it was published, or edited: either way it is the
+    // project's file now, and the plugin's new version is only suggested.
+    try std.testing.expectEqual(AssetAction.keep, decideAsset("v1 from the plugin", "v2 from the plugin", false));
+    try std.testing.expectEqual(AssetAction.keep, decideAsset("v1 plus the project's edit", "v2 from the plugin", false));
 }
 
-test "decideAsset: a differing file nothing fingerprinted is kept unless overwrite is asked for" {
-    const a = std.testing.allocator;
-    try std.testing.expectEqual(AssetAction.keep, try decideAsset(a, "project copy", "plugin copy", null, false));
-    try std.testing.expectEqual(AssetAction.refresh, try decideAsset(a, "project copy", "plugin copy", null, true));
+test "decideAsset: only --overwrite replaces a differing file" {
+    try std.testing.expectEqual(AssetAction.refresh, decideAsset("project copy", "plugin copy", true));
 }
 
 test "contentHash is lowercase hex SHA-256" {

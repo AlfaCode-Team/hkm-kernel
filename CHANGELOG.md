@@ -4,6 +4,32 @@ All notable changes to the AlfacodeTeam PhpServicePlatform (Sentinel) kernel are
 documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-10-17
+
+### Changed
+- **`hkm plugins install`/`enable`/`update` never replace a file the project
+  already has.** When a plugin's copy of a published file (config, migration,
+  view, layout, translation) differs from the project's, the project's file is
+  kept and the plugin's version is written beside it as `<file>.updated`, to be
+  merged by hand. Until now a file still exactly as it was last published was
+  refreshed in place, so `hkm plugins install --latest` rewrote configuration,
+  views and layouts a project had built on. `--overwrite` still replaces them
+  for one run.
+- The side copy is named `<file>.updated` (was `<file>.plugin-new`); a leftover
+  `.plugin-new` is removed once the file matches the plugin again.
+- **A plugin is refused only when the running kernel is OLDER than it needs.**
+  The install gate used to require the kernel to fall inside the plugin's whole
+  `kernel` range, so a project that upgraded its kernel first could not install
+  a plugin declaring `~1.17` on 1.19, or `^1.13` on 2.0, although it would have
+  run. Now only the range's floor refuses ("requires kernel ^1.19.0 but this
+  kernel is 1.18.0, older"); a kernel above the range installs the plugin with
+  a warning ("released for kernel ~1.17; this kernel is 1.19.0, newer").
+  `HKM_PLUGIN_IGNORE_KERNEL=1` still overrides the floor.
+- `hkm plugins install` lists every kept file and its `.updated` suggestion,
+  and counts only the assets it actually wrote ("published N new plugin
+  asset(s)"); it used to write the side copies silently and count every file
+  the plugin owns.
+
 ## [1.19.0] - 2026-10-16
 
 ### Changed
