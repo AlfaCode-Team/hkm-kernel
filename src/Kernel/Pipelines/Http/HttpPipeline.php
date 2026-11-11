@@ -10,7 +10,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Loading\{DependencyGraphCalculator, O
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Contracts\HttpStageContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Stages\{
     CorrelationIdStage, ObservabilityStage, SecurityStage, ResolveStage,
-    LoadStage, RouteFilterStage, ExecuteStage, ErrorStage
+    LoadStage, RouteFilterStage, RouteLabelStage, ExecuteStage, ErrorStage
 };
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\{MetricsPort, NullMetrics, NullTracer, TracerPort};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteIndex;
@@ -33,7 +33,9 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
  *   7. RouteFilterStage        — the matched route's declared filters[]
  *      ↳ after.execute hooks   — module-registered stages; each calls $next()
  *                                 and post-processes the controller's Response
- *   8. ExecuteStage            — resolve controller → run → Response (terminal)
+ *   8. RouteLabelStage         — applies the route's audit/metric/emits labels
+ *                                 (innermost after.execute position)
+ *   9. ExecuteStage            — resolve controller → run → Response (terminal)
  *
  * Hooks are registered ONCE during module boot() (at kernel build), so the
  * stage list is stable and is compiled exactly once on the first request, then
@@ -60,6 +62,13 @@ final class HttpPipeline
 
     /** @var list<HttpStageContract>|null compiled once, reused */
     private ?array $stages = null;
+
+    /**
+     * filter-manifest.php, read lazily and only on the error path.
+     *
+     * @var array<string, mixed>|null
+     */
+    private ?array $filterManifest = null;
 
     /**
      * @param list<class-string> $essentialModules cross-cutting modules loaded
@@ -172,6 +181,10 @@ final class HttpPipeline
             // Placed here, each hook calls $next() and receives the controller's
             // Response on the way back out: "after execute" in an onion pipeline.
             ...$this->resolveHook('after.execute'),
+            // The route's declared audit/metric/emits labels. Innermost, so it
+            // sees the controller's Response and every hook's request attributes;
+            // a no-op for the routes (nearly all) that declare none.
+            new RouteLabelStage(),
             new ExecuteStage(),
         ]; 
     }
@@ -266,16 +279,52 @@ final class HttpPipeline
                     continue;
                 }
 
+                // When a module.json declared itself the owner of this alias,
+                // name it. "no Provider registered [auth]" is the symptom; "the
+                // plugin solving http.security_filters provides it, and is not
+                // in withModules()" is the cause, and the reader should not have
+                // to already know which plugin that is.
+                $owner = $this->filterOwner($alias);
+
                 throw new \InvalidArgumentException(sprintf(
-                    'Route [%s] declares filter [%s], which no Provider::boot() registered. '
+                    'Route [%s] declares filter [%s], which no Provider::boot() registered.%s '
                     . 'Registered aliases: %s. Register it with $http->filter() in the plugin that '
                     . 'provides it, or remove it from the route.',
                     $key,
                     $alias,
+                    $owner === null
+                        ? ''
+                        : sprintf(' The module solving [%s] declares that it provides this alias —'
+                            . ' is that plugin listed in withModules()?', $owner),
                     $this->filters->aliases() === [] ? '(none)' : implode(', ', $this->filters->aliases()),
                 ));
             }
         }
+    }
+
+    /**
+     * The `solves` domain of the module that declared ownership of an alias.
+     *
+     * Read from filter-manifest.php, which {@see \AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages\ValidateRouteFiltersStage}
+     * compiles from each module.json's "providesFilters". OPTIONAL: a manifest
+     * compiled by an older kernel, or a deployment where no plugin declares
+     * ownership, simply yields null and the message degrades to what it said
+     * before. This is only ever called while already building an exception, so
+     * the read costs nothing on a healthy boot.
+     */
+    private function filterOwner(string $alias): ?string
+    {
+        $this->filterManifest ??= $this->loadManifest('filter-manifest.php', ['provides' => []]);
+
+        $provides = $this->filterManifest['provides'] ?? null;
+
+        if (!\is_array($provides)) {
+            return null;
+        }
+
+        $owner = $provides[$alias] ?? null;
+
+        return \is_string($owner) && $owner !== '' ? $owner : null;
     }
 
     /** Read a boolean env flag once, at pipeline build. */

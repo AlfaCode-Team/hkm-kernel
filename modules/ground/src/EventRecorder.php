@@ -10,12 +10,15 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Events\Contracts\IntegrationEventCont
 /**
  * An EventBus listener that records instead of reacting.
  *
- * EventBus is final and has no wildcard subscription, so the ground cannot
- * observe dispatches by wrapping it. It subscribes this to every name in the
- * plugin's module.json `emits[]` instead — which makes the recorder only as
- * complete as that declaration, and turns a missing `emits[]` entry into a
- * visible "no events recorded" rather than a silent gap. `plugin:check` reports
- * the same drift from the other direction.
+ * EventBus is final, so the ground cannot observe dispatches by wrapping it.
+ * It subscribes this to `EventBus::ALL` instead, which records every dispatch
+ * whatever its name.
+ *
+ * It used to subscribe one name at a time from the plugin's module.json
+ * `emits[]`, because that was the only list available — and that made the
+ * recorder exactly as complete as a hand-maintained declaration. An event
+ * fired under an undeclared name was simply never seen, so a test asserting it
+ * failed with "recorded: nothing", which reads like the dispatch never ran.
  *
  * The instance is bound into the CoreContainer before it freezes, so EventBus
  * resolves this exact object rather than constructing a fresh one per dispatch.

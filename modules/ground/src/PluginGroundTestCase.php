@@ -487,17 +487,17 @@ abstract class PluginGroundTestCase extends TestCase
     }
 
     /**
-     * A dispatch failure has two very different causes, and the message should
-     * distinguish them: the event never fired, or it fired under a name that
-     * module.json does not declare, in which case nothing was subscribed and the
-     * recorder could not have seen it.
+     * The recorder subscribes to `EventBus::ALL`, so "recorded" is every
+     * dispatch that happened and not a filtered view of it. That makes the
+     * list worth printing: nothing recorded means nothing was dispatched, and a
+     * list that does not contain the expected name — but does contain a
+     * near-miss — is a naming mismatch rather than a missing dispatch.
      */
     private static function eventContext(string $nameOrClass, EventRecorder $recorder): string
     {
         $recorded = $recorder->names();
 
         return "Expected [{$nameOrClass}] to be dispatched.\n"
-            . 'Recorded: ' . ($recorded === [] ? 'nothing' : implode(', ', $recorded)) . "\n"
-            . 'Only names listed in module.json "emits" are recorded — check that first.';
+            . 'Dispatched: ' . ($recorded === [] ? 'nothing at all' : implode(', ', $recorded));
     }
 }

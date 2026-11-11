@@ -89,6 +89,7 @@ use Plugins\Validation\Provider as ValidationProvider;
 use Plugins\Session\Provider as SessionProvider;
 use Plugins\Cookie\Provider as CookieProvider;
 use Plugins\RedisCache\Provider as RedisCacheProvider;
+use Plugins\I18n\Provider as I18nProvider;
 use Plugins\View\Provider as ViewModule;
 use Plugins\SecurityFilters\Provider as SecurityFiltersModule;
 
@@ -333,6 +334,13 @@ return Kernel::configure()
         // CommonRules + FinancialRules packs. DTOs extend Plugins\Validation\
         // AbstractDto; built-in rules work without this, the packs need it.
         ValidationProvider::class,
+
+        // I18n (solves: i18n.translation) — the Translator. Required, not
+        // optional: SecurityFilters below declares requires[] = ["i18n.translation"]
+        // for its denial messages, so leaving this out fails the boot at
+        // CompileServiceManifestStage with "Unknown module.json requires[] entries"
+        // on a project that has not been touched yet.
+        I18nProvider::class,
 
         // Database (solves: database.management) — the multi-driver database stack:
         // the DatabasePort adapter, the pooled adapter that borrows from the

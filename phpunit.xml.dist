@@ -23,6 +23,21 @@
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
         </testsuite>
+        <!--
+            Modules: the first-party packages under modules/ that carry their own
+            tests. They are listed here because this file is what CI runs, and a
+            package whose suite is in no testsuite is a package whose tests never
+            fail — the one state that looks exactly like passing.
+
+            modules/ground is deliberately NOT here yet: its suite boots real
+            kernels and takes ~67s, so adding it is a CI-time decision of its own
+            rather than a side effect of listing these three.
+        -->
+        <testsuite name="Modules">
+            <directory>modules/pools/tests</directory>
+            <directory>modules/openapi/tests</directory>
+            <directory>modules/circuit-breaker/tests</directory>
+        </testsuite>
     </testsuites>
 
     <source>

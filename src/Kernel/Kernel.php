@@ -12,12 +12,19 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Exceptions\KernelException;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Server\ServerPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\{WorkerLoop, WorkerPipeline};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\{CachePort, ClockPort, LoggerPort, QueuePort, SystemClock};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\{RouteIndex, UrlGenerator};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Scheduling\Scheduler;
 use AlfacodeTeam\PhpServicePlatform\Commands\Schedule\{ScheduleListCommand, ScheduleRunCommand};
-use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\SecurityLayerContract};
+use AlfacodeTeam\PhpServicePlatform\Commands\Daemon\DaemonInstallCommand;
+use AlfacodeTeam\PhpServicePlatform\Commands\Daemon\DaemonRunCommand;
+use AlfacodeTeam\PhpServicePlatform\Commands\Daemon\DaemonStatusCommand;
+use AlfacodeTeam\PhpServicePlatform\Commands\Server\ServerListCommand;
+use AlfacodeTeam\PhpServicePlatform\Commands\Server\ServerRunCommand;
+use AlfacodeTeam\PhpServicePlatform\Commands\Spec\SpecGenerateCommand;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\PortAwareLayerContract, Contracts\SecurityLayerContract};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
 /**
@@ -63,10 +70,11 @@ final class Kernel
     private ?string $basePath = null;
     private ?string $projectPath = null;
 
-    private CoreContainer $core;
-    private HttpPipeline  $http;
-    private CliPipeline   $cli;
-    private WorkerLoop    $workerLoop;
+    private CoreContainer  $core;
+    private HttpPipeline   $http;
+    private CliPipeline    $cli;
+    private WorkerLoop     $workerLoop;
+    private ServerPipeline $servers;
 
     /** Long-lived kernel services, constructed during materialize(). */
     private EventBus       $eventBus;
@@ -570,8 +578,12 @@ final class Kernel
      * Module boot() registers hooks for all three pipelines plus event
      * subscriptions in a single call, so all three pipeline instances must
      * exist when modules are wired. They are cheap shells — each defers its
-     * manifest disk I/O until its own first run — so constructing the two
-     * surfaces not in use costs effectively nothing.
+     * manifest disk I/O until its own first run — so constructing the surfaces
+     * not in use costs effectively nothing. The ServerPipeline is built here
+     * for the same reason and is NOT passed to boot(): a server is DECLARED in
+     * module.json, so adding it to the four-argument ModuleContract::boot()
+     * signature would break every existing plugin to deliver a registration
+     * path the manifest already provides.
      */
     private function materialize(RuntimeMode $mode): void
     {
@@ -591,6 +603,15 @@ final class Kernel
         );
         $this->workerPipe = new WorkerPipeline();
 
+        // Layers are built in the bootstrap, before this container existed. Hand
+        // the ones that want ports (WafLayer's ban cache and logger) the SAME
+        // singletons every module resolves, rather than a second adapter each.
+        foreach ($this->securityLayers as $layer) {
+            if ($layer instanceof PortAwareLayerContract) {
+                $layer->usePorts($this->core);
+            }
+        }
+
         $this->http = new HttpPipeline(
             gateway:          new SecurityGateway($this->securityLayers),
             core:             $this->core,
@@ -608,6 +629,21 @@ final class Kernel
             // project declared app-wide should not quietly stop existing at the
             // queue boundary.
             essentialModules: $this->essentialModules,
+        );
+        $this->servers = new ServerPipeline(
+            $this->core,
+            $errorPipeline,
+            // Essentials reach a server for the same reason they reach a job:
+            // a module the project declared app-wide should not quietly stop
+            // existing in the one process that runs for weeks.
+            essentialModules: $this->essentialModules,
+            // `server:run` arrives through the CLI, so the kernel is already
+            // materialized as RuntimeMode::Cli by the time a server starts —
+            // true for the second it was typed and wrong for the rest of the
+            // process's life. This lets the pipeline correct the record.
+            enterSurface: function (): void {
+                $this->mode = RuntimeMode::Server;
+            },
         );
 
         // Configuration compiled by CompileConfigManifestStage during build().
@@ -647,6 +683,7 @@ final class Kernel
         $this->core->instance(WorkerPipeline::class, $this->workerPipe);
         $this->core->instance(HttpPipeline::class, $this->http);
         $this->core->instance(CliPipeline::class, $this->cli);
+        $this->core->instance(ServerPipeline::class, $this->servers);
         $this->core->instance(ErrorPipeline::class, $errorPipeline);
 
         // The scheduler's own commands. Registered as class-strings so
@@ -654,6 +691,28 @@ final class Kernel
         // injects the Scheduler above.
         $this->cli->command(ScheduleRunCommand::class);
         $this->cli->command(ScheduleListCommand::class);
+
+        // Reads the compiled route manifest and writes an OpenAPI document.
+        // Registered as a class-string so CliPipeline builds it through the core
+        // container, consistent with the schedule commands above.
+        $this->cli->command(SpecGenerateCommand::class);
+
+        // Provisioning for plugins that are CLIENTS for a server which has to
+        // exist — a message bus, a broker. The kernel supplies the mechanism
+        // and holds no knowledge of any daemon: which binary, which version,
+        // which checksum and which config all come from the plugin's own
+        // module.json, so a second daemon is a manifest block in a second
+        // plugin and no kernel change.
+        $this->cli->command(DaemonInstallCommand::class);
+        $this->cli->command(DaemonStatusCommand::class);
+        $this->cli->command(DaemonRunCommand::class);
+
+        // The server surface's own commands. `daemon[]` declares the EXTERNAL
+        // processes a plugin needs; `servers[]` declares the in-process PHP
+        // ones, and both exist because a deployment missing one shows the same
+        // symptom: everything appears to work and nothing arrives.
+        $this->cli->command(ServerListCommand::class);
+        $this->cli->command(ServerRunCommand::class);
 
         // Wire each module ONCE — hooks + event subscriptions on live instances.
         foreach ($this->moduleClasses as $moduleClass) {
@@ -692,6 +751,28 @@ final class Kernel
         $this->ensureBuilt();
         $this->materialize(RuntimeMode::Worker);
         return $this->workerLoop;
+    }
+
+    /**
+     * The server surface — long-running processes that own their own loop.
+     *
+     *   exit($kernel->server()->run('realtime'));
+     *
+     * The fourth surface, and the only one that is not request-shaped: HTTP
+     * (PHP-FPM or OpenSwoole), CLI and worker all end by finishing their unit
+     * of work, while a server ends only when it is told to. See
+     * {@see ServerPipeline} for what that changes.
+     *
+     * A dedicated entry script is the honest way to run one, because it
+     * materializes the kernel for this surface from the start. `server:run`
+     * through the CLI works too and the pipeline corrects {@see self::mode()}
+     * once the server starts.
+     */
+    public function server(): ServerPipeline
+    {
+        $this->ensureBuilt();
+        $this->materialize(RuntimeMode::Server);
+        return $this->servers;
     }
 
     public function container(): CoreContainer

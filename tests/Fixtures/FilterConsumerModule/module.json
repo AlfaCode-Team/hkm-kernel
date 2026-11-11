@@ -1,0 +1,9 @@
+{
+  "name":    "filter-consumer",
+  "version": "1.0.0",
+  "solves":  "filters.consumer",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "requiresFilters": ["auth"]
+}

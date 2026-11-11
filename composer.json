@@ -59,7 +59,12 @@
     "repositories": [
         {
             "type": "path",
-            "url": "modules/http"
+            "url": "modules/http",
+            "options": {
+                "versions": {
+                    "alfacode-team/http": "1.0.1"
+                }
+            }
         },
         {
             "type": "path",
@@ -84,7 +89,10 @@
             "AlfacodeTeam\\PhpServicePlatform\\System\\": "src/System/",
             "Project\\": "projects/",
             "Plugins\\": "plugins/",
-            "AlfacodeTeam\\Ground\\": "modules/ground/src/"
+            "AlfacodeTeam\\Ground\\": "modules/ground/src/",
+            "AlfacodeTeam\\CircuitBreaker\\": "modules/circuit-breaker/src/",
+            "AlfacodeTeam\\OpenApi\\": "modules/openapi/src/",
+            "AlfacodeTeam\\Pools\\": "modules/pools/src/"
         },
         "files": [
             "src/Kernel/Support/helpers.php",
@@ -103,7 +111,10 @@
     "autoload-dev": {
         "psr-4": {
             "Tests\\": "tests/",
-            "AlfacodeTeam\\Ground\\Tests\\": "modules/ground/tests/"
+            "AlfacodeTeam\\Ground\\Tests\\": "modules/ground/tests/",
+            "AlfacodeTeam\\CircuitBreaker\\Tests\\": "modules/circuit-breaker/tests/",
+            "AlfacodeTeam\\OpenApi\\Tests\\": "modules/openapi/tests/",
+            "AlfacodeTeam\\Pools\\Tests\\": "modules/pools/tests/"
         }
     },
     "authors": [

@@ -61,10 +61,12 @@ final readonly class GroupExpander
      * one path, several hosts) from two declarations colliding on a name.
      *
      * @param array<string, mixed> $source
-     * @return list<array{method: string, path: string, handler: string, name: ?string, filters: list<string>, requires: list<string>, domain: string, faces: list<string>, decl: string}>
+     * @return list<array{method: string, path: string, handler: string, name: ?string, filters: list<string>, requires: list<string>, domain: string, faces: list<string>, decl: string, labels?: array<string, mixed>}>
      */
     public function flatten(array $source, string $owner): array
     {
+        RouteLabels::assertNoneOn($source, $owner, isGroup: false);
+
         $scope = [
             'prefix'   => RouteNormalizer::prefix($source['routePrefix'] ?? '', $owner),
             'name'     => RouteNormalizer::stringOrEmpty($source['routeName'] ?? '', $owner, 'routeName'),
@@ -117,6 +119,10 @@ final readonly class GroupExpander
 
             $name = RouteNormalizer::stringOrEmpty($route['name'] ?? '', $owner, 'name');
 
+            // audit / metric / emits — per ROUTE only, and absent unless declared,
+            // so a route without them flattens to exactly the shape it always had.
+            $labels = RouteLabels::normalize($route, "Route [{$route['method']} {$path}] in {$owner}");
+
             $entry = [
                 'method'   => strtoupper(trim((string) $route['method'])),
                 'path'     => $path,
@@ -136,6 +142,10 @@ final readonly class GroupExpander
                 'faces'    => RouteNormalizer::faces($route['faces'] ?? []) ?: $inherited['faces'],
                 'decl'     => "{$at} routes[{$index}]",
             ];
+
+            if ($labels !== null) {
+                $entry['labels'] = $labels;
+            }
 
             // One flat route per domain. A single string yields one, exactly as
             // before; a list yields one copy per host, each with its own route
@@ -157,6 +167,8 @@ final readonly class GroupExpander
             }
 
             $context = "Route group in {$owner}";
+
+            RouteLabels::assertNoneOn($group, $context, isGroup: true);
 
             $scope = [
                 'prefix'   => $inherited['prefix']

@@ -1,0 +1,23 @@
+{
+  "name":    "labels-fixture",
+  "version": "1.0.0",
+  "solves":  "labels.fixture",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "emits":    ["order.created", "order.viewed"],
+  "routePrefix": "/lab",
+  "routes": [
+    { "method": "POST", "path": "/orders", "handler": "Tests\\Fixtures\\LabelsModule\\LabelController@created",
+      "audit": "order.create", "metric": ["orders.created", "orders.total"], "emits": "order.created" },
+    { "method": "GET",  "path": "/orders/{id:num}", "handler": "Tests\\Fixtures\\LabelsModule\\LabelController@show",
+      "audit": "order.view", "metric": "orders.viewed", "emits": ["order.viewed"] },
+    { "method": "GET",  "path": "/invalid", "handler": "Tests\\Fixtures\\LabelsModule\\LabelController@invalid",
+      "audit": "order.create", "metric": "orders.created", "emits": "order.created" },
+    { "method": "GET",  "path": "/boom", "handler": "Tests\\Fixtures\\LabelsModule\\LabelController@boom",
+      "metric": "orders.created" },
+    { "method": "GET",  "path": "/guarded", "handler": "Tests\\Fixtures\\LabelsModule\\LabelController@created",
+      "filters": ["lab-deny"], "audit": "order.create", "metric": "orders.created", "emits": "order.created" },
+    { "method": "GET",  "path": "/plain", "handler": "Tests\\Fixtures\\LabelsModule\\LabelController@created" }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+    "name": "alfacode-team/openapi",
+    "description": "A small, framework-agnostic OpenAPI 3.1 document model and JSON emitter with deterministic output.",
+    "type": "library",
+    "keywords": [
+        "openapi",
+        "swagger",
+        "api-specification",
+        "json-schema",
+        "phpserviceplatform"
+    ],
+    "homepage": "https://github.com/AlfaCode-Team/openapi",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "AlfaCode Team",
+            "homepage": "https://github.com/AlfaCode-Team"
+        },
+        {
+            "name": "Hakeem Shamavu",
+            "email": "shamavurasheed@gmail.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/AlfaCode-Team/openapi/issues",
+        "source": "https://github.com/AlfaCode-Team/openapi"
+    },
+    "require": {
+        "php": "^8.4",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0 || ^13.0",
+        "phpstan/phpstan": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "AlfacodeTeam\\OpenApi\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AlfacodeTeam\\OpenApi\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse",
+        "check": [
+            "@analyse",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "1.0.x-dev"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

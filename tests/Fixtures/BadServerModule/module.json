@@ -1,0 +1,14 @@
+{
+  "name":    "badserver",
+  "version": "1.0.0",
+  "solves":  "server.bad",
+  "type":    "module",
+
+  "requires": [],
+  "exposes":  [],
+
+  "servers": [
+    { "name": "Realtime Server",
+      "class": "Tests\\Fixtures\\ServerModule\\DemoServer" }
+  ]
+}

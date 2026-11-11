@@ -1,0 +1,64 @@
+{
+    "name": "alfacode-team/circuit-breaker",
+    "description": "A framework-agnostic circuit breaker — stops calling a dependency that is already failing, with shared cross-process state and a failure predicate so healthy refusals never trip the circuit.",
+    "type": "library",
+    "keywords": [
+        "circuit-breaker",
+        "resilience",
+        "fault-tolerance",
+        "stability",
+        "bulkhead",
+        "phpserviceplatform"
+    ],
+    "homepage": "https://github.com/AlfaCode-Team/circuit-breaker",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "AlfaCode Team",
+            "homepage": "https://github.com/AlfaCode-Team"
+        },
+        {
+            "name": "Hakeem Shamavu",
+            "email": "shamavurasheed@gmail.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/AlfaCode-Team/circuit-breaker/issues",
+        "source": "https://github.com/AlfaCode-Team/circuit-breaker"
+    },
+    "require": {
+        "php": "^8.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0 || ^13.0",
+        "phpstan/phpstan": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "AlfacodeTeam\\CircuitBreaker\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AlfacodeTeam\\CircuitBreaker\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse",
+        "check": [
+            "@analyse",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "1.0.x-dev"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

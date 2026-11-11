@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace AlfacodeTeam\Ground\Inspection;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Contracts\ModuleContract;
+use AlfacodeTeam\Ground\Contract\ContractLock;
+use AlfacodeTeam\Ground\Contract\ContractSurface;
+use AlfacodeTeam\Ground\FrameworkVars;
 use AlfacodeTeam\Ground\PluginManifest;
 
 /**
@@ -29,6 +32,12 @@ use AlfacodeTeam\Ground\PluginManifest;
  *      unexercised path stays wrong until a user finds it.
  *   5. Handler targets. Verified at boot only when ROUTE_VERIFY_HANDLERS=true,
  *      which is off in production for good reason.
+ *   6. One plugin importing another's internals. bindInternal() guards
+ *      container RESOLUTION; an import plus `new` never asks the container, so
+ *      the coupling compiles and passes its tests.
+ *   7. A published string that vanished — a route name, event, domain or config
+ *      key something outside this repository already holds. Opt-in, via
+ *      contract.lock.json.
  *
  * Import analysis is textual — top-level `use` statements only. It therefore
  * sees a violation that is imported and misses one written as a fully-qualified
@@ -76,6 +85,7 @@ final class Inspector
         $this->checkRouteHandlers();
         $this->checkConfigDeclarations();
         $this->checkAccessRules();
+        $this->checkContractLock();
 
         // The UI half. Silent for a plugin with no ui/ directory, which is most
         // of them — see UiInspector.
@@ -566,6 +576,8 @@ final class Inspector
             $relative = $this->relative($file);
             $imports  = $this->imports($file);
 
+            $this->checkCrossPluginImports($file, $relative, $imports);
+
             if (str_contains($relative, 'Domain/')) {
                 $this->checkDomainPurity($file, $relative, $imports);
 
@@ -622,6 +634,164 @@ final class Inspector
         }
     }
 
+    // ── 7. One plugin reaching into another's internals ───────────────────────
+
+    /**
+     * The layers of a NEIGHBOURING plugin that are nobody else's business.
+     *
+     * Named explicitly rather than as "anything but API/", and the difference is
+     * load-bearing. Measured against the 69 first-party plugins, the broad form
+     * reported 54 imports; 29 of them were a neighbour's ROOT-level class
+     * (`Plugins\Validation\AbstractDto`, `Plugins\I18n\Translator`) or a
+     * published surface directory (`Plugins\Pageflow\Http\PageflowResponder`) —
+     * all deliberate, all working, all of them the publisher's own idea of its
+     * public face. Reporting those would have made the check wrong about more
+     * than half of what it said.
+     *
+     * These three are the layers the five access rules define as internal, and
+     * every hit on them is a real reach past a contract.
+     */
+    private const NEIGHBOUR_INTERNAL = ['Domain', 'Application', 'Infrastructure'];
+
+    /**
+     * A plugin may import another plugin's PUBLISHED contract and nothing else.
+     *
+     * NOTHING ELSE CATCHES THIS. `bindInternal()` guards container RESOLUTION,
+     * so it throws when module B asks the container for module A's repository —
+     * but an import plus `new` never touches the container, and
+     * `new \Plugins\Image\Domain\ValueObjects\ResizeMode('fit')` works forever.
+     * It is a coupling that compiles, passes its tests, and only surfaces when
+     * the neighbour refactors a class it was entitled to consider private.
+     *
+     * The neighbour's own `exposes[]` is the override, because module.json is the
+     * single source of truth for what a module publishes. Cookie lists
+     * `Plugins\Cookie\Infrastructure\CookieJar` there; it sits under
+     * Infrastructure/ and is nonetheless public, declared so by its owner. Of
+     * the 25 strict hits in the workspace, 8 were exactly this — a rule that
+     * ignored the declaration would have been arguing with the manifest.
+     *
+     * @param list<string> $imports
+     */
+    private function checkCrossPluginImports(string $file, string $relative, array $imports): void
+    {
+        $mine = $this->pluginRoot();
+
+        // Not a `Plugins\` package (ground itself, a module) — the rule is about
+        // one plugin reaching into another and has nothing to say here.
+        if ($mine === null) {
+            return;
+        }
+
+        // With no neighbours there is no exposes[] to consult, and every
+        // legitimate import of a declared contract would be reported as a
+        // violation. The inspector's contract is that neighbours-empty narrows
+        // what it can conclude, never that it starts guessing.
+        if ($this->neighbours === []) {
+            return;
+        }
+
+        $published = $this->publishedByNeighbours();
+
+        foreach ($imports as $import) {
+            $parts = explode('\\', ltrim($import, '\\'));
+
+            // Four segments minimum: Plugins\Other\Layer\Class. Anything
+            // shorter is a root-level class, which is the neighbour's own idea
+            // of its public face — see NEIGHBOUR_INTERNAL.
+            if ($parts[0] !== 'Plugins' || \count($parts) < 4) {
+                continue;
+            }
+            if ($parts[1] === $mine) {
+                continue;
+            }
+            if (!\in_array($parts[2], self::NEIGHBOUR_INTERNAL, true)) {
+                continue;
+            }
+            if (isset($published[ltrim($import, '\\')])) {
+                continue;
+            }
+
+            $this->add(Finding::error(
+                'access.cross-plugin',
+                "{$relative} imports [{$import}] — another plugin's {$parts[2]} layer.",
+                sprintf(
+                    'Inject a contract from Plugins\\%s\\API\\Contracts\\ instead, and declare that plugin\'s '
+                    . 'domain in requires[]. If %s means this class to be public, it belongs in its exposes[] — '
+                    . 'that declaration is honoured here.',
+                    $parts[1],
+                    $parts[1],
+                ),
+                $file,
+            ));
+        }
+    }
+
+    /**
+     * This plugin's own namespace root — `Posts` for `Plugins\Posts\Provider`.
+     *
+     * Taken from the Provider class rather than by parsing each file's
+     * `namespace`, because PSR-4 makes them the same answer and the Provider is
+     * the one class the manifest already guarantees.
+     */
+    private function pluginRoot(): ?string
+    {
+        $parts = explode('\\', ltrim($this->manifest->providerClass, '\\'));
+
+        return ($parts[0] ?? '') === 'Plugins' && ($parts[1] ?? '') !== '' ? $parts[1] : null;
+    }
+
+    /** @var array<string, true>|null */
+    private ?array $published = null;
+
+    /**
+     * Every class any installed neighbour declares in its own `exposes[]`.
+     *
+     * A flat set, with no namespace mapping: the question is only ever "did
+     * somebody declare this exact string public", and an entry already carries
+     * the namespace of whoever wrote it.
+     *
+     * @return array<string, true>
+     */
+    private function publishedByNeighbours(): array
+    {
+        if ($this->published !== null) {
+            return $this->published;
+        }
+
+        $published = [];
+
+        foreach ($this->neighbours as $neighbour) {
+            foreach ($neighbour->exposes() as $contract) {
+                $published[ltrim($contract, '\\')] = true;
+            }
+        }
+
+        return $this->published = $published;
+    }
+
+    // ── 8. The contract lock ──────────────────────────────────────────────────
+
+    /**
+     * Published strings that disappeared, or appeared without being recorded.
+     *
+     * Silent for a plugin with no `contract.lock.json`, which is every plugin
+     * until its maintainer runs `ground contract:lock` once. See
+     * {@see \AlfacodeTeam\Ground\Contract\ContractLock} for why the lock is
+     * opt-in and why retirement is `deprecated` rather than deletion.
+     */
+    private function checkContractLock(): void
+    {
+        $lock = ContractLock::beside($this->manifest);
+
+        if ($lock === null) {
+            return;
+        }
+
+        foreach ($lock->compare(ContractSurface::of($this->manifest)) as $finding) {
+            $this->add($finding);
+        }
+    }
+
     /**
      * Imports the Domain layer may make despite the "nothing external" rule.
      *
@@ -650,20 +820,15 @@ final class Inspector
     /**
      * Variables the PROJECT owns, which a plugin may read without declaring.
      *
-     * `APP_KEY` is the clearest case: every plugin that signs anything reads it,
-     * no plugin should claim it in `config[]`, and `hkm plugins enable` must not
-     * offer to write it per-plugin. Requiring a declaration here would be
-     * demanding the wrong fix.
-     *
-     * Deliberately narrow — an unrecognised `SOMETHING_KEY` is still reported,
-     * because that is a plugin's own configuration and undeclared means
-     * unvalidated at boot and unseeded into any project's .env.
+     * The list moved to {@see FrameworkVars} when the contract lock needed the
+     * same answer — it was locking `APP_KEY` as a plugin's own contract, so
+     * removing a variable that was never the plugin's would have been reported
+     * as a broken promise. Two definitions of "whose variable is this" would
+     * have disagreed the first time either changed.
      */
     private static function isFrameworkVar(string $key): bool
     {
-        return str_starts_with($key, 'APP_')
-            || \in_array($key, ['ENV_CACHE', 'BOOT_CACHE', 'VIEW_PATHS', 'VIEW_EXTENSIONS'], true)
-            || str_starts_with($key, 'ROUTE_');
+        return FrameworkVars::owns($key);
     }
 
     private static function allowedInDomain(string $import): bool

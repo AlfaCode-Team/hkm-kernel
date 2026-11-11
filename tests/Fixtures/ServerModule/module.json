@@ -1,0 +1,20 @@
+{
+  "name":    "serverdemo",
+  "version": "1.0.0",
+  "solves":  "server.demo",
+  "type":    "module",
+
+  "requires": [],
+  "exposes":  [],
+
+  "servers": [
+    { "name": "realtime",
+      "class": "Tests\\Fixtures\\ServerModule\\DemoServer",
+      "why": "holds the open connections; without it every client is connected to nothing",
+      "requires": ["jobs.demo"],
+      "restart": { "memoryMb": 512, "seconds": 3600 } },
+
+    { "name": "bus-bridge",
+      "class": "Tests\\Fixtures\\ServerModule\\DemoServer" }
+  ]
+}

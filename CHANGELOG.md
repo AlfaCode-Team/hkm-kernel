@@ -4,6 +4,406 @@ All notable changes to the AlfacodeTeam PhpServicePlatform (Sentinel) kernel are
 documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-11-11
+
+### Added
+- **`VectorStorePort` and `EmbeddingPort`** — the contracts for similarity
+  search over fixed-dimension vectors, and for turning text into one. Designed by
+  the same intersection rule as `DocumentStorePort`: a filter, metric or index
+  type is in the port only if every store that could back it gives it one
+  meaning, and anything a store cannot honour is refused at construction rather
+  than approximated. No adapter ships in the kernel.
+  - **Collections** have a fixed dimension (1 to 2000, the most an HNSW index can
+    take) and a metric (`Cosine`, `Euclidean`, `DotProduct`) fixed per collection,
+    never per query. `ensureCollection()` / `ensureIndex()` answer with a
+    `VectorOutcome` in which `AlreadyExists` and `Conflict` are distinct, so a
+    migration that changes a definition cannot report success while the old one
+    stays in place.
+  - **Search** is `VectorQuery::nearest()` with `k` (1 to 1000) and AND-ed
+    filters: `Eq`, `In` and four numeric ranges. A missing field never matches,
+    types are strict, a range never matches a non-number; `VectorFilter::matches()`
+    executes those rules so an adapter's tests need not derive the expectation
+    from the code under test. Negations, `Or`, offset and non-HNSW indexes are
+    deliberately absent.
+  - **`distance` is lower-is-closer for every metric** (dot product is the
+    negative inner product). Ordering is `(distance, id)`.
+  - **A search returns `min(k, matches)`.** The port states this as an obligation
+    on the adapter, with the measurements behind it: an HNSW scan applies its
+    filter after a fixed candidate list, so a filtered query can return fewer
+    rows than match, or none, with no error.
+  - **`EmbeddingPort`** is `embed()`, `embedMany()`, `dimensions()` and `model()`
+    — deliberately nothing about prompts, tools or providers. `Vector`,
+    `VectorCollection` and the other value objects live in `Ports\Vector\`.
+- **Declarative route labels — `audit`, `metric`, `emits`.** A route in
+  module.json / proj.json may declare observability intent and the kernel does
+  the recording, so a handler carries none of it:
+  `{ "method": "POST", "path": "/orders", "handler": "…@create",
+  "audit": "order.create", "metric": ["orders.created"], "emits": "order.created" }`.
+  - **Compiled, absent by default.** `CompileRouteManifestStage` writes a
+    `labels` key onto an entry only when the route declares one, so an existing
+    manifest compiles byte-identically. The derived index and the flat-manifest
+    fallback carry it unchanged.
+  - **A malformed label fails the boot**, naming the route: a non-string, a name
+    outside `[a-z][a-z0-9._:-]*` (128 max), more than 16 per key, a label on a
+    group or on the module root (it would apply to nothing), or — for a plugin
+    route — an `emits` name missing from that module's `emits[]`. A project has
+    no such list, so its routes are not checked against one.
+  - **`RouteLabelStage`** sits at the innermost `after.execute` position (in
+    front of `ExecuteStage`, behind every registered hook), so it sees the
+    matched `route_entry`, the final Response and any request attribute a hook
+    published. It records only when the handler RAN and returned below 400:
+    a request refused earlier (404, security denial, `auth`/`throttle` filter),
+    a 4xx/5xx from the handler, a thrown error and a `HEAD` probe record no
+    label — "orders.created" must not tick for an order that was not created.
+    Refusals are measured where they always were: `ObservabilityStage` wraps the
+    pipeline and counts every request, with its matched route template and
+    status, as `http.server.requests`.
+  - **Sinks, and a sink that is absent is inert.** `metric` calls
+    `count(string $metric, int $by = 1)` on the request's `usage` attribute
+    (checked structurally; the kernel names no plugin class). `audit` calls
+    `Routing\Labels\AuditLabelSink::record()` when one is bound — with a PUBLIC
+    `bind()`, and the route must pull the binding's module into its graph via
+    `requires[]`. `emits` dispatches `Routing\Labels\RouteEmittedEvent`
+    (primitives only) through the request-scoped `EventBus`, so a listener bound
+    with `bind()` in a module's `register()` resolves. No sink installed is a
+    debug log line, never an error; a sink that throws is caught and logged and
+    never changes the response.
+
+- **`EventBus::ALL` — subscribe to every event.** `subscribe(EventBus::ALL,
+  Listener::class)` delivers every dispatch to that listener. A consumer that
+  observes rather than reacts — a webhook relay, an audit log, an event
+  recorder — structurally cannot enumerate the names it wants: they belong to
+  *other* plugins, and it is installed precisely because nobody knows in
+  advance what the application emits. The only list available was module.json
+  `emits[]`, which made every such consumer exactly as complete as a
+  hand-maintained declaration.
+  - **The kernel's own test harness hit this first.** `Ground`'s `EventRecorder`
+    subscribed to `emits[]` one name at a time and documented that this "makes
+    the recorder only as complete as that declaration". An event dispatched
+    under an undeclared name was never recorded, so a test asserting it fired
+    failed with *recorded: nothing* — which reads as "the dispatch never ran"
+    and sends the reader to the wrong file. The recorder now subscribes to
+    `ALL`, so declared-vs-dispatched drift is visible from both directions and
+    not only from `plugin:check`.
+  - **One literal name, deliberately not a pattern dialect.** Whether `user.*`
+    should match `user.profile.updated`, and whether `.` is a separator at all,
+    is the consumer's policy — and a subscriber that receives everything and
+    filters is strictly more capable than one the kernel filters for.
+  - **A class subscribed to both a name and `ALL` is invoked once.** The first
+    consumers of this deliver *outward*, where a duplicate is a second POST to
+    someone else's endpoint, charged to them — and "I subscribed to everything,
+    and also to the one I care about" is an entirely natural way to arrive
+    there. De-duplication is against the wildcard only: subscribing one class
+    twice to one name still calls it twice, exactly as it always did.
+  - **Backward compatible.** With no `ALL` subscription the dispatch path is
+    unchanged, including the ordering of existing subscribers, which run before
+    any wildcard listener so an observer added later cannot interpose itself
+    ahead of a handler that was already there.
+- **`DocumentStorePort`** — a port for schemaless document collections, with
+  MongoDB and Firestore as plugin adapters. Not an alternative to
+  `DatabasePort`: that one is portable because MySQL, PostgreSQL and SQLite
+  answer the same language, and these two answer none at all.
+  - **The query is a typed object, not an array.** `DocumentQuery` /
+    `DocumentFilter` expose the ten operators that are the *intersection* of the
+    two query languages, and refuse — at construction, with the reason — every
+    combination only one store can run: `not-in` with `!=`, two
+    `array-contains`, a range filter whose first ordering is on another field,
+    more than 30 `in` values (or 10 for `not-in`), a null inside a value list.
+    MongoDB would run all of them, which is exactly why they are refused here
+    rather than in the adapter: otherwise the query passes every test and fails
+    on whichever backend the developer was not using.
+  - **Three convergences an adapter must implement**, because the two stores
+    silently disagree. Ordering by a field also filters for its existence on
+    Firestore; `!=` and `not-in` exclude a missing field there, and `!=` excludes
+    an explicit null; and a cursor needs a total order. `requiredFields()` and
+    `nonNullFields()` report the constraints to add. Measured against MongoDB
+    9.0.4 over the same five documents: sorting by an optional field returns 5
+    rows un-converged and 4 converged, and `{status: {$ne: 'paid'}}` returns 4
+    and 2 — so a list page is quietly short, and "everything not yet paid"
+    includes records that were never given a status.
+  - **Indexes are the migration**, since both stores create collections
+    implicitly and accept any document shape, while Firestore *errors* on a
+    query with no composite index to serve it. `ensureIndex()` returns an
+    `IndexResult`, and `AlreadyExists` is not `Conflict`: measured on 9.0.4,
+    re-creating one key pattern under a second name fails with code 85, and
+    adding `unique: true` to an existing index fails with code 86 and leaves the
+    index *not* unique — the duplicate value still inserted. An adapter that
+    swallows "already exists" to stay idempotent reports a green deploy with no
+    constraint behind it.
+  - **Capabilities are refused, never downgraded.** `DocumentStoreCapability`
+    covers unique indexes, server-side validators and TTL; `ensureIndex()`
+    throws when an adapter lacks one. A unique index asked for and not enforced
+    removes an invariant without removing the belief in it. Firestore cannot
+    honour a validator through this port at all — its own documentation states
+    that "server client libraries bypass all Cloud Firestore Security Rules",
+    which is how a PHP adapter authenticates.
+  - **One divergence is deliberately NOT converged: `increment()` on a
+    non-numeric field.** MongoDB refuses the write (measured on 9.0.4);
+    Firestore overwrites it — "If the field is not an integer or double ... the
+    field is set to the given value instead." Everywhere else the port narrows
+    the permissive store onto the strict one, and it cannot here: detecting the
+    field's type on Firestore means reading the document and writing
+    conditionally, which is the read-modify-write that loses concurrent
+    increments. Atomicity is the only reason the method exists, so converging
+    would destroy the guarantee being converged. The port says so, and an
+    adapter must report what its store did rather than paper over it.
+  - **No transactions and no offset pagination, deliberately.** MongoDB's
+    transactions need a replica set (a standalone 9.0.4 refuses) while
+    Firestore's are always available, so a `transaction()` here would work in
+    production and fail on a laptop. Firestore charges "a read for each skipped
+    document", so a page number would be priced by how far a user scrolled;
+    `DocumentQuery::after()` takes a cursor instead.
+- **A fourth runtime surface: `RuntimeMode::Server`.** HTTP (PHP-FPM or
+  OpenSwoole), CLI and worker are all request-shaped — something arrives, it is
+  handled, the process ends by finishing. A server is not: it owns its own loop,
+  holds state for weeks, and ends only when it is told to. `$kernel->server()`
+  materializes for it, and `Kernel::mode()` now reports `server` for a process
+  whose whole job is to be one.
+  - **`servers[]` in `module.json`**, compiled to `server-manifest.php` by
+    `CompileServerManifestStage`. A plugin declares `name`, `class`, `why`, any
+    extra `requires[]` module domains, and a `restart` block
+    (`{memoryMb, seconds}`). It is the in-process half of `daemon[]`: that one
+    declares the EXTERNAL processes a plugin needs, this one the PHP processes,
+    and both exist because a deployment missing one shows the same symptom —
+    everything appears to work and nothing arrives.
+  - **`ServerContract`** — `serve(ServerContext): int` and `stop(): void`.
+    `stop()` is called from a signal handler, so it may set a flag or wake a
+    transport and nothing else.
+  - **`ServerPipeline`** supplies what every long-running loop otherwise
+    re-implements, differently: the module-scoped container (plus the project's
+    essentials, which now reach a server exactly as they reach a job), the
+    SIGTERM/SIGINT/SIGQUIT trap with async delivery and handler restoration, the
+    memory and lifetime ceilings, and the error pipeline. Failing to START is
+    reported there too, not only printed — under a supervisor there may be
+    nothing watching the output, and a server that never came up delivers
+    exactly as much as one that crashed.
+  - **`ServerContext`** hands over two containers and the distinction is the
+    point: `container()` is built once for the process, for start-up
+    resolution; `newScope()` is a fresh one per message or connection. Using
+    the first as the second means a module that rebinds a port per scope
+    (tenancy rebinding `DatabasePort`) is rebound at start-up and serves the
+    wrong tenant for the life of the process — silently.
+  - **`ServerLimits`** decides whether to stop; the server decides when to ask,
+    because the loop is inside the server and nothing outside it gets a turn.
+    Both ceilings default to OFF — one the kernel invented would surface as a
+    server exiting every few hours for no declared reason, indistinguishable
+    from a crash. `reason()` (`signal`/`memory`/`runtime`/`asked`) is what tells
+    a clean recycle apart from a crash in a supervisor's log, which otherwise
+    shows only that a process exited.
+  - **`server:list`** enumerates what a deployment must run, reading the
+    manifest and loading no server class, so it still works on a machine where
+    no server can start. **`server:run <name>`** runs one in the foreground,
+    with `--memory` and `--max-seconds` overriding the declared ceilings. Those
+    are the only flags: a server's own host, port and credentials come from the
+    environment, because a variable declared in `config[]` is validated at boot
+    and a flag is validated by nobody.
+  - A name that is not `/^[a-z0-9][a-z0-9._-]*$/`, two modules claiming one
+    name, and an unknown `requires[]` domain each FAIL the boot. The class is
+    checked at run time instead, because `class_exists()` autoloads and
+    checking it at boot would load every server class on every HTTP request.
+  - `server-manifest.php` joins the `BootStamp` sentinels, so a `BOOT_CACHE`
+    written by an older kernel recompiles rather than leaving the surface
+    silently inert.
+  - **Verified against a real Swoole server (6.2.5), and three things differ
+    when the server FORKS.** `start()` IS the loop, and in the default
+    `SWOOLE_BASE` mode the process that called `run()` becomes the manager
+    while workers are forks. So: `shouldStop()` has to be polled from a Swoole
+    timer in ONE worker (every worker polling shuts the server down on
+    whichever grew fastest); the kernel's SIGTERM trap **never fires** —
+    `pcntl_signal_get_handler()` still reports it in the manager and in every
+    worker, and Swoole takes the signal natively below PHP's handler table, so
+    `ServerContract::stop()` is not called and flushing belongs in
+    `on('shutdown')`; and the stop REASON does not cross the fork. The
+    shutdown is still graceful either way — port released, no orphan.
+  - **`ServerLimits` no longer claims a cause it cannot know.** It used to
+    report "returned on its own", which was a false statement about a server
+    that had in fact been terminated by a signal Swoole handled, or recycled by
+    a ceiling detected in a worker. `ServerPipeline` now re-polls once after
+    `serve()` returns, so a `seconds` ceiling IS attributed (wall clock is
+    shared across a fork); a `memoryMb` ceiling and a signal are not, and the
+    report says "returned after Xs with no reason recorded" plus why, rather
+    than inventing one. New: `ServerLimits::hasReason()`.
+  - Reference: `docs/ai-context/31_SERVERS.md`, §6 for the forking case.
+- **`WafLayer`, an application firewall in the SecurityGateway.** Opt in by
+  listing it first in `withSecurity([...])`. It runs before any module loads,
+  so a refused request costs a few regex passes. Four default rules, cheapest
+  first:
+  - `malformed`: NUL or control bytes, invalid UTF-8 in the path,
+    Content-Length together with Transfer-Encoding, over-long URLs, too many
+    inputs.
+  - `traversal`: `..` segments in the path however often they are encoded,
+    climbs to system directories and `php://`-style wrappers in the query.
+  - `probe`: dotfiles, WordPress, phpMyAdmin, `vendor/phpunit`, `.sql`/`.bak`
+    files, `/composer.lock`.
+  - `injection`: SQLi, XSS, Log4Shell and PHP-code signatures on the path,
+    query, `User-Agent` and `Referer`. The body is inspected only with
+    `inspectBody: true`, up to `maxScanBytes` (64 KB) per value.
+
+  Every rule takes linear time on hostile input. A run of 8 KB of `<`, quotes,
+  `../` or `/*` costs at most about 0.15 ms, and each injection signature runs
+  only when the value contains a byte or word that signature requires. A clean
+  GET costs about 18 µs. A value that still exhausts a PCRE limit counts as a
+  match (`unscannable`), not as clean.
+
+  Each signature is tested against the ordinary input it most resembles.
+  `WafMode::Monitor` logs `waf.would_block` and lets the request through.
+  `WafMode::Block` (the default) returns 403 `Request blocked.` and logs
+  `waf.blocked` with the rule that fired. The 403 body does not name the rule.
+  Rules can be switched off per path (`ruleExemptPaths`), IPs and CIDR ranges
+  can bypass the layer (`trustedIps`), and any `WafRuleContract` can be added.
+- The layer **fails open**: a rule or cache that throws is logged as
+  `waf.error`, and the request goes through.
+- **IP bans** are opt-in (`banAfter`, `banWindow`, `banSeconds`), need a
+  `CachePort`, and never apply in Monitor mode. They are off by default
+  because carrier-grade NAT puts many users behind one address. IPv6 clients
+  are banned by their /64.
+- A `trustedIps` entry that does not parse is ignored. It is never widened to
+  `/0`.
+- **`PortAwareLayerContract`.** A security layer implementing it receives the
+  CoreContainer at materialize through `usePorts()`. It then resolves the same
+  `CachePort` and `LoggerPort` singletons the modules get, instead of building
+  a second adapter in the bootstrap.
+- **`ResumableStorage`** — an OPTIONAL `StoragePort` capability for receiving
+  one object as a series of chunks across several requests. `storeStream()` is
+  a single request, so a phone losing signal at 90% of a 2 GB video starts
+  again from zero, and a request that long has to outlive every proxy timeout
+  on the path. Where chunks are assembled is the adapter's business — local
+  disk appends, S3 makes multipart parts — which is exactly what a consumer
+  rolling its own gets half right, since S3 refuses undersized parts only at
+  the end, after every chunk has been sent. Checked with `instanceof`; a
+  consumer must still work without it by accepting the whole object at once.
+  Adapters must keep an upload invisible until `completeUpload()`, address
+  chunks by byte offset and refuse a gap rather than zero-filling it.
+- **`daemon[]` — provisioning the external process a plugin is a client for.**
+  Some capabilities are a client for a separate daemon: a bus, a broker, a
+  search engine. Installing one leaves a deployment a process short, and the
+  symptom is always that everything appears to work and nothing arrives. A
+  plugin now declares what it needs and `daemon:install` fetches, verifies and
+  configures it; `daemon:status` compares installed against pinned and exits
+  non-zero on drift, so it works as a deploy gate. The kernel holds the
+  mechanism and knows no daemon: binary, version, checksum, config template
+  and arguments all come from the plugin's own manifest.
+  - The **checksum is pinned in the manifest**, committed and reviewable.
+    Fetching `SHA256SUMS` from the host that served the binary verifies
+    nothing, since whoever can replace one can replace the other.
+  - A platform with **no pinned digest is refused** — there is no unverified
+    path, because that branch becomes the one every unpinned platform takes
+    silently. A mismatch deletes the download and stops; no flag skips it.
+  - Exactly **one named archive member** is extracted, so zip-slip is designed
+    out rather than guarded against.
+  - An **existing config is never overwritten** (it holds the running
+    credential); the plugin's version lands beside it as `.conf.new`. The
+    generated secret is minted once, because rotating it leaves the daemon and
+    the project disagreeing while both look right.
+  - Nothing is started and no service unit is installed.
+- **`spec:generate` — an OpenAPI document from the compiled routes.** Built
+  from `route-manifest.php` rather than from annotations or a hand-kept file,
+  which is what keeps it true: the manifest is what the router actually
+  matches, so a route renamed, disabled by `routePolicy` or scoped to a domain
+  is reflected without anyone remembering a second source. Typed path
+  parameters carry their type across, and a route's `filters[]` become its
+  security requirements.
+- **Route filter ownership — `providesFilters` / `requiresFilters`.** A route
+  naming an unregistered filter alias used to fail with the symptom ("no
+  Provider registered [auth]") and leave the reader to know the cause. These
+  manifest keys compile to `filter-manifest.php`, so the message can finish the
+  sentence: the module solving `[http.security_filters]` declares that it
+  provides this alias — is that plugin in `withModules()`? Read lazily and only
+  while building the exception, and optional: an older manifest yields null and
+  the message degrades to what it said before.
+- **`FileScannerPort` and `FileSanitizerPort`.** Two ports, because they answer
+  different questions at different costs: a sanitizer rewrites bytes in memory
+  on the way in, a scanner asks a daemon with a signature database and can be
+  unreachable. `FileScannerPort` is the one kernel port that must **not** fail
+  open — `WafLayer` lets a request through when its cache breaks, but
+  withholding a file costs a delay where serving an unscanned one distributes
+  malware under the application's own domain. A verdict therefore has three
+  outcomes, not two: treating an outage as clean makes a daemon restart an open
+  door, treating it as infected quarantines every upload taken during one. An
+  outage maps to `Pending`, withheld and retried.
+- **`PubSubPort` and `NullPubSub`** — fan-out messaging, where `QueuePort` is
+  point-to-point. The two look interchangeable and the failure is quiet: a
+  realtime server on four workers holds a quarter of the clients in each, so an
+  event published to a *queue* reaches one worker and three quarters of clients
+  never see it, at random, with no error. It reproduces only under more than
+  one worker — never in development. At-most-once by design, since that is what
+  Redis pub/sub, NATS core and MQTT QoS 0 all do. `publish()` must not throw;
+  `subscribe()` does, because it is a server's main loop.
+- **`modules/pools`** — a borrow/return connection pool with `Stack` and
+  `Coroutine` adapters. The second exists because under Swoole a blocking
+  borrow parks the whole worker rather than the one request waiting.
+- **`modules/circuit-breaker`** — open/half-open/closed over a pluggable
+  `StateStore`, so the state lives wherever the deployment can share it rather
+  than in a static each worker owns a separate copy of.
+- **`modules/openapi`** — the document value objects `spec:generate` writes
+  through. It holds no route knowledge, which is what lets the writer be tested
+  without booting anything.
+- **`contract.lock.json` in `modules/ground`** — a record of every string a
+  plugin has published, failing on a removal or an unlocked addition. The rule
+  is Appwrite's, and so is the reason: scopes are persisted by API keys, so
+  they can never be removed. A key issued last year holds the literal string
+  `databases.write`, and deleting that scope does not invalidate the key — it
+  makes the key authorise nothing, silently, for a customer who changed
+  nothing. The same shape of value is everywhere here and nothing guarded it: a
+  `solves` domain sits in other plugins' `requires[]`, a route name in views and
+  emails, an event name in a subscriber that will simply stop running, a config
+  key in every operator's `.env`. Adds `FrameworkVars` (the variables the
+  project owns, so the inspector and the lock cannot disagree about `APP_KEY`)
+  and `MigratedSqlite` (a real `DatabasePort` with the plugin's migrations
+  applied, so a repository is tested against SQL rather than a fake that agrees
+  with it).
+
+### Changed
+- **Cheaper cached boots under PHP-FPM.** `proj.json` is decoded once per file
+  version rather than once per helper call: the bootstrap asks six questions of
+  it, and each used to pay a full decode. With APCu enabled the decoded file is
+  shared across requests. The boot-stamp key is now xxh128 instead of sha256.
+  The stamp format is unchanged, but the key changes, so the first request after
+  upgrading recompiles the manifests once when `BOOT_CACHE` is on.
+- **`BootStamp` gained two sentinels**, `filter-manifest.php` and
+  `server-manifest.php`. Without them a cache written by the previous kernel
+  would be accepted and those stages would never run, leaving both features
+  silently inert — which is the exact failure the sentinel list exists to
+  prevent.
+- **The `modules/` packages that carry tests now run in CI.** `phpunit.xml.dist`
+  gained a `Modules` suite covering `pools`, `openapi` and `circuit-breaker`.
+  Until now a package whose suite was in no testsuite was a package whose tests
+  could never fail, which is indistinguishable from passing. `modules/ground` is
+  deliberately still outside it: its suite boots real kernels and takes ~67s, so
+  listing it is a CI-time decision of its own.
+
+### Fixed
+- **A newly scaffolded project could not boot.** The project template registered
+  `SecurityFilters` but not `I18n`, and `SecurityFilters` declares
+  `requires: ["i18n.translation"]`. `hkm new` therefore produced a project that
+  failed at `CompileServiceManifestStage` with *"Unknown module.json requires[]
+  entries — no registered module solves them"* on the very first request, before
+  anything had been written. `I18nProvider` is now in the template's
+  `withModules()`, so a fresh project boots as scaffolded.
+- **A partial `composer update` could not resolve.** The path repository for
+  `modules/http` declared no version, so composer inferred `dev-main` from the
+  submodule's branch while the root required `^1.0` and the lock recorded
+  `dev-master` — none of which agree. The kernel's own constraint had become
+  unsatisfiable against its own submodule, visible only when something tried to
+  resolve. The repository now declares its version explicitly, and the other
+  path packages are relocked to the state their submodules are actually in.
+
+### Security
+- **Updated Symfony to the patched releases**, clearing 6 advisories:
+  `symfony/http-foundation` v8.1.9 → v8.1.11, `symfony/filesystem` v8.1.2 →
+  v8.1.11, `symfony/mime` v8.1.2 → v8.1.10. The existing `^8.1` constraints
+  already allowed these, so only the lock changed.
+  - The relevant one for this kernel is **CVE-2026-118514**, *HEAD requests
+    bypass the `methods` option*, an incomplete fix for CVE-2026-45075:
+    `ROUTE_HEAD_FALLBACK` defaults to true, so a HEAD with no route of its own
+    is served by the GET route. A deployment that gates on HTTP method in front
+    of PHP should take this release.
+  - Also covered: path escape from a base directory in `Filesystem`, path
+    rules bypassed by appending to the script name, `private_ranges` trusting
+    IPv4-mapped/6to4/Teredo/NAT64 clients as reverse proxies, generated URLs
+    pointing at a client-chosen host, and header injection via non-token
+    characters in MIME parameter names.
+
 ## [1.20.0] - 2026-10-17
 
 ### Changed
