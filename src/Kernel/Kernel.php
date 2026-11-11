@@ -17,6 +17,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\{CachePort, ClockPort, LoggerPo
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\{RouteIndex, UrlGenerator};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Scheduling\Scheduler;
 use AlfacodeTeam\PhpServicePlatform\Commands\Schedule\{ScheduleListCommand, ScheduleRunCommand};
+use AlfacodeTeam\PhpServicePlatform\Commands\Spec\SpecGenerateCommand;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\PortAwareLayerContract, Contracts\SecurityLayerContract};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
@@ -663,6 +664,11 @@ final class Kernel
         // injects the Scheduler above.
         $this->cli->command(ScheduleRunCommand::class);
         $this->cli->command(ScheduleListCommand::class);
+
+        // Reads the compiled route manifest and writes an OpenAPI document.
+        // Registered as a class-string so CliPipeline builds it through the core
+        // container, consistent with the schedule commands above.
+        $this->cli->command(SpecGenerateCommand::class);
 
         // Wire each module ONCE — hooks + event subscriptions on live instances.
         foreach ($this->moduleClasses as $moduleClass) {
