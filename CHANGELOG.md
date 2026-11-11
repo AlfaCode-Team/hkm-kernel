@@ -380,6 +380,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entries — no registered module solves them"* on the very first request, before
   anything had been written. `I18nProvider` is now in the template's
   `withModules()`, so a fresh project boots as scaffolded.
+- **A partial `composer update` could not resolve.** The path repository for
+  `modules/http` declared no version, so composer inferred `dev-main` from the
+  submodule's branch while the root required `^1.0` and the lock recorded
+  `dev-master` — none of which agree. The kernel's own constraint had become
+  unsatisfiable against its own submodule, visible only when something tried to
+  resolve. The repository now declares its version explicitly, and the other
+  path packages are relocked to the state their submodules are actually in.
+
+### Security
+- **Updated Symfony to the patched releases**, clearing 6 advisories:
+  `symfony/http-foundation` v8.1.9 → v8.1.11, `symfony/filesystem` v8.1.2 →
+  v8.1.11, `symfony/mime` v8.1.2 → v8.1.10. The existing `^8.1` constraints
+  already allowed these, so only the lock changed.
+  - The relevant one for this kernel is **CVE-2026-118514**, *HEAD requests
+    bypass the `methods` option*, an incomplete fix for CVE-2026-45075:
+    `ROUTE_HEAD_FALLBACK` defaults to true, so a HEAD with no route of its own
+    is served by the GET route. A deployment that gates on HTTP method in front
+    of PHP should take this release.
+  - Also covered: path escape from a base directory in `Filesystem`, path
+    rules bypassed by appending to the script name, `private_ranges` trusting
+    IPv4-mapped/6to4/Teredo/NAT64 clients as reverse proxies, generated URLs
+    pointing at a client-chosen host, and header injection via non-token
+    characters in MIME parameter names.
 
 ## [1.20.0] - 2026-10-17
 
