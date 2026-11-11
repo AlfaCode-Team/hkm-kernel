@@ -14,13 +14,16 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Contracts\SecurityLayerContr
  * Denied requests never touch module code — zero module cost.
  *
  * Layer order matters: cheapest first. A typical stack:
- *   1. CsrfTokenLayer      (timing-safe string compare — microseconds)
- *   2. [Auth module layer] (token verify — milliseconds, optional)
+ *   1. WafLayer            (regex passes over path/query/headers, optional)
+ *   2. CsrfTokenLayer      (timing-safe string compare — microseconds)
+ *   3. [Auth module layer] (token verify — milliseconds, optional)
  *
- * The kernel ships exactly ONE layer: CsrfTokenLayer. IP filtering and rate
- * limiting are deliberately NOT kernel layers — they are opt-in route filters
- * from plugins/SecurityFilters ('throttle', 'shield'), so a route pays for them
- * only when it declares them. Do not reintroduce them here.
+ * The kernel ships two layers, both opt-in: WafLayer (request inspection) and
+ * CsrfTokenLayer. IP filtering and rate limiting are deliberately NOT kernel
+ * layers — they are opt-in route filters from plugins/SecurityFilters
+ * ('throttle', 'shield'), so a route pays for them only when it declares them.
+ * Do not reintroduce them here. WafLayer's IP ban is not rate limiting: it
+ * counts only requests that already matched an attack signature.
  */
 final class SecurityGateway
 {

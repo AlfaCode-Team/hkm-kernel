@@ -17,7 +17,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\{CachePort, ClockPort, LoggerPo
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\{RouteIndex, UrlGenerator};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Scheduling\Scheduler;
 use AlfacodeTeam\PhpServicePlatform\Commands\Schedule\{ScheduleListCommand, ScheduleRunCommand};
-use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\SecurityLayerContract};
+use AlfacodeTeam\PhpServicePlatform\Kernel\Security\{SecurityGateway, Contracts\PortAwareLayerContract, Contracts\SecurityLayerContract};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
 
 /**
@@ -590,6 +590,15 @@ final class Kernel
             $this->core->has(LoggerPort::class) ? $this->core->get(LoggerPort::class) : null,
         );
         $this->workerPipe = new WorkerPipeline();
+
+        // Layers are built in the bootstrap, before this container existed. Hand
+        // the ones that want ports (WafLayer's ban cache and logger) the SAME
+        // singletons every module resolves, rather than a second adapter each.
+        foreach ($this->securityLayers as $layer) {
+            if ($layer instanceof PortAwareLayerContract) {
+                $layer->usePorts($this->core);
+            }
+        }
 
         $this->http = new HttpPipeline(
             gateway:          new SecurityGateway($this->securityLayers),
