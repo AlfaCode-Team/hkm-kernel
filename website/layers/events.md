@@ -292,6 +292,31 @@ class Provider implements ModuleContract
 }
 ```
 
+### Subscribing to every event
+
+`EventBus::ALL` subscribes a listener to every integration event, whatever its name:
+
+```php
+$events->subscribe(EventBus::ALL, ForwardToWebhooksListener::class);
+```
+
+This exists for consumers that deliver **outward** and cannot know the names in advance — a webhook sender, an event journal, an audit forwarder.
+
+Four rules make it predictable:
+
+- **Exact subscribers run first.** A listener subscribed by name runs before any wildcard listener. That ordering is backward compatibility, not semantics: adding a wildcard subscriber must not reorder what already worked.
+- **A listener subscribed both ways is delivered once.** De-duplication is against the wildcard only, so two *exact* subscriptions of the same listener still run twice — that was already true, and nothing here changes it. A webhook sent twice is a visible defect.
+- **An event literally named `*` is delivered once**, not twice, even though its exact bucket and the wildcard bucket are the same array.
+- **A throwing wildcard listener is isolated and reported** like any other. One bad observer cannot stop the rest.
+
+With no wildcard subscription registered, dispatch is unchanged.
+
+::: warning Bind a listener publicly
+`EventBus::resolveListener()` calls `get()` from the **kernel** scope. A listener bound with `bindInternal()` is unreachable from there, and autowiring cannot reach a module's internal bindings either — so the listener silently never runs. Bind listeners with `bind()`.
+
+A public binding's *closure* may still reach internal bindings, because `ModuleContainer` threads a binding's owning scope while resolving. It is the binding itself that must be public.
+:::
+
 ### Event Listener Contract
 
 Listeners implement `EventListenerContract`:

@@ -11,7 +11,30 @@ The gateway enforces a layered security model:
 3. **Optional identity attachment** — layers can resolve an authenticated identity
 4. **Isolated failures** — a layer crash does NOT affect other layers (no throws allowed)
 
-The kernel ships exactly ONE layer: `CsrfTokenLayer`. IP filtering and rate limiting are **NOT** kernel layers — they're opt-in route filters from plugins (`'shield'`, `'throttle'`).
+The kernel ships exactly TWO layers, both opt-in: [`WafLayer`](/security/waf) (request inspection) and `CsrfTokenLayer` (stateless HMAC-signed CSRF tokens). IP filtering and rate limiting are **NOT** kernel layers — they're opt-in route filters from plugins (`'shield'`, `'throttle'`), so a route pays for them only when it declares them.
+
+A typical stack, cheapest first:
+
+```
+1. WafLayer            (regex passes over path/query/headers — optional)
+2. CsrfTokenLayer      (timing-safe string compare — microseconds)
+3. [Auth module layer] (token verification — milliseconds, optional)
+```
+
+`WafLayer`'s IP ban is not rate limiting: it counts only requests that already matched an attack signature.
+
+### Layers that need ports
+
+Layers are constructed in the bootstrap, before the core container exists. A layer implementing `PortAwareLayerContract` receives the container at materialize:
+
+```php
+interface PortAwareLayerContract
+{
+    public function usePorts(CoreContainer $core): void;
+}
+```
+
+It then resolves the **same** `CachePort` and `LoggerPort` singletons every module uses, instead of building a second adapter. Without it, a ban recorded by one worker would be invisible to the others.
 
 ## SecurityLayerContract
 

@@ -537,6 +537,44 @@ interface HashingPort
 - `check($value, $hashedValue)` — verify a plaintext value against a stored hash (timing-safe).
 - `needsRehash($hashedValue, $options)` — whether the stored hash should be re-made with current options (e.g., cost changed).
 
+## Ports documented elsewhere
+
+Four contracts are large enough to have their own pages. They follow the same rules as everything above — the kernel defines them, a plugin implements them, and none ships with the kernel.
+
+| Port | Page | What it contracts |
+|---|---|---|
+| `DocumentStorePort` | [Document Store](/infrastructure/document-store) | Schemaless collections (MongoDB, Firestore). Not an alternative to `DatabasePort` — most applications bind both |
+| `VectorStorePort`, `EmbeddingPort` | [Vectors & Embeddings](/infrastructure/vectors) | Similarity search over fixed-dimension vectors, and turning text into one |
+| `PubSubPort` | [Pub/Sub](/infrastructure/pubsub) | Fan-out messaging, where `QueuePort` is point-to-point. The difference is not cosmetic |
+| `FileScannerPort`, `FileSanitizerPort` | [File Safety](/infrastructure/file-safety) | Scanning and sanitising user uploads |
+
+## Optional capabilities on StoragePort
+
+Two interfaces extend `StoragePort` without widening it, because it is implemented by real adapters **and** by in-memory fakes across many test suites — an abstract method would break every fake for a capability most have no opinion about. Check both with `instanceof` and keep a path that works without them.
+
+```php
+interface RangeReadableStorage
+{
+    public function size(string $path): int;
+    public function readRange(string $path, int $offset, ?int $length = null);
+}
+```
+
+Serve HTTP `Range` requests through this, never by `fstat`/`fseek` on `readStream()`: an S3 body can do neither, so that code silently sends whole objects on S3.
+
+```php
+interface ResumableStorage
+{
+    public function createUpload(string $filename, string $path = '', ?int $totalSize = null, string $visibility = 'private'): string;
+    public function appendChunk(string $uploadId, int $offset, string $chunk): int;
+    public function uploadedBytes(string $uploadId): int;
+    public function completeUpload(string $uploadId): string;
+    public function abortUpload(string $uploadId): void;
+}
+```
+
+Receives one object as a series of chunks across several requests. See [File Safety & Uploads](/infrastructure/file-safety) for what an adapter must guarantee.
+
 ## Registering port implementations
 
 Bind implementations in the kernel bootstrap via `withPorts()`:
