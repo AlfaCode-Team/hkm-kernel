@@ -193,6 +193,32 @@ Use a group `name` prefix to disambiguate:
 
 Names: `a.home`, `b.home`
 
+### The exception: one declaration, several hosts
+
+A **single** declaration fanned out by a `domain` or `subdomain` **list** keeps its name on every host:
+
+```jsonc
+{
+  "groups": [
+    { "domain": ["brand.com", "vote.brand.com", "brand.local"],
+      "name": "marketing.",
+      "routes": [{ "method": "GET", "path": "/", "handler": "…@home", "name": "home" }] }
+  ]
+}
+```
+
+Every host gets its own copy of the route, and all copies carry `marketing.home`.
+
+That is not ambiguous, because the copies differ **only** in host: same method, same path. So the name still means one URL path, and a relative `route('marketing.home')` is correct on all of them.
+
+Before this, a project serving one brand on several hosts had to copy the whole group once per host with a different name prefix on each.
+
+Three rules keep it predictable:
+
+- **An absolute `route()` points at the first host** — the first `domain` when one is declared, otherwise `APP_URL`, because a bare subdomain label names no single host. **Put the canonical host first.**
+- **Two separate declarations claiming one name still fail the boot**, even when their paths match. Only the copies made from one declaration share a name.
+- **Disabling one host's copy** through `routePolicy.disable` does not release the name while other copies still hold it. A name is released only when no surviving route carries it.
+
 A project override inherits the plugin route's name unless it declares its own, so overridden routes keep their old names accessible.
 
 ## Compiled Manifest

@@ -151,7 +151,7 @@ A list of HTTP route objects. Each route **must have** `method`, `path`, and `ha
 | `method` | string | Yes | `"GET"` | Upper-cased automatically; `HEAD` served by `GET` |
 | `path` | string | Yes | `"/invoices/{id:num}"` | Must start with `/`; cannot be relative |
 | `handler` | string | Yes | `"InvoiceController@index"` | Exactly one `@`; `Full\Class@method` |
-| `name` | string | No | `"invoice.index"` | Application-wide unique; two routes cannot share a name |
+| `name` | string | No | `"invoice.index"` | Application-wide unique. Copies made by a `domain`/`subdomain` **list** share one name — see [Resolution](/routing/resolution) |
 | `filters` | `string[]` | No | `["auth", "throttle:60,1"]` | Route opts into these filters |
 | `requires` | `string[]` | No | `["view.rendering"]` | Additional module domains for THIS route only |
 | `domain` | `string \| string[]` | No | `"admin.example.com"` | Host(s) this route answers on; overrides module-wide |

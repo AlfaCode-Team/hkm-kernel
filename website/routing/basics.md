@@ -23,7 +23,7 @@ Routes live in the `routes` array of a module's `module.json` or a project's `pr
 | `method` | yes | string | HTTP method: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` |
 | `path` | yes | string | Absolute path starting with `/`. May include typed parameters: `/posts/{id:num}` |
 | `handler` | yes | string | `ClassName@methodName` — the controller and method to run. Plugins must use full path: `Plugins\PostPlugin\Http\Controllers\PostController@show` |
-| `name` | no | string | Route name for URL generation: `route('posts.show', ['id' => 7])`. Must be unique application-wide. |
+| `name` | no | string | Route name for URL generation: `route('posts.show', ['id' => 7])`. Unique application-wide, except that one declaration fanned out by a `domain`/`subdomain` list keeps its name on every host. |
 | `filters` | no | string or list | Pipeline filters: `"auth"` or `["auth", "throttle:60,1"]`. De-duplicated by alias; a route's filter overrides a group's. |
 | `requires` | no | string or list | Module domains this route pulls in: `"view.rendering"` or `["tenancy.routing", "mail.sending"]`. Seeded into the dependency graph for this request only. |
 | `faces` | no | string or list | Restrict to specific domain types: `["admin"]` hides the route on other faces. The kernel reads `route_face` from the request attribute. |

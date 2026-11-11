@@ -250,6 +250,42 @@ Both are only available if the plugin is installed (declared in `withModules([..
 | Routes, commands, jobs | Declared in `module.json` | Declared in `proj.json` or `withRoutes()` |
 | Overrides | No — can only be disabled | Yes — project overrides plugins by default |
 
+## Installing and Updating a Plugin
+
+`hkm plugins install`, `enable` and `update` publish a plugin's assets — config files, migrations, views, layouts, translations — into the project.
+
+### A published file is never replaced
+
+When a plugin's copy of a published file differs from the project's, **the project's file is kept**. The plugin's version lands beside it as `<file>.updated`, for you to merge by hand.
+
+```text
+config/storage.php           ← yours, untouched
+config/storage.php.updated   ← the plugin's new version
+```
+
+This matters because the alternative is losing work silently. A file still byte-identical to the one last published used to be refreshed in place, so `hkm plugins install --latest` rewrote configuration, views and layouts a project had built on.
+
+- `--overwrite` replaces them for one run, when you do want the plugin's version.
+- A leftover `.updated` is removed automatically once your file matches the plugin again.
+- The command lists every file it kept, with its `.updated` suggestion, and counts only the assets it actually wrote.
+
+### The kernel gate checks the floor, not the range
+
+A plugin is refused only when the running kernel is **older** than it needs:
+
+```text
+requires kernel ^1.19.0 but this kernel is 1.18.0, older   ← refused
+released for kernel ~1.17; this kernel is 1.19.0, newer    ← installed, with a warning
+```
+
+A kernel *above* the declared range installs with a warning rather than being blocked. Requiring the kernel to fall inside the whole range meant a project that upgraded its kernel first could not install a plugin declaring `~1.17` on 1.19, or `^1.13` on 2.0, even though it would have run.
+
+`HKM_PLUGIN_IGNORE_KERNEL=1` overrides the floor.
+
+::: tip What the floor is for
+The floor is not advisory. A plugin implementing a port that ships in a later kernel cannot be loaded at all on an earlier one — the interface does not exist, so it is a fatal at autoload rather than a missing feature. Keep `module.json`'s `kernel` floor at the release that introduced every kernel symbol the plugin references.
+:::
+
 ## Plugin Documentation
 
 Every plugin should document itself. The kernel does not enforce or read a separate documentation file — you are responsible for providing clear README, API docs, and examples in your plugin's repository or in a companion doc file.
