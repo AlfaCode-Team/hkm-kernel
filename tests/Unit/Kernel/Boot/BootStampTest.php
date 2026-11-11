@@ -43,6 +43,7 @@ final class BootStampTest extends TestCase
         // test_a_missing_compiled_manifest_misses().
         ManifestWriter::write('route-manifest.php', ['GET /' => ['handler' => 'C@m']]);
         ManifestWriter::write('files-manifest.php', []);
+        ManifestWriter::write('filter-manifest.php', ['provides' => [], 'requires' => []]);
     }
 
     protected function tearDown(): void

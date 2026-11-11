@@ -1,0 +1,9 @@
+{
+  "name":    "filter-provider",
+  "version": "1.0.0",
+  "solves":  "filters.provider",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "providesFilters": ["auth", "throttle"]
+}

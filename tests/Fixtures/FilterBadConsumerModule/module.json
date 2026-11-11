@@ -1,0 +1,9 @@
+{
+  "name":    "filter-bad-consumer",
+  "version": "1.0.0",
+  "solves":  "filters.bad",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "requiresFilters": ["nope"]
+}

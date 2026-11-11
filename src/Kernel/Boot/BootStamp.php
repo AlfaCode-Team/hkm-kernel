@@ -66,6 +66,12 @@ final class BootStamp
     private const SENTINELS = [
         'manifests/route-manifest.php',
         'manifests/files-manifest.php',
+        // Added when providesFilters/requiresFilters landed. Without it, a cache
+        // written by the previous kernel would be accepted and this manifest
+        // never compiled — so HttpPipeline could never name the plugin that owns
+        // a missing filter alias, which is precisely the silently-inert feature
+        // this list exists to prevent.
+        'manifests/filter-manifest.php',
     ];
 
     /** Whether the compile may be skipped — `BOOT_CACHE` truthy. */

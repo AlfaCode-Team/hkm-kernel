@@ -1,0 +1,9 @@
+{
+  "name":    "filter-rival",
+  "version": "1.0.0",
+  "solves":  "filters.rival",
+  "type":    "module",
+  "requires": [],
+  "exposes":  [],
+  "providesFilters": ["auth"]
+}
