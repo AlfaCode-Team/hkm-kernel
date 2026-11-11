@@ -263,6 +263,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CoreContainer at materialize through `usePorts()`. It then resolves the same
   `CachePort` and `LoggerPort` singletons the modules get, instead of building
   a second adapter in the bootstrap.
+- **`ResumableStorage`** — an OPTIONAL `StoragePort` capability for receiving
+  one object as a series of chunks across several requests. `storeStream()` is
+  a single request, so a phone losing signal at 90% of a 2 GB video starts
+  again from zero, and a request that long has to outlive every proxy timeout
+  on the path. Where chunks are assembled is the adapter's business — local
+  disk appends, S3 makes multipart parts — which is exactly what a consumer
+  rolling its own gets half right, since S3 refuses undersized parts only at
+  the end, after every chunk has been sent. Checked with `instanceof`; a
+  consumer must still work without it by accepting the whole object at once.
+  Adapters must keep an upload invisible until `completeUpload()`, address
+  chunks by byte offset and refuse a gap rather than zero-filling it.
+- **`daemon[]` — provisioning the external process a plugin is a client for.**
+  Some capabilities are a client for a separate daemon: a bus, a broker, a
+  search engine. Installing one leaves a deployment a process short, and the
+  symptom is always that everything appears to work and nothing arrives. A
+  plugin now declares what it needs and `daemon:install` fetches, verifies and
+  configures it; `daemon:status` compares installed against pinned and exits
+  non-zero on drift, so it works as a deploy gate. The kernel holds the
+  mechanism and knows no daemon: binary, version, checksum, config template
+  and arguments all come from the plugin's own manifest.
+  - The **checksum is pinned in the manifest**, committed and reviewable.
+    Fetching `SHA256SUMS` from the host that served the binary verifies
+    nothing, since whoever can replace one can replace the other.
+  - A platform with **no pinned digest is refused** — there is no unverified
+    path, because that branch becomes the one every unpinned platform takes
+    silently. A mismatch deletes the download and stops; no flag skips it.
+  - Exactly **one named archive member** is extracted, so zip-slip is designed
+    out rather than guarded against.
+  - An **existing config is never overwritten** (it holds the running
+    credential); the plugin's version lands beside it as `.conf.new`. The
+    generated secret is minted once, because rotating it leaves the daemon and
+    the project disagreeing while both look right.
+  - Nothing is started and no service unit is installed.
+- **`spec:generate` — an OpenAPI document from the compiled routes.** Built
+  from `route-manifest.php` rather than from annotations or a hand-kept file,
+  which is what keeps it true: the manifest is what the router actually
+  matches, so a route renamed, disabled by `routePolicy` or scoped to a domain
+  is reflected without anyone remembering a second source. Typed path
+  parameters carry their type across, and a route's `filters[]` become its
+  security requirements.
+- **Route filter ownership — `providesFilters` / `requiresFilters`.** A route
+  naming an unregistered filter alias used to fail with the symptom ("no
+  Provider registered [auth]") and leave the reader to know the cause. These
+  manifest keys compile to `filter-manifest.php`, so the message can finish the
+  sentence: the module solving `[http.security_filters]` declares that it
+  provides this alias — is that plugin in `withModules()`? Read lazily and only
+  while building the exception, and optional: an older manifest yields null and
+  the message degrades to what it said before.
+- **`FileScannerPort` and `FileSanitizerPort`.** Two ports, because they answer
+  different questions at different costs: a sanitizer rewrites bytes in memory
+  on the way in, a scanner asks a daemon with a signature database and can be
+  unreachable. `FileScannerPort` is the one kernel port that must **not** fail
+  open — `WafLayer` lets a request through when its cache breaks, but
+  withholding a file costs a delay where serving an unscanned one distributes
+  malware under the application's own domain. A verdict therefore has three
+  outcomes, not two: treating an outage as clean makes a daemon restart an open
+  door, treating it as infected quarantines every upload taken during one. An
+  outage maps to `Pending`, withheld and retried.
+- **`PubSubPort` and `NullPubSub`** — fan-out messaging, where `QueuePort` is
+  point-to-point. The two look interchangeable and the failure is quiet: a
+  realtime server on four workers holds a quarter of the clients in each, so an
+  event published to a *queue* reaches one worker and three quarters of clients
+  never see it, at random, with no error. It reproduces only under more than
+  one worker — never in development. At-most-once by design, since that is what
+  Redis pub/sub, NATS core and MQTT QoS 0 all do. `publish()` must not throw;
+  `subscribe()` does, because it is a server's main loop.
+- **`modules/pools`** — a borrow/return connection pool with `Stack` and
+  `Coroutine` adapters. The second exists because under Swoole a blocking
+  borrow parks the whole worker rather than the one request waiting.
+- **`modules/circuit-breaker`** — open/half-open/closed over a pluggable
+  `StateStore`, so the state lives wherever the deployment can share it rather
+  than in a static each worker owns a separate copy of.
+- **`modules/openapi`** — the document value objects `spec:generate` writes
+  through. It holds no route knowledge, which is what lets the writer be tested
+  without booting anything.
+- **`contract.lock.json` in `modules/ground`** — a record of every string a
+  plugin has published, failing on a removal or an unlocked addition. The rule
+  is Appwrite's, and so is the reason: scopes are persisted by API keys, so
+  they can never be removed. A key issued last year holds the literal string
+  `databases.write`, and deleting that scope does not invalidate the key — it
+  makes the key authorise nothing, silently, for a customer who changed
+  nothing. The same shape of value is everywhere here and nothing guarded it: a
+  `solves` domain sits in other plugins' `requires[]`, a route name in views and
+  emails, an event name in a subscriber that will simply stop running, a config
+  key in every operator's `.env`. Adds `FrameworkVars` (the variables the
+  project owns, so the inspector and the lock cannot disagree about `APP_KEY`)
+  and `MigratedSqlite` (a real `DatabasePort` with the plugin's migrations
+  applied, so a repository is tested against SQL rather than a fake that agrees
+  with it).
 
 ### Changed
 - **Cheaper cached boots under PHP-FPM.** `proj.json` is decoded once per file
@@ -271,6 +360,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared across requests. The boot-stamp key is now xxh128 instead of sha256.
   The stamp format is unchanged, but the key changes, so the first request after
   upgrading recompiles the manifests once when `BOOT_CACHE` is on.
+- **`BootStamp` gained two sentinels**, `filter-manifest.php` and
+  `server-manifest.php`. Without them a cache written by the previous kernel
+  would be accepted and those stages would never run, leaving both features
+  silently inert — which is the exact failure the sentinel list exists to
+  prevent.
+- **The `modules/` packages that carry tests now run in CI.** `phpunit.xml.dist`
+  gained a `Modules` suite covering `pools`, `openapi` and `circuit-breaker`.
+  Until now a package whose suite was in no testsuite was a package whose tests
+  could never fail, which is indistinguishable from passing. `modules/ground` is
+  deliberately still outside it: its suite boots real kernels and takes ~67s, so
+  listing it is a CI-time decision of its own.
 
 ### Fixed
 - **A newly scaffolded project could not boot.** The project template registered
