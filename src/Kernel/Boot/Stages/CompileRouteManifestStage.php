@@ -4,7 +4,7 @@ namespace AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Stages;
 
 use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\{BootException, ManifestReader, ManifestWriter};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Boot\Routing\{
-    DomainComposer, GroupExpander, RouteCompiler, RouteNormalizer, RoutePolicy
+    DomainComposer, GroupExpander, RouteCompiler, RouteLabels, RouteNormalizer, RoutePolicy
 };
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteIndex;
 
@@ -149,6 +149,13 @@ final class CompileRouteManifestStage implements BootStageContract
                     "Route [{$key}] in [{$moduleClass}]",
                 );
 
+                // A plugin route may only emit events its module declares.
+                RouteLabels::assertEmitsDeclared(
+                    $route['labels'] ?? null,
+                    $manifest['emits'] ?? null,
+                    "Route [{$key}] in [{$moduleClass}]",
+                );
+
                 $routes[$key] = [
                     'handler'  => $route['handler'],
                     'module'   => $moduleClass,
@@ -158,7 +165,7 @@ final class CompileRouteManifestStage implements BootStageContract
                     'requires' => $requires,
                     'faces'    => $route['faces'],
                     'domain'   => $route['domain'],
-                ] + $this->compiler->precompile(
+                ] + self::labelsEntry($route) + $this->compiler->precompile(
                     $route['handler'],
                     $path,
                     $manifest['solves'],
@@ -251,7 +258,7 @@ final class CompileRouteManifestStage implements BootStageContract
                 'requires'  => $requires,
                 'faces'     => $route['faces'],
                 'domain'    => $route['domain'],
-            ] + $this->compiler->precompile(
+            ] + self::labelsEntry($route) + $this->compiler->precompile(
                 $route['handler'],
                 $path,
                 self::PROJECT_SCOPE,
@@ -265,6 +272,19 @@ final class CompileRouteManifestStage implements BootStageContract
         ManifestWriter::write('route-manifest.php', $routes);
         ManifestWriter::write('route-index.php', RouteIndex::build($routes));
         ManifestWriter::write('route-names.php', RouteIndex::names($routes));
+    }
+
+    /**
+     * The `labels` key for a compiled entry — present ONLY when the route declared
+     * any, so a manifest compiled from routes without labels is byte-identical to
+     * one compiled before labels existed.
+     *
+     * @param array<string, mixed> $route a flattened route
+     * @return array{labels?: array<string, mixed>}
+     */
+    private static function labelsEntry(array $route): array
+    {
+        return isset($route['labels']) ? ['labels' => $route['labels']] : [];
     }
 
     /**

@@ -10,7 +10,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Loading\{DependencyGraphCalculator, O
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Contracts\HttpStageContract;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\Stages\{
     CorrelationIdStage, ObservabilityStage, SecurityStage, ResolveStage,
-    LoadStage, RouteFilterStage, ExecuteStage, ErrorStage
+    LoadStage, RouteFilterStage, RouteLabelStage, ExecuteStage, ErrorStage
 };
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\{MetricsPort, NullMetrics, NullTracer, TracerPort};
 use AlfacodeTeam\PhpServicePlatform\Kernel\Routing\RouteIndex;
@@ -33,7 +33,9 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Support\Paths;
  *   7. RouteFilterStage        — the matched route's declared filters[]
  *      ↳ after.execute hooks   — module-registered stages; each calls $next()
  *                                 and post-processes the controller's Response
- *   8. ExecuteStage            — resolve controller → run → Response (terminal)
+ *   8. RouteLabelStage         — applies the route's audit/metric/emits labels
+ *                                 (innermost after.execute position)
+ *   9. ExecuteStage            — resolve controller → run → Response (terminal)
  *
  * Hooks are registered ONCE during module boot() (at kernel build), so the
  * stage list is stable and is compiled exactly once on the first request, then
@@ -172,6 +174,10 @@ final class HttpPipeline
             // Placed here, each hook calls $next() and receives the controller's
             // Response on the way back out: "after execute" in an onion pipeline.
             ...$this->resolveHook('after.execute'),
+            // The route's declared audit/metric/emits labels. Innermost, so it
+            // sees the controller's Response and every hook's request attributes;
+            // a no-op for the routes (nearly all) that declare none.
+            new RouteLabelStage(),
             new ExecuteStage(),
         ]; 
     }

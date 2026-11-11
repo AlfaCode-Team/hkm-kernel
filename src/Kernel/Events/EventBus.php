@@ -31,6 +31,27 @@ use Psr\Container\ContainerInterface;
  */
 final class EventBus
 {
+    /**
+     * Subscribe under this name to receive EVERY event.
+     *
+     * The alternative is enumerating names, and a subscriber that wants all of
+     * them structurally cannot: the names belong to OTHER plugins, and a
+     * webhook or audit consumer is installed precisely because it does not know
+     * what the application emits. The only list available was module.json
+     * `emits[]`, which made every such consumer exactly as complete as a
+     * hand-maintained declaration — and a name missing from it silently
+     * unobserved. The kernel's own test harness hit this first: `Ground`'s
+     * EventRecorder subscribes to `emits[]` one name at a time and documents
+     * that it "makes the recorder only as complete as that declaration".
+     *
+     * This is deliberately ONE literal name and not a pattern dialect. Whether
+     * `user.*` should match `user.profile.updated`, and whether `.` is a
+     * separator at all, is the consumer's policy — Appwrite's own matcher is
+     * specific to its resource tree — and a subscriber that receives everything
+     * and filters is strictly more capable than one the kernel filters for.
+     */
+    public const ALL = '*';
+
     /** @var array<string, list<class-string<EventListenerContract>>> event name => listener classes */
     private array $subscribers = [];
 
@@ -73,6 +94,8 @@ final class EventBus
     /**
      * Subscribe a listener to an event. Called from Module::boot().
      *
+     * Pass {@see self::ALL} as the name to receive every event.
+     *
      * @param class-string<EventListenerContract> $listenerClass
      */
     public function subscribe(string $eventName, string $listenerClass): void
@@ -110,7 +133,7 @@ final class EventBus
     {
         $failures = [];
 
-        foreach ($this->subscribers[$event->name()] ?? [] as $listenerClass) {
+        foreach ($this->listenersFor($event->name()) as $listenerClass) {
             try {
                 $listener = $this->resolveListener($listenerClass);
                 $listener->handle($event);
@@ -128,6 +151,50 @@ final class EventBus
         }
 
         return $failures;
+    }
+
+    /**
+     * Every listener that should see this event: the ones subscribed to its
+     * name, then the ones subscribed to {@see self::ALL}.
+     *
+     * Exact subscribers run FIRST, and the reason is backward compatibility
+     * rather than semantics: they are the only ones that existed before, so
+     * running them first means a wildcard observer added later cannot interpose
+     * itself ahead of a handler that was already there. Beyond that, no
+     * ordering is promised between an exact and a wildcard subscriber — a
+     * listener that needs to run after another needs the other to say so, not a
+     * position in this list.
+     *
+     * A class subscribed BOTH to this name and to ALL is invoked ONCE. That
+     * matters because the wildcard's first consumers deliver outward: a webhook
+     * sent twice is a duplicate POST to someone else's endpoint, charged to
+     * them, and "I subscribed to everything and also to the one I care about"
+     * is an entirely natural way to arrive there. Exact subscriptions are
+     * de-duplicated against the wildcard and NOT against each other, so
+     * subscribing one class twice to one name still calls it twice exactly as
+     * it always did.
+     *
+     * An event whose own name is literally `*` needs no special case: its exact
+     * bucket and the wildcard bucket are the same array, so the de-duplication
+     * below collapses them and it is delivered once.
+     *
+     * @return list<class-string<EventListenerContract>>
+     */
+    private function listenersFor(string $eventName): array
+    {
+        $exact    = $this->subscribers[$eventName] ?? [];
+        $wildcard = $this->subscribers[self::ALL] ?? [];
+
+        if ($wildcard === []) {
+            return $exact;
+        }
+
+        $extra = array_values(array_filter(
+            $wildcard,
+            static fn (string $listenerClass): bool => !\in_array($listenerClass, $exact, true),
+        ));
+
+        return [...$exact, ...$extra];
     }
 
     /**
