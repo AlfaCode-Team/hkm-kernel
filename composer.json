@@ -59,7 +59,12 @@
     "repositories": [
         {
             "type": "path",
-            "url": "modules/http"
+            "url": "modules/http",
+            "options": {
+                "versions": {
+                    "alfacode-team/http": "1.0.1"
+                }
+            }
         },
         {
             "type": "path",
