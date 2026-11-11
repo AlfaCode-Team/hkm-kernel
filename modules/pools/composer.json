@@ -1,0 +1,41 @@
+{
+    "name": "alfacode-team/pools",
+    "description": "A fixed-capacity pool of lazily created resources, with per-operation borrowing, slot reservation and no vendor dependencies.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["hkm-kernel", "pool", "connection-pool", "swoole", "coroutine"],
+    "authors": [
+        {
+            "name": "AlfaCode Team",
+            "email": "shamavurasheed@gmail.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": ">=8.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11 || ^12 || ^13"
+    },
+    "autoload": {
+        "psr-4": {
+            "AlfacodeTeam\\Pools\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AlfacodeTeam\\Pools\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "//": "No dependencies, deliberately. A pool that required a metrics library would make that library a dependency of the framework; the host adapts whatever it has to the two-method Telemetry interface instead.",
+        "branch-alias": {
+            "dev-main": "1.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
