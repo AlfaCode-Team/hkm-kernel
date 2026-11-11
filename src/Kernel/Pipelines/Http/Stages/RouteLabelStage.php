@@ -154,8 +154,8 @@ final class RouteLabelStage implements HttpStageContract
             method:        $request->method(),
             status:        $response->status(),
             params:        $this->params($request),
-            userId:        $identity?->userId ?? '',
-            tenantId:      $identity?->tenantId ?? '',
+            userId:        $identity->userId ?? '',
+            tenantId:      $identity->tenantId ?? '',
             correlationId: (string) $request->attribute('correlation_id', ''),
             occurredAt:    $clock->now()->format(\DateTimeInterface::RFC3339),
         ));
