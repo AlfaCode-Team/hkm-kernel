@@ -96,11 +96,18 @@ final class BootStamp
      * Hash of everything the builder itself contributes. Anything here changing
      * invalidates the cache without a single stat() call.
      *
+     * xxh128, not sha256: this is a cache key, not a signature. Nothing trusts
+     * it against an adversary (the stamp lives in var/cache and a writer there
+     * can rewrite the manifests too), and on a project's routes+groups arrays
+     * sha256 cost ~1 ms per request where xxh128 costs ~20 us. The digest is 32
+     * hex characters, so a stamp written by the old sha256 build (64 characters)
+     * can never equal it: that cache misses once and is rewritten.
+     *
      * @param array<string, mixed> $inputs
      */
     public static function hash(array $inputs): string
     {
-        return hash('sha256', serialize($inputs));
+        return hash('xxh128', serialize($inputs));
     }
 
     /**

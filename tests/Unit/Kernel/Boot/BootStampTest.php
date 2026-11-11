@@ -116,6 +116,25 @@ final class BootStampTest extends TestCase
         self::assertNull(BootStamp::read($this->hash()));
     }
 
+    public function test_the_hash_is_a_32_character_xxh128_digest(): void
+    {
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $this->hash());
+    }
+
+    public function test_a_stamp_written_under_the_old_sha256_hash_misses_once(): void
+    {
+        // Kernels before xxh128 wrote a 64-character sha256 of the same inputs.
+        // That stamp must miss so the manifests are recompiled and re-stamped,
+        // never accepted by accident.
+        $inputs = ['modules' => ['A']];
+        BootStamp::write(hash('sha256', serialize($inputs)), [], []);
+
+        self::assertNull(BootStamp::read($this->hash($inputs)));
+
+        BootStamp::write($this->hash($inputs), [], []);
+        self::assertNotNull(BootStamp::read($this->hash($inputs)));
+    }
+
     // ── Every way it must MISS ──────────────────────────────────────────────
 
     public function test_changed_builder_inputs_miss(): void
