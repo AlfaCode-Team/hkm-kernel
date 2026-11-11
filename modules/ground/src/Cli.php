@@ -47,6 +47,7 @@ final class Cli
             'init'                        => self::init($rest),
             'install', 'i'                => self::install($rest),
             'check'                       => self::kernel(['plugin:check', ...$rest]),
+            'contract', 'lock'            => self::kernel(['contract:lock', ...$rest]),
             'probe'                       => self::kernel(['plugin:probe', ...$rest]),
             'serve'                       => self::kernel(['plugin:serve', ...$rest]),
             'dev', 'ui'                   => self::kernel(['plugin:dev', ...$rest]),
@@ -303,6 +304,7 @@ final class Cli
         self::line('  init        everything this plugin needs to be testable, once');
         self::line('  install     dependencies only, from the checkouts next door');
         self::line('  check       static checks — the mistakes a boot cannot catch');
+        self::line('  contract    lock the strings others already hold (routes, events, domain, config)');
         self::line('  probe       boot it and report what compiled');
         self::line('  serve       browse it at http://127.0.0.1:8321');
         self::line('  dev         `yarn dev` for the plugin UI — HMR against the real kernel');

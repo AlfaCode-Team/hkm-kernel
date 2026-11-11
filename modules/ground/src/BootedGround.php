@@ -385,8 +385,9 @@ final class BootedGround
     // ── Events ────────────────────────────────────────────────────────────────
 
     /**
-     * Everything the plugin dispatched — but only for names it declared in
-     * module.json `emits[]`, which is all EventBus allows subscribing to.
+     * Everything the plugin dispatched, under any name — the recorder
+     * subscribes to `EventBus::ALL`, so an event missing from module.json
+     * `emits[]` is still recorded and shows up as the drift it is.
      */
     public function events(): EventRecorder
     {
@@ -666,23 +667,22 @@ final class BootedGround
     }
 
     /**
-     * Subscribe the recorder to every name the plugin declares it emits.
+     * Subscribe the recorder to EVERY event.
      *
-     * EventBus has no wildcard, so `emits[]` is the only list available. A name
-     * missing from it is simply not recorded — which is why `plugin:check`
-     * reports declared-vs-dispatched drift separately.
+     * This used to iterate module.json `emits[]`, because that was the only
+     * list available — which made the recorder exactly as complete as a
+     * hand-maintained declaration. An event dispatched under a name missing
+     * from `emits[]` was not recorded at all, so a test asserting it fired
+     * failed with "recorded: nothing" and sent the reader to look at the
+     * dispatch, which was fine, instead of at the manifest, which was not.
+     *
+     * `EventBus::ALL` records the dispatches themselves, so a failure now means
+     * the event genuinely did not fire, and declared-vs-dispatched drift is
+     * observable in BOTH directions rather than only from `plugin:check`.
      */
     private function subscribeRecorder(): void
     {
-        $emits = $this->manifest->emits();
-        if ($emits === []) {
-            return;
-        }
-
-        $bus = $this->core()->get(EventBus::class);
-        foreach ($emits as $name) {
-            $bus->subscribe($name, EventRecorder::class);
-        }
+        $this->core()->get(EventBus::class)->subscribe(EventBus::ALL, EventRecorder::class);
     }
 
     /**

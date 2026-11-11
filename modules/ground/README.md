@@ -562,6 +562,8 @@ covers the mistakes nothing else reports:
 | `exposes.unbound` | an exposed contract that `register()` never binds fails at request time, in the *consuming* module |
 | `route.handler-class`, `-method`, `-visibility` | verified at boot only when `ROUTE_VERIFY_HANDLERS=true`, which is off in production |
 | `access.*` | the five access rules are enforced at RUNTIME, so an unexercised path stays wrong until a user finds it |
+| `access.cross-plugin` | `bindInternal()` guards container *resolution*; an import plus `new` never asks the container, so reaching into a neighbour's `Domain/`, `Application/` or `Infrastructure/` compiles, passes its tests, and only breaks when that neighbour refactors a class it was entitled to consider private |
+| `contract.removed`, `contract.unlocked` | a published string something outside the repo already holds — see the lock below. Opt-in |
 
 ### What the analysis can and cannot see
 
@@ -573,6 +575,95 @@ variable that existed only in this project's own docblock.)
 The limit that remains: imports are read from `use` statements, so a violation
 written as an inline fully-qualified reference is not seen. **This catches drift;
 it does not prove conformance.**
+
+The cross-plugin rule honours the **neighbour's own `exposes[]`**, because
+`module.json` is the single source of truth for what a module publishes. Cookie
+lists `Plugins\Cookie\Infrastructure\CookieJar` there; it sits under
+`Infrastructure/` and is nonetheless public, declared so by its owner. The rule
+also names three layers rather than saying "anything but `API/`" — measured over
+the 69 first-party plugins, the broad form reported 54 imports and 29 of them
+were a neighbour's root-level class or its own published surface directory, all
+deliberate. A check wrong about half of what it says teaches people to ignore
+all of it.
+
+With **no neighbours installed** there is no `exposes[]` to consult, so the rule
+goes quiet rather than guessing.
+
+---
+
+## The contract lock — `contract:lock`
+
+```bash
+ground contract                      # first run: write the lock. After: check it.
+ground contract --check              # report only (what CI runs)
+ground contract --update             # record what is newly published
+ground contract --deprecate <value>  # retire one, keeping the record
+```
+
+Appwrite locks its API scopes and states the reason in a line: **scopes are
+persisted by API keys, so they can never be removed.** A key issued last year
+holds the literal string `databases.write`. Deleting that scope does not
+invalidate the key — it makes the key authorise nothing, silently, for someone
+who changed nothing.
+
+The same shape of value is all through this framework, and nothing guarded it:
+
+| Locked | Held by | What a removal does |
+|---|---|---|
+| `solves` | other plugins' `requires[]`, projects' `proj.json` `essentials` | every application that depended on the plugin **fails to boot** |
+| route names | `route('posts.show')` in views, mails, other plugins | throws at the call site — a 500 on whichever page linked to it |
+| `emits[]` | `listens[]`, `$events->subscribe(...)` | the listener **simply stops running**. No error anywhere |
+| `exposes[]` | consumer plugins' type hints | fails to resolve, on the request that needed it |
+| `config[]` | every deployed `.env` — `hkm plugins enable` seeds them | the operator's configured value is no longer read and a default wins, silently |
+
+`permissions[]` is read when a manifest declares it. None do yet; permission
+strings currently live as `config[]` defaults, which the config row covers.
+Framework-owned variables (`APP_*`, `ROUTE_*`, `BOOT_CACHE`, …) are **not**
+locked — they were never the plugin's to promise.
+
+**Deliberately not locked:** `requires[]`/`listens[]` (consumed, so a break is
+the publisher's and appears in the publisher's own lock), route **paths** (a path
+moves behind a stable name — the reason names exist), and handlers or filters,
+which are internal.
+
+### Removal and unlocked addition both fail
+
+The second half is what makes the first trustworthy. A lock that caught only
+removals would quietly stop covering everything added after it was written, and
+would be most incomplete exactly when the plugin had changed most.
+
+`--update` adds records and **cannot absolve a removal** — it says so and exits
+non-zero. There is no `--prune`: a flag that removes records removes the
+guarantee, and the one command reached for when the check goes red would become
+the one command that makes it meaningless.
+
+### Retirement is `deprecated`, never deletion
+
+```jsonc
+{
+  "lockVersion": 1,
+  "surfaces":   { "events": ["post.archived", "post.legacy"] },
+  "deprecated": { "events": ["post.legacy"] }
+}
+```
+
+A retired entry **stays in `surfaces` forever** and is listed in `deprecated` as
+well. Its absence from the manifest then stops being an error, while the string
+itself is never freed for reuse — deleting the line would free it, and the next
+release could reuse `posts.publish` for something that means the opposite.
+Removing a value from `surfaces` while leaving it in `deprecated` is itself
+reported, because that is what half-deleting a record looks like.
+
+Deprecating something still published is fine: that is the soft period.
+
+### Opt-in, and why
+
+No `contract.lock.json`, no check. Plugins have published these strings for
+releases without one, and failing their CI to introduce bookkeeping they never
+agreed to would be the tooling breaking working repositories to enforce its own
+records. Running `ground contract:lock` once is the opt-in. **Commit the file** —
+it is meant to be read in review, which is why it is sorted, canonical and
+byte-identical whoever generates it.
 
 ---
 

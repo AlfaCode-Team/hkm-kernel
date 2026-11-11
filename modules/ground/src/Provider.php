@@ -10,6 +10,7 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Cli\CliPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Http\HttpPipeline;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Pipelines\Worker\WorkerPipeline;
+use AlfacodeTeam\Ground\Commands\ContractLockCommand;
 use AlfacodeTeam\Ground\Commands\MakeGroundTestCommand;
 use AlfacodeTeam\Ground\Commands\MakeUiTestCommand;
 use AlfacodeTeam\Ground\Commands\PluginCheckCommand;
@@ -69,6 +70,7 @@ final class Provider implements ModuleContract
     public function boot(HttpPipeline $http, CliPipeline $cli, WorkerPipeline $worker, EventBus $events): void
     {
         $cli->command(PluginCheckCommand::class);
+        $cli->command(ContractLockCommand::class);
         $cli->command(PluginProbeCommand::class);
         $cli->command(PluginMigrateCommand::class);
         $cli->command(PluginServeCommand::class);

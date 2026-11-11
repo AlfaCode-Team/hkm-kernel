@@ -132,6 +132,32 @@ final class PluginGroundTest extends PluginGroundTestCase
         $this->assertNotDispatched('ground.sample.created');
     }
 
+    public function testAnUndeclaredEventIsStillRecorded(): void
+    {
+        // The recorder subscribes to EventBus::ALL, so it records the DISPATCH
+        // rather than a view of it filtered through module.json `emits[]`.
+        //
+        // This name is deliberately absent from the Sample fixture's `emits[]`.
+        // Under the old one-name-at-a-time subscription nothing was listening
+        // for it, so it went unrecorded and a test asserting it fired failed
+        // with "recorded: nothing" — which reads as "the dispatch never ran"
+        // and sends the reader to the wrong file. Drift is now visible from
+        // this direction too, not only from `plugin:check`.
+        $this->ground()->dispatch(new class implements \AlfacodeTeam\PhpServicePlatform\Kernel\Events\Contracts\IntegrationEventContract {
+            public function name(): string { return 'ground.sample.undeclared'; }
+            public function version(): string { return '1.0'; }
+            public function payload(): array { return ['drift' => true]; }
+        });
+
+        self::assertNotContains(
+            'ground.sample.undeclared',
+            $this->ground()->manifest()->emits(),
+            'the fixture must NOT declare this event, or the test proves nothing',
+        );
+        $this->assertDispatched('ground.sample.undeclared', times: 1);
+        self::assertTrue($this->ground()->events()->payloadOf('ground.sample.undeclared')['drift']);
+    }
+
     // ── Scope isolation ───────────────────────────────────────────────────────
 
     public function testTheExposedContractResolvesInThePluginScope(): void
