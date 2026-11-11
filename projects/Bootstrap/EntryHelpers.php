@@ -98,12 +98,7 @@ final class EntryHelpers
      */
     public static function projectRoutes(string $projectPath): array
     {
-        $file = rtrim($projectPath, '/') . '/proj.json';
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
+        $data = self::projJson($projectPath);
         if (!is_array($data) || !isset($data['routes']) || !is_array($data['routes'])) {
             return [];
         }
@@ -158,12 +153,7 @@ final class EntryHelpers
      */
     public static function projectRouteGroups(string $projectPath): array
     {
-        $file = rtrim($projectPath, '/') . '/proj.json';
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
+        $data = self::projJson($projectPath);
         if (!is_array($data)) {
             return [];
         }
@@ -192,12 +182,7 @@ final class EntryHelpers
      */
     public static function projectDomains(string $projectPath): array
     {
-        $file = rtrim($projectPath, '/') . '/proj.json';
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
+        $data = self::projJson($projectPath);
         if (!is_array($data) || !is_array($data['domains'] ?? null)) {
             return [];
         }
@@ -226,12 +211,7 @@ final class EntryHelpers
      */
     public static function projectEssentials(string $projectPath): array
     {
-        $file = rtrim($projectPath, '/') . '/proj.json';
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
+        $data = self::projJson($projectPath);
         if (!is_array($data) || !is_array($data['essentials'] ?? null)) {
             return [];
         }
@@ -258,12 +238,7 @@ final class EntryHelpers
      */
     public static function projectRoutePolicy(string $projectPath): array
     {
-        $file = rtrim($projectPath, '/') . '/proj.json';
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
+        $data = self::projJson($projectPath);
         if (!is_array($data)) {
             return [];
         }
@@ -285,17 +260,101 @@ final class EntryHelpers
      */
     public static function projectRouteAllowPolicy(string $projectPath): array
     {
-        $file = rtrim($projectPath, '/') . '/proj.json';
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
+        $data = self::projJson($projectPath);
         if (!is_array($data)) {
             return [];
         }
 
         return self::policySpecs($data['routePolicy']['only'] ?? null);
+    }
+
+    /**
+     * <projectPath>/proj.json, decoded — once per file version, not once per call.
+     *
+     * The bootstrap asks for routes, groups, domains, essentials and both route
+     * policies separately. Each used to decode the whole file, and a project's
+     * proj.json runs to hundreds of KB, so a request paid six full decodes for
+     * one answer. Now the file is stat'ed on every call (a few microseconds) and
+     * the decoded array is reused while its identity is unchanged:
+     *
+     *   - identity = dev + inode + size + mtime, once the file is older than
+     *     PROJ_JSON_RACY_SECONDS;
+     *   - a file written more recently is compared by content hash instead,
+     *     because a same-second rewrite of the same size leaves the stat
+     *     unchanged.
+     *
+     * The decoded array is kept in APCu when it is enabled (keyed by path, so
+     * FPM workers share one decode across requests), and in a per-process memo
+     * otherwise (CLI, tests, long-lived workers).
+     *
+     * Null when the file is missing; whatever json_decode() gives otherwise, so
+     * each caller keeps its own shape checks.
+     */
+    private static function projJson(string $projectPath): mixed
+    {
+        $file = rtrim($projectPath, '/') . '/proj.json';
+
+        // PHP caches the last stat() per filename; without this an edit made
+        // within one process (a worker, a test) would be invisible.
+        clearstatcache(true, $file);
+        $stat = @stat($file);
+        if ($stat === false || ($stat['mode'] & 0170000) !== 0100000) { // S_IFREG
+            return null;
+        }
+
+        $racy = time() - $stat['mtime'] < self::PROJ_JSON_RACY_SECONDS;
+        $key  = $racy ? '' : $stat['dev'] . ':' . $stat['ino'] . ':' . $stat['size'] . ':' . $stat['mtime'];
+
+        if (!$racy) {
+            if (isset(self::$projJsonMemo[$file]) && self::$projJsonMemo[$file][0] === $key) {
+                return self::$projJsonMemo[$file][1];
+            }
+            if (self::apcuOn()) {
+                $cached = apcu_fetch(self::PROJ_JSON_APCU_PREFIX . $file, $hit);
+                if ($hit && is_array($cached) && ($cached[0] ?? null) === $key) {
+                    self::$projJsonMemo[$file] = [$key, $cached[1]];
+                    return $cached[1];
+                }
+            }
+        }
+
+        $raw = @file_get_contents($file);
+        if ($raw === false) {
+            return null;
+        }
+        if ($racy) {
+            $key = 'h:' . hash('xxh128', $raw);
+        }
+        if (isset(self::$projJsonMemo[$file]) && self::$projJsonMemo[$file][0] === $key) {
+            return self::$projJsonMemo[$file][1];
+        }
+
+        $decoded = json_decode($raw, true);
+        self::$projJsonMemo[$file] = [$key, $decoded];
+        if (!$racy && self::apcuOn()) {
+            apcu_store(self::PROJ_JSON_APCU_PREFIX . $file, [$key, $decoded]);
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Per-process memo of decoded proj.json files: path => [identity, decoded].
+     * Under PHP-FPM it lives for one request; in a worker or a test run it lives
+     * until the process exits, which is why every hit is revalidated first.
+     *
+     * @var array<string, array{0: string, 1: mixed}>
+     */
+    private static array $projJsonMemo = [];
+
+    /** A proj.json written within this many seconds is identified by content. */
+    private const PROJ_JSON_RACY_SECONDS = 2;
+
+    private const PROJ_JSON_APCU_PREFIX = 'hkm:proj-json:';
+
+    private static function apcuOn(): bool
+    {
+        return function_exists('apcu_enabled') && apcu_enabled();
     }
 
     /**
