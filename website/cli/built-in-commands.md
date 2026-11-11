@@ -431,6 +431,75 @@ Steps performed:
 4. Patches root `composer.json` to remove the path repository
 5. Runs `composer update`
 
+## Server commands
+
+Long-running PHP processes declared in a module's `servers[]`. See [Servers](/background/servers).
+
+### server:list
+
+Every server any loaded module declares, with the `why` line its author wrote.
+
+```bash
+hkm cli server:list
+```
+
+### server:run
+
+Starts one in the **foreground**. A supervisor is expected to restart it.
+
+```bash
+hkm cli server:run realtime
+```
+
+| Flag | Meaning |
+|---|---|
+| `--max-seconds` | Exit after this long, so a supervisor replaces the process |
+| `--max-memory` | Exit above this many MB, checked between units of work |
+
+Both default to whatever the server declared in `restart`. The command carries no host or port flag on purpose: a variable declared in `config[]` is validated at boot, and argv is not.
+
+## Daemon commands
+
+Provisioning for the **external** processes a plugin is a client for — a broker, a bus. See [Daemons](/background/daemons).
+
+### daemon:install
+
+Fetches the binary a plugin declares, verifies it against the checksum pinned in that plugin's manifest, and renders its config.
+
+```bash
+hkm cli daemon:install
+```
+
+Refuses a platform with no pinned digest, deletes a download whose digest does not match, and never overwrites an existing config. Nothing is started and no service unit is installed.
+
+### daemon:status
+
+Compares what is installed against what the commit pins, and **exits non-zero on drift** — so it works as a deploy gate.
+
+```bash
+hkm cli daemon:status
+```
+
+### daemon:run
+
+Runs an installed daemon in the foreground with the arguments its manifest declares.
+
+```bash
+hkm cli daemon:run somed
+```
+
+## API specification
+
+### spec:generate
+
+Writes an OpenAPI document from the compiled route manifest.
+
+```bash
+hkm cli spec:generate
+```
+
+It is generated from `route-manifest.php` rather than from annotations or a hand-kept file, which is what keeps it true: the manifest is what the router actually matches, so a route that was renamed, disabled by `routePolicy`, or scoped to a domain is reflected without anyone remembering to update a second source. Typed path parameters carry their type across, and a route's declared `filters[]` become its security requirements.
+
 ## Common patterns
 
 ### Seeding after a fresh install

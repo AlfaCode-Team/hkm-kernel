@@ -309,6 +309,35 @@ Registered aliases: auth, throttle, shield, signed, hmac.
 
 This catches typos immediately instead of silently doing nothing.
 
+### Naming the plugin that owns the alias
+
+The message above is the symptom. The cause is usually that the plugin providing the alias is not in `withModules()` — and the reader had to already know which plugin that is to act on it.
+
+A module can therefore declare the aliases it provides, and the ones it expects:
+
+```jsonc
+{
+  "solves": "http.security_filters",
+  "providesFilters": ["auth", "throttle", "hmac", "shield", "signed"],
+  "requiresFilters": ["auth"]
+}
+```
+
+`ValidateRouteFiltersStage` compiles these into `filter-manifest.php` at boot, so the error can finish the sentence:
+
+```
+Route [POST /api/invoices] declares filter [auth], which no Provider::boot() registered.
+The module solving [http.security_filters] declares that it provides this alias —
+is that plugin listed in withModules()?
+Registered aliases: (none).
+```
+
+The manifest is read **lazily and only while the exception is already being built**, so a healthy boot pays nothing for it. It is also optional: a manifest compiled by an older kernel, or a deployment where no plugin claims ownership, yields nothing and the message degrades to exactly what it said before.
+
+::: tip No boot stage rejects unknown module.json keys
+Which means `providesFilters` is safe to add to a plugin that still supports older kernels — an older kernel ignores it, and the ownership hint simply does not appear.
+:::
+
 To fall back to the old behaviour (unknown filter throws when that route is requested, not at build):
 
 ```bash

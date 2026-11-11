@@ -16,7 +16,9 @@ Add a `name` to any route:
 }
 ```
 
-Names must be **unique application-wide** — two routes cannot claim the same name. A collision fails at boot.
+Names must be **unique application-wide** — two separate routes cannot claim the same name. A collision fails at boot.
+
+One exception: a **single** declaration fanned out by a `domain` or `subdomain` **list** keeps its name on every host it compiles to. The copies differ only in host — same method, same path — so the name still means one URL path. See [Resolution & Overrides](/routing/resolution#the-exception-one-declaration-several-hosts).
 
 ### Naming with Groups
 
@@ -181,6 +183,22 @@ route('home', absolute: true);
 ```
 
 A wildcard or bare subdomain has no single host, so it falls back to `APP_URL`.
+
+### When the declaration names several hosts
+
+A `domain` or `subdomain` **list** compiles one declaration into a copy per host, and all copies keep the name. An absolute `route()` has to pick one, and it picks the **first**:
+
+```jsonc
+{ "domain": ["brand.com", "vote.brand.com", "brand.local"],
+  "routes": [{ "method": "GET", "path": "/", "handler": "…@home", "name": "home" }] }
+```
+
+```php
+route('home');                   // /              — correct on all three hosts
+route('home', absolute: true);   // https://brand.com/   — the first domain
+```
+
+**Put the canonical host first.** For a list of bare subdomain labels, which name no single host, it falls back to `APP_URL` as above.
 
 ## Escape Hatches
 

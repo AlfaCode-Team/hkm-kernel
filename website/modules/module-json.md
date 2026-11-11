@@ -151,12 +151,17 @@ A list of HTTP route objects. Each route **must have** `method`, `path`, and `ha
 | `method` | string | Yes | `"GET"` | Upper-cased automatically; `HEAD` served by `GET` |
 | `path` | string | Yes | `"/invoices/{id:num}"` | Must start with `/`; cannot be relative |
 | `handler` | string | Yes | `"InvoiceController@index"` | Exactly one `@`; `Full\Class@method` |
-| `name` | string | No | `"invoice.index"` | Application-wide unique; two routes cannot share a name |
+| `name` | string | No | `"invoice.index"` | Application-wide unique. Copies made by a `domain`/`subdomain` **list** share one name — see [Resolution](/routing/resolution) |
 | `filters` | `string[]` | No | `["auth", "throttle:60,1"]` | Route opts into these filters |
 | `requires` | `string[]` | No | `["view.rendering"]` | Additional module domains for THIS route only |
 | `domain` | `string \| string[]` | No | `"admin.example.com"` | Host(s) this route answers on; overrides module-wide |
 | `subdomain` | `string \| string[]` | No | `["api", "admin"]` | Subdomain(s); can be bare (every domain) or attached |
 | `faces` | `string[]` | No | `["admin"]` | Hide this route on other faces; requires route_face attribute |
+| `audit` | string | No | `"order.created"` | Recorded through `AuditLabelSink` when the route succeeds |
+| `metric` | `string[]` | No | `["orders.created"]` | Counted on the request-scoped `usage` accumulator |
+| `emits` | `string[]` | No | `["order.created"]` | Dispatched as a `RouteEmittedEvent` on the `EventBus` |
+
+The last three are [route labels](/routing/labels): the route declares what should be recorded, and the kernel records it, so the handler carries none of it. They apply only when the handler **ran** and returned a status below 400 — a denial or a validation failure means the thing the label names did not happen. A label whose sink is not installed does nothing and is logged at debug level.
 
 **Boot failures (each validated at boot):**
 
@@ -269,6 +274,18 @@ Module-wide domain / subdomain grouping. Routes may also declare their own to ov
 | `commands` | array | No | `CompileCommandManifestStage` | CLI commands this module provides |
 | `jobs` | array | No | `CompileJobManifestStage` | Background jobs this module provides |
 | `schedule` | array | No | `CompileScheduleManifestStage` | Scheduled tasks (cron jobs) |
+| `servers` | array | No | `CompileServerManifestStage` | Long-running PHP processes this module provides |
+| `daemon` | object | No | — | An external process this module is a client for |
+| `providesFilters` | `string[]` | No | `ValidateRouteFiltersStage` | Route filter aliases this module registers |
+| `requiresFilters` | `string[]` | No | `ValidateRouteFiltersStage` | Aliases this module's routes expect |
+
+::: warning jobs[] does not register the handler
+`jobs[]` compiles the job **manifest** only. The name-to-class registry is `$worker->job('name', Class::class)` in `Provider::boot()`.
+
+`WorkerLoop` resolves a job as `$this->pipeline->resolve($name) ?? (class_exists($name) ? $name : null)`, so a fully-qualified class name still works through the fallback — but a **logical** name that was never registered resolves to nothing, and an unresolved job is `JobResult::skipped()`. **Skipping acks the message**, so every job of that kind is silently discarded.
+
+A job handler must also be bound with `bind()`, not `bindInternal()`: `WorkerLoop` calls `make()` from outside the module's scope.
+:::
 
 ### `emits`
 

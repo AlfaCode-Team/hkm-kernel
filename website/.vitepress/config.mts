@@ -51,6 +51,7 @@ export default defineConfig({
           { text: 'Errors', link: '/errors/exceptions' },
           { text: 'Infrastructure & Ports', link: '/infrastructure/ports' },
           { text: 'Workers & Scheduling', link: '/background/workers-and-jobs' },
+          { text: 'Servers & Daemons', link: '/background/servers' },
           { text: 'CLI', link: '/cli/cli-pipeline' },
           { text: 'Testing', link: '/testing/' },
         ],
@@ -123,6 +124,7 @@ export default defineConfig({
           { text: 'Domains, Subdomains & Faces', link: '/routing/domains' },
           { text: 'Named Routes & URLs', link: '/routing/named-routes' },
           { text: 'Resolution & Overrides', link: '/routing/resolution' },
+          { text: 'Route Labels', link: '/routing/labels' },
           { text: 'Routing Cookbook', link: '/routing/cookbook' },
         ],
       },
@@ -132,6 +134,7 @@ export default defineConfig({
         items: [
           { text: 'Security Gateway & Identity', link: '/security/gateway' },
           { text: 'CSRF Protection', link: '/security/csrf' },
+          { text: 'WAF — Application Firewall', link: '/security/waf' },
         ],
       },
       {
@@ -161,6 +164,10 @@ export default defineConfig({
           { text: 'Ports', link: '/infrastructure/ports' },
           { text: 'Database & Transactions', link: '/infrastructure/database' },
           { text: 'Cache & Locks', link: '/infrastructure/cache-and-locks' },
+          { text: 'Document Store', link: '/infrastructure/document-store' },
+          { text: 'Vectors & Embeddings', link: '/infrastructure/vectors' },
+          { text: 'Pub/Sub Messaging', link: '/infrastructure/pubsub' },
+          { text: 'File Safety & Uploads', link: '/infrastructure/file-safety' },
           { text: 'Observability', link: '/infrastructure/observability' },
           { text: 'Helper Functions', link: '/infrastructure/helpers' },
         ],
@@ -171,6 +178,8 @@ export default defineConfig({
         items: [
           { text: 'Workers & Jobs', link: '/background/workers-and-jobs' },
           { text: 'Task Scheduling', link: '/background/scheduler' },
+          { text: 'Servers', link: '/background/servers' },
+          { text: 'Daemons', link: '/background/daemons' },
         ],
       },
       {

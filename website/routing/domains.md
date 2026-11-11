@@ -229,6 +229,27 @@ Routes:
 
 This design allows `UrlGenerator` to hold no request state, so CLI commands and queue workers can generate links from any context without knowing the current host.
 
+### One brand on several hosts keeps one name
+
+The rule above governs **separate** declarations. A **single** declaration given a `domain` or `subdomain` list compiles to a copy per host, and every copy keeps the name:
+
+```jsonc
+{ "domain": ["vocbrands.com", "vote.vocbrands.com", "vocbrands.local"],
+  "name": "marketing.vocbrands.",
+  "routes": [{ "method": "GET", "path": "/", "handler": "…@home", "name": "home" }] }
+```
+
+All three hosts serve `marketing.vocbrands.home`. That is unambiguous because the copies differ only in host — same method, same path — so a relative `route()` is right on every one of them.
+
+Without this, a brand on its development, staging and production hosts had to be written as three groups with three different name prefixes, and every `route()` call had to know which host it was on.
+
+The same applies to a `subdomain` list, alone or combined with a `domain` list, at every level that can name a host: module-wide (`routeDomain` / `routeSubdomain`), group, and route.
+
+Two rules bound it:
+
+- **Two separate declarations claiming one name still fail the boot**, even on the same path. Only copies of a single declaration share a name.
+- **Disabling one host's copy** via `routePolicy.disable` leaves the name with the surviving copies. A name is released only when no surviving route carries it.
+
 ## Absolute URLs with Domains
 
 When generating absolute URLs for a route grouped under a concrete host, `UrlGenerator` uses that host:

@@ -23,9 +23,9 @@ Stages write these manifest files to `var/cache/manifests/`:
 
 ## Pipeline Stages (Execution Order)
 
-### Compile Stages (1–12)
+### Compile Stages (1–14)
 
-These stages read `module.json` and configuration files, then write manifests. With `BOOT_CACHE=1`, all 12 stages are skipped when the stamp says the manifests are current. Each stage has access to a shared `ManifestReader` whose module.json cache is warm after the first stage reads it.
+These stages read `module.json` and configuration files, then write manifests. With `BOOT_CACHE=1`, all 14 stages are skipped when the stamp says the manifests are current. Each stage has access to a shared `ManifestReader` whose module.json cache is warm after the first stage reads it.
 
 #### Stage 1: ValidateConfigStage
 
@@ -215,7 +215,20 @@ return [
 
 **Used by:** `Scheduler`, on each `schedule:run` tick. See [Task scheduling](/background/scheduler).
 
-#### Stage 11: CompileConfigManifestStage
+#### Stage 11: CompileServerManifestStage
+
+**Purpose:** Compile each module's `servers[]` into `server-manifest.php` — the long-running PHP processes a deployment is expected to run. See [Servers](/background/servers).
+
+**Validates:**
+- the `name` matches `/^[a-z0-9][a-z0-9._-]*/`, so an operator can actually type it. `"Realtime Server"` is two argv tokens and could never be started;
+- no two modules claim the same name — one of them would be unreachable;
+- every `requires[]` entry is a domain some module `solves`, exactly as a route's is.
+
+**Does not validate:** the `class`. `class_exists()` autoloads, so checking it at boot would load every server class on every HTTP request. It is checked at run time by `server:run`.
+
+**Used by:** `server:list` and `server:run`.
+
+#### Stage 12: CompileConfigManifestStage
 
 **Purpose:** Merge `config/*.php` files from the project and every module, with the project always winning on key collisions.
 
@@ -239,7 +252,7 @@ return [
 
 **Used by:** `ConfigRepository` (available via `config('key')` helper).
 
-#### Stage 12: CompileModuleFilesStage
+#### Stage 13: CompileModuleFilesStage
 
 **Purpose:** Build a manifest of helper files each module wants to auto-load.
 
@@ -257,6 +270,16 @@ return [
 ```
 
 **Used by:** LoadModuleFilesStage to `require_once` them at boot.
+
+#### Stage 14: ValidateRouteFiltersStage
+
+**Purpose:** Compile each module's `providesFilters` and `requiresFilters` into `filter-manifest.php`, so a route declaring an unregistered filter alias can be told *which plugin* owns it. See [Route filters](/http/filters).
+
+**Reads:** every `module.json`'s `providesFilters[]` and `requiresFilters[]`.
+
+**Writes:** `filter-manifest.php` — `{ provides: { alias => solves-domain }, requires: { … } }`.
+
+**Used by:** `HttpPipeline`, lazily and only while building the exception for an unregistered alias. A healthy boot never reads it.
 
 ### Always-Run Stages (Must Run on Every Build)
 
@@ -280,7 +303,7 @@ Even when compilation is cached, these stages always run. Skipping them would me
 
 These stages touch no disk and produce no manifest. They run on every build — a cached boot must still refuse a missing port or an unusable security layer.
 
-#### Stage 13: RegisterPortsStage
+#### Stage 15: RegisterPortsStage
 
 **Purpose:** Verify the two ports the kernel cannot run without are bound.
 
@@ -288,7 +311,7 @@ These stages touch no disk and produce no manifest. They run on every build — 
 
 **Fails:** `BootException("Missing port bindings: …")`, rethrown as `BootFailureException("Boot failed at [...RegisterPortsStage]: …")`.
 
-#### Stage 14: BindSecurityStage
+#### Stage 16: BindSecurityStage
 
 **Purpose:** Verify the security gateway has something to run.
 
@@ -461,6 +484,34 @@ public static function read(string $configHash): ?array
 ```
 
 **Key point:** The hash is computed ONCE, before `resolveEssentialModules()`. That resolution turns proj.json "essentials" domains into provider classes, so a hash taken after would describe a different array and never match the next build.
+
+#### The sentinel list
+
+`SENTINELS` names compiled manifests that must already exist for a cached boot to be trusted:
+
+```text
+manifests/route-manifest.php
+manifests/files-manifest.php
+manifests/filter-manifest.php
+manifests/server-manifest.php
+```
+
+**A new compile stage must add its manifest here.** Without it, a cache written by the *previous* kernel version is accepted, the new stage never runs, and the feature is silently inert — which is the one failure mode this list exists to prevent. The last two entries were added with route filter ownership and the server surface for exactly that reason: `server:list` would otherwise report that a deployment needs no long-running process, on a deployment whose plugin declares one.
+
+#### The stamp key is xxh128, not sha256
+
+```php
+public static function hash(array $inputs): string
+{
+    return hash('xxh128', serialize($inputs));
+}
+```
+
+This is a **cache key, not a signature**. Nothing trusts it against an adversary — the stamp lives in `var/cache`, and anything that can write there can rewrite the manifests it guards — so a cryptographic digest buys nothing and is paid for on every PHP-FPM request, before the cache can decide to skip anything.
+
+Measured on a project's routes and groups arrays: sha256 cost ~1 ms where xxh128 costs ~20 µs, against a cache hit that is itself ~0.02 ms. The hash was most of what the cache was meant to save.
+
+Old stamps cannot be mistaken for new ones: the digest is 32 hex characters where sha256 wrote 64, so a stamp from a previous kernel can never compare equal. That cache misses exactly once and is rewritten.
 
 ## Entry Point: BootPipeline::run()
 

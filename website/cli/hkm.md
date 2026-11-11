@@ -282,6 +282,8 @@ hkm plugins [subcommand]
 | Subcommand | Purpose |
 |---|---|
 | `list` | List all registered plugins and their status |
+| `install <name>` | Fetch a plugin and publish its assets into the project |
+| `update <name>` | Fetch a newer version and publish what changed |
 | `enable <name>` | Enable a plugin for the current project |
 | `disable <name>` | Disable a plugin |
 | `domains` | Show which plugin claims each domain |
@@ -290,11 +292,16 @@ hkm plugins [subcommand]
 
 ```bash
 hkm plugins list                         # All plugins
+hkm plugins install hkm-plugin-storage   # Install and publish assets
 hkm plugins enable hkm-plugin-auth       # Enable Auth plugin
 hkm plugins disable hkm-plugin-cache     # Disable Cache plugin
 hkm plugins domains                      # Domain → plugin map
 hkm plugins audit                        # Check for issues
 ```
+
+`install`, `update` and `enable` **never replace a project file they did not write.** When a plugin's copy of a published file differs from yours, yours is kept and the plugin's version lands beside it as `<file>.updated`. Pass `--overwrite` for one run to take the plugin's version instead.
+
+A plugin is refused only when the running kernel is **older** than its declared floor; a newer kernel installs it with a warning. `HKM_PLUGIN_IGNORE_KERNEL=1` overrides the floor. See [Plugins](/modules/plugins#installing-and-updating-a-plugin).
 
 See [/modules/plugins](/modules/plugins) for the full plugin API.
 
