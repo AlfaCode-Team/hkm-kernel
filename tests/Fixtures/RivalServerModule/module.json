@@ -1,0 +1,18 @@
+{
+  "name":    "rivalserver",
+  "version": "1.0.0",
+  "solves":  "server.rival",
+  "type":    "module",
+
+  "requires": [],
+  "exposes":  [],
+
+  "servers": [
+    { "name": "realtime",
+      "class": "Tests\\Fixtures\\ServerModule\\DemoServer" },
+
+    { "name": "unknown-dep",
+      "class": "Tests\\Fixtures\\ServerModule\\DemoServer",
+      "requires": ["view.rendring"] }
+  ]
+}

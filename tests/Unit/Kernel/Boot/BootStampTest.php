@@ -44,6 +44,7 @@ final class BootStampTest extends TestCase
         ManifestWriter::write('route-manifest.php', ['GET /' => ['handler' => 'C@m']]);
         ManifestWriter::write('files-manifest.php', []);
         ManifestWriter::write('filter-manifest.php', ['provides' => [], 'requires' => []]);
+        ManifestWriter::write('server-manifest.php', []);
     }
 
     protected function tearDown(): void

@@ -72,6 +72,12 @@ final class BootStamp
         // a missing filter alias, which is precisely the silently-inert feature
         // this list exists to prevent.
         'manifests/filter-manifest.php',
+        // Added with the server surface. A cache written before it would be
+        // accepted, the stage would never run, and `server:list` would report
+        // that a deployment needs no long-running process — on a deployment
+        // whose realtime plugin declares one. Silently inert in the one place
+        // the symptom is "everything looks fine and nothing arrives".
+        'manifests/server-manifest.php',
     ];
 
     /** Whether the compile may be skipped — `BOOT_CACHE` truthy. */
