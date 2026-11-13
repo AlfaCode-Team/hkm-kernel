@@ -28,6 +28,18 @@ Three principles guide testing in HKM:
 
 ## Running Tests
 
+::: warning A project from `hkm new` has no test setup at all
+The commands below are the **kernel repository's**. A freshly scaffolded project has no `tests/`, no `phpunit.xml`, no `vendor/bin/phpunit` and no phpunit in its `composer.json`, so none of them run. Nothing in the docs sets one up for a project — the only test-setup instructions are for plugins, via [ground](/packages/ground).
+
+And **do not just `composer require --dev phpunit/phpunit`**: the kernel ships PHPUnit 13.2.6, and loading the kernel's autoloader into an 11.x run is a fatal —
+
+```
+Cannot instantiate interface PHPUnit\Runner\Extension\Facade
+```
+
+Point your project's `phpunit.xml.dist` at the **kernel's** binary and bootstrap instead, and keep one PHPUnit in the process.
+:::
+
 The repository includes both Unit and Feature test suites:
 
 ```bash
@@ -238,7 +250,44 @@ $this->assertCount(1, $queue->pending());
 
 ### Writing Custom Fakes
 
-When you need to test a service that depends on a port without a built-in fake, write one:
+When you need to test a service that depends on a port without a built-in fake, write one.
+
+::: danger The kernel's event and transaction classes are `final`
+`EventBus`, `TransactionManager` and `DomainEventCollector` are all `final`. They can be neither extended nor mocked by PHPUnit, so the `FakeEventBus extends EventBus` shown below **does not compile**:
+
+```
+Fatal error: Class FakeEventBus cannot extend final class
+  AlfacodeTeam\PhpServicePlatform\Kernel\Events\EventBus
+```
+
+Fake a **port** (those are interfaces, by design); for the three final classes, use the real object and observe it instead. Subscribe a recording listener to a real bus:
+
+```php
+final class RecordingListener implements EventListenerContract
+{
+    /** @var list<IntegrationEventContract> */
+    public static array $events = [];
+
+    public function handle(IntegrationEventContract $event): void
+    {
+        self::$events[] = $event;
+    }
+}
+
+// in the test: a real bus, a container that resolves the listener
+$bus = new EventBus($container);
+$bus->subscribe('invoice.created', RecordingListener::class);
+
+$sut->create($dto);
+
+self::assertCount(1, RecordingListener::$events);
+self::assertSame('invoice.created', RecordingListener::$events[0]->name());
+```
+
+That tests more than a fake would: the event really went through `EventBus`, so the subscription, the name and the listener resolution are all covered. `TransactionManager` takes a `DatabasePort` — pass a fake port and assert on what it recorded.
+
+The pattern below is kept because the *recording* idea is right; only the `extends` is not.
+:::
 
 ```php
 <?php

@@ -312,7 +312,24 @@ Four rules make it predictable:
 With no wildcard subscription registered, dispatch is unchanged.
 
 ::: warning Bind a listener publicly
-`EventBus::resolveListener()` calls `get()` from the **kernel** scope. A listener bound with `bindInternal()` is unreachable from there, and autowiring cannot reach a module's internal bindings either — so the listener silently never runs. Bind listeners with `bind()`.
+`EventBus::resolveListener()` calls `get()` from the **kernel** scope. A listener bound with `bindInternal()` is unreachable from there, and autowiring cannot reach a module's internal bindings either. Bind listeners with `bind()`.
+
+What actually happens when you do not is worth knowing, because it is **not** a silent no-op — measured both ways:
+
+| The internally-bound listener | Result |
+|---|---|
+| no constructor arguments | **runs anyway** — `resolveListener()` falls back to `new $class()` |
+| has constructor arguments | **fails loudly** — a `ScopeViolationException` naming the binding and the scope, returned in `dispatch()`'s array of failures and logged at error level |
+
+```
+EventBus listener failed {"listener":"Plugins\\Task\\...\\InternalWithDepsListener",
+  "event":"task.created","error":"No binding found for [...TaskServiceContract]
+  in scope [kernel]. Did you forget to bind it in register()?"}
+```
+
+So the bug is visible — in the log and in `dispatch()`'s return value — as long as a `LoggerPort` is bound in the **core** container. Without one, the log line is where the silence comes from, not the bus.
+
+Everything the listener needs must be publicly resolvable too: a public listener whose dependency is `bindInternal()` fails the same way.
 
 A public binding's *closure* may still reach internal bindings, because `ModuleContainer` threads a binding's owning scope while resolving. It is the binding itself that must be public.
 :::

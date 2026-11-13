@@ -11,7 +11,12 @@ This page covers deploying HKM Kernel applications to production on PHP-FPM or O
 - [ ] `APP_ENV=production` set in `.env`
 - [ ] `APP_DEBUG=false` set (never debug output in production)
 - [ ] `APP_KEY` generated and stored in secrets (used by CSRF token layer)
-- [ ] `BOOT_CACHE=1` enabled for PHP-FPM (86× faster boot)
+- [ ] `BOOT_CACHE=1` enabled for PHP-FPM (86× on the compile step; **9.4× measured end to end on throughput**, see below)
+- [ ] `ENV_CACHE=1` set (it is off by default because mtime granularity makes it unsafe while editing — a deployed release is not being edited)
+- [ ] `expose_php = Off` in `php.ini` — PHP-FPM sends `X-Powered-By: PHP/8.5.12`, naming the exact patch level, and the kernel's security headers cannot remove it because it is emitted below userland
+- [ ] A **cross-process** `CachePort` bound in `withPorts()` — an in-memory adapter turns `throttle` and `CachePort::lock()` into silent no-ops under PHP-FPM ([cache and locks](/infrastructure/cache-and-locks#deployment-notes))
+- [ ] The real **queue** bound in `withPorts()` too, not only by a plugin — the worker resolves `QueuePort` from the core container ([workers and jobs](/background/workers-and-jobs#enqueueing-jobs))
+- [ ] Worker pool sized against the workload, not copied from a guide (see *Sizing the pool*)
 - [ ] `var/cache/` directory created and writable by the web server user
 - [ ] Database migrations applied (`hkm cli migrate:run`)
 - [ ] Environment variables validated: `hkm install --check`
@@ -86,6 +91,40 @@ Reload PHP-FPM after changes:
 sudo systemctl reload php8.4-fpm
 ```
 
+### Sizing the pool
+
+`pm.max_children` is the number of requests that can be **in flight**, and the right value
+depends entirely on what a request does. Measured on one application, same code, only the
+pool size changing (8 cores):
+
+| Route | 4 children | 32 children |
+|---|---|---|
+| 50 ms of I/O (a DB or API call) | 70 req/s | **591 req/s** (8.1×) |
+| `/ping` (no work) | 1,171 | 1,450 |
+| A write path: transaction + 3 statements | **515** | 385 (**0.75×**) |
+| Two local SQL reads | ~990 | 557 |
+
+A route that **waits** scales almost linearly with the pool: throughput is
+`children / request_seconds`, and four children at 50 ms can never exceed 78 req/s no matter
+the concurrency offered. A route that **computes or writes** gets *slower* as the pool grows,
+because the processes contend for cores and for the database's writer.
+
+Size from the measurement, not the default: `children ≈ concurrency × (time waiting ÷ total
+time)`, then verify the CPU-bound routes did not regress.
+
+::: warning PHP-FPM does not degrade past its pool — it refuses
+At concurrency 200 against a 4-child pool, 199,624 of 200,000 responses were non-2xx, each
+served in 2 ms, with nginx logging `connect() failed (54: Connection reset by peer)` to the
+FPM upstream. The accept queue is capped by the OS (`kern.ipc.somaxconn`, 128 on the test
+machine; `net.core.somaxconn` on Linux) **regardless of `listen.backlog`**, and raising
+`pm.max_children` to 32 did not move the cliff.
+
+So `listen.backlog = 2048` is a lie unless the kernel limit is raised with it, and a load
+test that reports a huge req/s with non-2xx responses is measuring the rate of refusal. Watch
+non-2xx, raise `somaxconn` to match `listen.backlog`, and put a queue or a rate limit in
+front of the pool.
+:::
+
 ### BOOT_CACHE Optimization
 
 Under PHP-FPM, every request re-executes `bootstrap/app.php`, which calls `Kernel::build()`. This recompiles every manifest (routes, services, views, config, etc.) — about **2 ms** and **150 KB** of disk writes per request, with identical output.
@@ -97,7 +136,17 @@ Enable BOOT_CACHE to skip recompilation when manifests are current:
 BOOT_CACHE=1
 ```
 
-With caching enabled, boot drops to **~0.02 ms** — **86× faster**. The cache is invalidated when:
+With caching enabled, boot drops to **~0.02 ms** — **86× faster** on that step. End to end,
+on a real application under load, the measured difference is **9.4× on throughput**:
+
+| Configuration | req/s | vs. shipped |
+|---|---|---|
+| As scaffolded (`APP_DEBUG=true`, no `BOOT_CACHE`) | 163 | 1.0× |
+| `BOOT_CACHE=1` | 997 | 6.1× |
+| `+ APP_ENV=production`, `APP_DEBUG=false`, `ENV_CACHE=1` | 1,542 | **9.4×** |
+
+A project deployed to PHP-FPM with the development defaults runs at roughly a tenth of its
+capacity. The cache is invalidated when:
 
 - Any `module.json` or `config/*.php` file changes (mtime + size checked)
 - A config file is added or deleted (per-directory `*.php` count)
@@ -170,7 +219,52 @@ $server->on('request', function (SwooleRequest $req, SwooleResponse $res) use ($
 });
 ```
 
-Server settings come from the environment: `SWOOLE_HOST`, `SWOOLE_PORT`, `HKM_WORKERS`, `SWOOLE_MAX_REQUEST`, `SWOOLE_COROUTINE`, `SWOOLE_DAEMONIZE`. See [Environment variables](/reference/env-vars#openswoole-entry-point).
+Server settings come from the environment: `SWOOLE_HOST`, `SWOOLE_PORT`, `HKM_WORKERS`, `SWOOLE_MAX_REQUEST`, `SWOOLE_COROUTINE`, `SWOOLE_DISPATCH_MODE`, `SWOOLE_HOOK_FLAGS`, `SWOOLE_DAEMONIZE`. See [Environment variables](/reference/env-vars#openswoole-entry-point).
+
+### Concurrency: the two settings that actually move it
+
+A resident kernel removes the *boot* from every request. It does not make a blocking request
+yield, so a worker serving a route that waits is just as occupied as an FPM child. With four
+workers on a route that waits 50 ms, all of these measured the same ~76 req/s — the
+`4 / 0.051 s` ceiling:
+
+| Configuration (4 workers, 50 ms I/O) | c=4 | c=50 | c=200 |
+|---|---|---|---|
+| default (`enable_coroutine` off) | 38 | 75 | 77 |
+| `SWOOLE_COROUTINE=true` alone | 19 | 73 | 71 |
+| `SWOOLE_COROUTINE=true` + `SWOOLE_HOOK_FLAGS=2147483647` | 77 | **925** | **3,653** |
+
+**`enable_coroutine` on its own buys nothing.** It runs the request inside a coroutine — the
+coroutine id is visible in the handler — but a blocking call still holds the worker.
+`hook_flags` (`SWOOLE_HOOK_ALL` = `2147483647`) is what makes `sleep()`, PDO, file and socket
+calls yield, and with it the same code served **3,653 req/s at concurrency 200 with p50
+unchanged at 52 ms**: 47× the throughput, and no queueing.
+
+The hooks are off by default for real reasons, all of which are the application's to check:
+
+- they cover **socket** I/O, so an SQLite (in-process, file) workload sees none of the gain;
+- a **shared handle** — one PDO connection, one Redis client — must not be used from two
+  coroutines at once, or the protocol desynchronises and one request reads another's reply.
+  Per-coroutine or pooled connections only;
+- anything `static` or process-global becomes concurrently reachable *mid-request*, not just
+  between requests.
+
+::: warning Swoole's default dispatch leaves workers idle behind a proxy
+`dispatch_mode` defaults to **2**: a connection is pinned to a worker by hashing its fd, for
+the life of that connection. Probed with four keepalive connections against four workers,
+they landed on **two** of them, and the server reached half its ceiling (38 of 78 req/s).
+`dispatch_mode = 3` hands each request to an idle worker: 57 req/s on the same probe, and the
+ceiling reached at concurrency 8 instead of 20.
+
+This is the normal case in production, because a reverse proxy holds a small pool of
+long-lived upstream connections. Set `SWOOLE_DISPATCH_MODE=3` for plain request/response
+HTTP. Keep the default only where a worker holds per-connection state (a WebSocket session),
+which mode 2 is what guarantees.
+:::
+
+Unlike PHP-FPM, Swoole **queues** past its capacity rather than refusing: at concurrency 200
+on four blocking workers it still served every request, at a p99 of 5.1 s. Neither behaviour
+is good; the difference matters when choosing where the backpressure lives.
 
 ### Request Isolation
 

@@ -498,7 +498,24 @@ Writes an OpenAPI document from the compiled route manifest.
 hkm cli spec:generate
 ```
 
-It is generated from `route-manifest.php` rather than from annotations or a hand-kept file, which is what keeps it true: the manifest is what the router actually matches, so a route that was renamed, disabled by `routePolicy`, or scoped to a domain is reflected without anyone remembering to update a second source. Typed path parameters carry their type across, and a route's declared `filters[]` become its security requirements.
+It is generated from `route-manifest.php` rather than from annotations or a hand-kept file, which is what keeps it true: the manifest is what the router actually matches, so a route that was renamed, disabled by `routePolicy`, or scoped to a domain is reflected without anyone remembering to update a second source. Typed path parameters carry their type across.
+
+Only some filters map to a security requirement: `auth`, `fresh-session` and `can` do. `throttle` becomes a documented `429` response, and a filter alias the generator does not know maps to nothing.
+
+::: warning Two unnamed routes on one handler abort the whole document
+`operationId` falls back to `lcfirst(ShortClassName).action` when a route has no `name`, so two routes pointing at the same controller method collide:
+
+```
+Duplicate operationId 'filterProbeController.index': already used by
+GET /api/tasks/filters, now also GET /api/tasks/filters-halt.
+```
+
+The command exits **1** and writes nothing. The fix is to give the routes a `name` in `module.json` / `proj.json` — which is worth doing anyway, since `route()` needs it:
+
+```jsonc
+{ "method": "GET", "path": "/filters", "name": "task.filters", "handler": "…@index" }
+```
+:::
 
 ## Common patterns
 

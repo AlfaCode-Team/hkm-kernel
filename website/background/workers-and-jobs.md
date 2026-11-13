@@ -240,6 +240,25 @@ The cap is not configurable from `module.json`: declared strategies use the clas
 
 The `retry` and `timeout` entries are compiled into `job-manifest.php` and read by the worker per job.
 
+::: warning A job needs BOTH declarations, and they do different things
+`module.json` `jobs[]` and `$worker->job()` in `Provider::boot()` are not alternatives:
+
+```php
+// Provider::boot() — maps the NAME to the handler class
+$worker->job('invoices.generate-pdf', GenerateInvoicePdf::class);
+```
+
+```jsonc
+// module.json — puts the job in job-manifest.php WITH this module's solves domain
+"jobs": [ { "name": "invoices.generate-pdf", "queue": "reports" } ]
+```
+
+- Without `$worker->job()`, `WorkerLoop` cannot resolve the name and returns `JobResult::skipped("Unknown job [...]")` — which **acks the message and discards it**. No exception, no log, no dead letter: the queue drains and nothing happens.
+- Without the `module.json` entry, the worker does not know which module owns the job, so it builds a container without that module's bindings and falls back to `new $jobClass()` — a fatal the moment the job has a constructor dependency.
+
+A job handler must also be bound with `bind()`, not `bindInternal()`: the worker resolves it from the kernel scope, exactly like an event listener.
+:::
+
 ## Enqueueing jobs
 
 From a service or controller:
@@ -259,6 +278,31 @@ $queue->later(
     payload: ['invoice_id' => $invoiceId],
 );
 ```
+
+::: danger The queue must be bound in the CORE container
+`WorkerLoop` resolves `QueuePort` from the **`CoreContainer`** — it has to, because it needs a queue *before* it has a job to build a module container for.
+
+A plugin that binds `QueuePort` inside the request/job **`ModuleContainer`** therefore wins for HTTP and loses for the worker. The result, measured on a scaffolded project with a Redis cache plugin registered as an essential module:
+
+```
+CORE  QueuePort => Project\Infrastructure\FileQueue     size('default') = 0
+redis LLEN app:queue:default                            = 2
+file  var/queue/default.jsonl                           = 0 bytes
+```
+
+An HTTP request pushed to Redis. The worker popped from the file queue, found it empty, printed `Remaining in 'default': 0` and exited. The jobs stayed in Redis forever. Nothing threw.
+
+So bind the real queue in `withPorts()` as well:
+
+```php
+if (($env('REDIS_HOST') ?? '') !== '' && extension_loaded('redis')) {
+    $ports[QueuePort::class] = static fn() => new RedisQueueAdapter($connection);
+    $ports[CachePort::class] = static fn() => new RedisCacheAdapter($connection);
+}
+```
+
+The per-request module binding then rebinds the identical adapter, which is harmless. The same applies to every port a long-running surface resolves before a module container exists.
+:::
 
 ## Job signing — optional but recommended
 
@@ -409,6 +453,28 @@ public function handle(JobPayload $payload): JobResult
     }
 }
 ```
+
+## What to expect from a worker
+
+Measured on one machine (8 cores, SQLite in WAL mode, Redis queue), so treat the ordering as
+the result and the absolute numbers as that machine's:
+
+| Job | rate |
+|---|---|
+| enqueue (`push()`) | ~20,000 jobs/s |
+| one `SELECT`, file queue | 1,900–2,560 jobs/s |
+| **two `INSERT`s, Redis queue, own `ModuleContainer`** | **269 jobs/s (1 worker), 715 (4 workers)** |
+
+A job that does real work runs **7–9× slower** than the synthetic one, which is the number to
+plan a queue against. Scaling across workers is sub-linear — 2.66× on four — because the
+database's writer serialises; the queue itself was never the bottleneck.
+
+Integrity over that run was exact: 2,602 orders produced 5,203 line rows, the jobs wrote
+5,203 reservation rows, the event listener wrote 2,602 audit rows, and the queue drained to
+zero. Every job ran once.
+
+A file-backed queue also degrades with depth, because `FileQueue` rewrites the whole file on
+each pop — fine for development, quadratic overall. A Redis queue is O(1) per pop.
 
 ## Source
 

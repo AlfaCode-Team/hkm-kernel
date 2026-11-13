@@ -27,6 +27,24 @@ Kernel::configure()
 
 ::: warning Start in Monitor
 The constructor's default is `WafMode::Block`. On a live site, pass `WafMode::Monitor` first, read the log for a few days, and only then switch. A new rule set meeting real traffic for the first time will refuse something you did not expect.
+
+::: danger Monitor mode logs nothing unless `LoggerPort` is bound in the CORE container
+On a project scaffolded by `hkm new`, the WAF writes **no log line at all** — in `Monitor` *or* `Block` mode. `WafLayer::report()` returns early when it cannot resolve a `LoggerPort`, and the scaffold binds none in `withPorts()`: the Logger plugin binds `LoggerPort` into the **module** container, while a security layer resolves ports from the **core** container at materialize.
+
+So "run Monitor and read the log" silently produces an empty log, and `Block` mode refuses requests without recording which rule fired. Bind it in the bootstrap:
+
+```php
+->withPorts([
+    LoggerPort::class => static fn() => \Plugins\Logger\Provider::fromConfig(),
+])
+```
+
+```
+warning: waf.blocked {"rule":"probe","signature":"wordpress","location":"path", …}
+```
+
+The same silence affects `EventBus` listener failures and `ServerContext::info()`, for the same reason.
+:::
 :::
 
 ## The default rules
@@ -36,11 +54,24 @@ Ordered cheapest first, so the common case exits early.
 | Rule | What it matches |
 |---|---|
 | `malformed` | NUL and control bytes, invalid UTF-8, `Content-Length` together with `Transfer-Encoding`, too many inputs |
-| `traversal` | `..` segments, climbs to system directories, `php://` and similar wrappers |
+| `traversal` | `..` segments, climbs to system directories, `php://` and similar wrappers (the wrapper signature is matched in the **query string only**, not the path) |
 | `probe` | dotfiles, WordPress paths, phpMyAdmin, `vendor/phpunit`, `.sql` and `.bak` files |
 | `injection` | SQLi, XSS, Log4Shell and PHP-code signatures |
 
-`injection` inspects the path, query string, `User-Agent` and `Referer`. It inspects the **body** only when you pass `inspectBody: true`.
+`injection` inspects the path, query string, `User-Agent` and `Referer`. It inspects the **body** only when the rule itself is constructed with `inspectBody: true`.
+
+::: warning `inspectBody` is a RULE parameter, not a layer parameter
+`new WafLayer(inspectBody: true)` is a fatal error — `Unknown named parameter $inspectBody`. The flag belongs to `InjectionSignatureRule`, so turning it on means replacing that one rule in the set:
+
+```php
+use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Waf\Rules\InjectionSignatureRule;
+
+new WafLayer(rules: [
+    ...WafLayer::defaultRules(),               // keeps malformed / traversal / probe
+    new InjectionSignatureRule(inspectBody: true),
+]);
+```
+:::
 
 Pass your own set with `rules:` — any `WafRuleContract` works, and `WafLayer::defaultRules()` returns the built-ins so you can extend rather than replace:
 
@@ -77,8 +108,15 @@ Security layers are constructed in the bootstrap, before the core container exis
 ```php
 interface PortAwareLayerContract
 {
-    public function usePorts(CoreContainer $core): void;
+    public function usePorts(\Psr\Container\ContainerInterface $ports): void;
 }
+```
+
+The parameter is a PSR-11 container, **not** `CoreContainer`. Implementing the narrower type is a fatal:
+
+```
+Declaration of MyLayer::usePorts(CoreContainer $core): void must be compatible with
+PortAwareLayerContract::usePorts(ContainerInterface $ports): void
 ```
 
 The kernel calls it at materialize, so the layer resolves the **same** singletons every module uses. Without it, a layer would construct a second cache adapter and a ban recorded by one worker would be invisible to the others. Explicit `cache:` and `logger:` constructor arguments still win.
