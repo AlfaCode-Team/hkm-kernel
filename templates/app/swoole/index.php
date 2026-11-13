@@ -37,6 +37,13 @@ hkm_require_kernel_autoload();
  *   - `enable_coroutine` defaults to FALSE: requests run sequentially per worker
  *     and concurrency comes from multiple workers. Set SWOOLE_COROUTINE=true only
  *     after verifying the whole request path is coroutine-safe.
+ *   - AND `enable_coroutine` ALONE CHANGES NO THROUGHPUT. It runs the request
+ *     inside a coroutine; it does NOT make a blocking call yield. Measured on a
+ *     route that sleeps 50 ms, 4 workers: 76 req/s with coroutines off, 71-76
+ *     with `enable_coroutine=true`, and 3,653 at concurrency 200 once
+ *     SWOOLE_HOOK_FLAGS turns the runtime hooks on — with p50 unchanged at
+ *     52 ms, because nothing queues any more. The hooks are what buy the
+ *     concurrency; see SWOOLE_HOOK_FLAGS below for the price of using them.
  *
  * Usage
  * -----
@@ -50,7 +57,11 @@ hkm_require_kernel_autoload();
  *   SWOOLE_PORT        9502        Listen port
  *   HKM_WORKERS        cpu_count   Worker process count
  *   HKM_ENV            production  production | development
- *   SWOOLE_COROUTINE   false       Enable coroutine concurrency (advanced)
+ *   SWOOLE_COROUTINE   false       Run each request in a coroutine (advanced)
+ *   SWOOLE_HOOK_FLAGS  0           Swoole runtime hook mask, e.g. 2147483647
+ *                                  (SWOOLE_HOOK_ALL). 0 = no hooks. Requires
+ *                                  SWOOLE_COROUTINE=true to mean anything
+ *   SWOOLE_DISPATCH_MODE unset     Swoole's worker dispatch mode (see below)
  *   SWOOLE_MAX_REQUEST 0           Recycle worker after N requests (0 = never)
  *   SWOOLE_DAEMONIZE   false       Run the server in the background
  */
@@ -65,9 +76,22 @@ use OpenSwoole\Http\Response as SwooleResponse;
 use OpenSwoole\Http\Server as SwooleServer;
 
 
-// ── 0. OpenSwoole presence guard ─────────────────────────────────────────────
+// ── 0. Swoole presence guard ─────────────────────────────────────────────────
+// `openswoole` and `swoole` are forks of one another: same API, different
+// namespace (`OpenSwoole\…` vs `Swoole\…`) and separate version lines. This file
+// is written against the OpenSwoole names, so when the machine has mainline
+// Swoole instead, alias its classes onto them — the three used here are the
+// whole surface. Without this the server refuses to start on a machine whose
+// `hkm doctor` reported a usable Swoole.
+if (!class_exists(SwooleServer::class) && class_exists('Swoole\Http\Server')) {
+    class_alias('Swoole\Http\Server', SwooleServer::class);
+    class_alias('Swoole\Http\Request', SwooleRequest::class);
+    class_alias('Swoole\Http\Response', SwooleResponse::class);
+}
+
 if (!class_exists(SwooleServer::class)) {
-    fwrite(STDERR, "[{{PROJECT_NAME}}] OpenSwoole extension not loaded. Add `extension=openswoole` to php.ini.\n");
+    fwrite(STDERR, "[{{PROJECT_NAME}}] Neither the `openswoole` nor the `swoole` extension is loaded.\n"
+        . "Add `extension=openswoole` (or `extension=swoole`) to php.ini.\n");
     exit(1);
 }
 
@@ -102,10 +126,47 @@ if ($trustedProxies !== '') {
     );
 }
 
+// Both default to "not set", so an untouched project behaves exactly as before.
+$dispatchMode = (int) (env('SWOOLE_DISPATCH_MODE') ?: 0);
+$hookFlags = (int) (env('SWOOLE_HOOK_FLAGS') ?: 0);
+
 $server = new SwooleServer($host, $port);
 $server->set([
     'worker_num' => $workers,
     'enable_coroutine' => $coroutine,
+
+    // Request -> worker assignment. Swoole's DEFAULT is 2: a connection is
+    // pinned to a worker by hashing its fd, for the whole life of that
+    // connection. Behind a reverse proxy — which holds a small pool of
+    // long-lived upstream connections — that leaves workers idle while others
+    // queue. Measured with 4 keepalive connections against 4 workers: they
+    // landed on TWO of them, and the server reached half its ceiling (38 of
+    // 78 req/s). Mode 3 hands each request to an IDLE worker instead: same
+    // test, 57 req/s, and the ceiling reached at concurrency 8 rather than 20.
+    //
+    // Left UNSET here because mode 2 is the only mode that guarantees one
+    // connection is always served by one worker, which anything keeping
+    // per-connection state in the worker (a WebSocket session) depends on.
+    // A plain request/response HTTP server does not, and wants 3.
+    ...($dispatchMode > 0 ? ['dispatch_mode' => $dispatchMode] : []),
+
+    // Runtime coroutine hooks. Without them `enable_coroutine` is cosmetic for
+    // any route that blocks: sleep(), a PDO query, a file read and an outbound
+    // socket all still hold the whole worker. With SWOOLE_HOOK_ALL
+    // (2147483647) a sleeping route went from 76 to 3,653 req/s at
+    // concurrency 200 on 4 workers, p50 unchanged.
+    //
+    // It is OFF by default because it rewrites what every blocking call in the
+    // process does, including inside vendor code that never expected to yield:
+    //   - hooks cover SOCKET I/O. SQLite is in-process file I/O and is NOT
+    //     helped, so a SQLite app sees none of that gain.
+    //   - a shared handle (one PDO connection, one Redis client) must not be
+    //     used from two coroutines at once. Per-coroutine or pooled, or the
+    //     protocol desynchronises and one request reads another's reply.
+    //   - anything static or process-global becomes concurrently reachable
+    //     mid-request, not just between requests.
+    // Turn it on deliberately, per application, after reading the request path.
+    ...($hookFlags > 0 ? ['hook_flags' => $hookFlags] : []),
     'max_request' => (int) (env('SWOOLE_MAX_REQUEST') ?: 0),
     'reload_async' => true,
     'max_wait_time' => 60,
