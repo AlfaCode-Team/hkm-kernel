@@ -98,13 +98,33 @@ HELP;
         }
 
         /** @var array<string, array<string, mixed>> $manifest */
-        $document = (new RouteSpecGenerator(
-            title: (string) $this->option('title', 'API'),
-            version: (string) $this->option('api-version', '1.0.0'),
-            description: $this->stringOrNull('description'),
-            excludePrefixes: $this->excludePrefixes(),
-            serverUrl: $this->stringOrNull('server'),
-        ))->generate($manifest);
+        try {
+            $document = (new RouteSpecGenerator(
+                title: (string) $this->option('title', 'API'),
+                version: (string) $this->option('api-version', '1.0.0'),
+                description: $this->stringOrNull('description'),
+                excludePrefixes: $this->excludePrefixes(),
+                serverUrl: $this->stringOrNull('server'),
+            ))->generate($manifest);
+        } catch (\InvalidArgumentException $e) {
+            // An operationId collision is reported in the document's own
+            // vocabulary, which does not mention routes. The cause is almost
+            // always two UNNAMED routes sharing one controller method: the id
+            // then falls back to `lcfirst(ShortClass).action`, which is the same
+            // string for both. Say so, because the message alone sends people
+            // looking for a duplicate path that does not exist.
+            $this->error($e->getMessage());
+
+            if (str_contains($e->getMessage(), 'Duplicate operationId')) {
+                $this->warning(
+                    'An operationId defaults to the handler (lcfirst(Class).method) when a route has no '
+                    . '"name", so two routes sharing a controller method collide. Give each of them a '
+                    . '"name" in module.json / proj.json — the name is used as the operationId verbatim.'
+                );
+            }
+
+            return 1;
+        }
 
         $target = $this->resolveOutput();
 
