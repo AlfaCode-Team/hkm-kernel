@@ -4,6 +4,109 @@ All notable changes to the AlfacodeTeam PhpServicePlatform (Sentinel) kernel are
 documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-11-13
+
+Everything in this release came out of building a project from the templates,
+following the documentation literally, and then measuring it: three SAPIs, five
+frameworks, a load sweep to concurrency 200, a 42-check security battery and a
+complete application exercising the transaction, event, job and view paths. The
+numbers are in `README.md` under *Performance — measured*.
+
+### Added
+
+- **`SWOOLE_HOOK_FLAGS` and `SWOOLE_DISPATCH_MODE` in the Swoole entry point.**
+  Both default to unset, so a project that does not opt in is unchanged.
+  - `enable_coroutine` on its own changes **no** throughput: it runs the request
+    inside a coroutine, but does not make a blocking call yield. Measured on a
+    route that waits 50 ms with 4 workers — 76 req/s with coroutines off, 71–76
+    with `SWOOLE_COROUTINE=true`, and **3,653 req/s at concurrency 200** once
+    `SWOOLE_HOOK_FLAGS=2147483647` (`SWOOLE_HOOK_ALL`) is set, with p50
+    unchanged at 52 ms because nothing queues. The hooks stay off by default and
+    the entry point now states the three reasons: they cover socket I/O only (an
+    SQLite workload gains nothing), a shared PDO or Redis handle is unsafe across
+    coroutines, and process-global state becomes concurrently reachable
+    mid-request.
+  - Swoole's default `dispatch_mode = 2` pins a connection to a worker by hashing
+    its fd. Probed with four keepalive connections against four workers, they
+    landed on **two** of them and the server reached half its ceiling (38 of 78
+    req/s); mode 3 reached 57, and the ceiling at concurrency 8 instead of 20.
+    That is the ordinary case behind a reverse proxy, whose upstream pool is a
+    handful of long-lived connections.
+
+### Fixed
+
+- **`hkm doctor` reported OPcache as missing on every machine.** PHP registers
+  the extension as *Zend OPcache*, so `extension_loaded('opcache')` is always
+  false. The check now normalises `get_loaded_extensions()`, and a loaded but
+  disabled OPcache (`opcache.enable=0`) is reported as OFF rather than absent —
+  a different problem with a different fix. Doctor is the single authority on
+  whether a machine can run the kernel, and this was it being wrong about the
+  setting that matters most in production.
+- **`spec:generate` died on an uncaught exception** when two routes shared a
+  controller method and declared no `name`: `operationId` falls back to
+  `lcfirst(ShortClass).action`, so they collide. It now names both routes, prints
+  the remedy (give the routes a `name`) and exits 1, so CI still fails.
+- **The Swoole entry point refused to start on mainline `swoole`.** The file is
+  written against the `OpenSwoole\…` names; the three classes it uses are now
+  aliased when only `Swoole\…` is present — otherwise a machine whose
+  `hkm doctor` had just reported a usable Swoole could not run the server.
+- **A scaffolded project bound no `LoggerPort` in the core container**, so every
+  kernel component that resolves a logger *before* any module registers degraded
+  to silence: `WafLayer` through `PortAwareLayerContract`, the `EventBus` when a
+  listener throws, and `ServerContext::info()`. A WAF in Monitor mode wrote
+  nothing to read, which is the entire purpose of Monitor mode. `LoggerPort` and
+  `ClockPort` are now bound in `withPorts()`.
+- **A scaffolded project bound an in-memory `CachePort`**, which under PHP-FPM
+  dies with the request. Measured: `throttle:5,1` never limited (12 × `200`, with
+  `X-RateLimit-Remaining` stuck at 4) and `CachePort::lock()` granted every
+  acquire — nothing thrown, nothing logged, and the rate-limit headers still
+  correct-looking. The template now binds `FileCache`, whose `increment()` holds
+  `flock(LOCK_EX)` and whose `lock()` returns a real `FileLock`, at no measurable
+  throughput cost.
+- **Migrations and the runtime opened different SQLite databases.** The migration
+  CLI defaults to `<project>/database/app.sqlite`; both `DatabasePort` bindings
+  call `fromEnvironment()`, which defaults an unnamed SQLite database to
+  `:memory:`. `migrate:run` reported success and every request then failed with
+  "no such table" on the schema just migrated. The template now sets `DB_NAME`
+  itself, which is what makes all three consumers agree; an explicit value still
+  wins.
+
+### Changed
+
+- **The template's queue comment was wrong in a way that loses jobs.** It claimed
+  the Redis plugin's override "lets `php app/worker/run.php` drain real jobs".
+  `WorkerLoop` resolves `QueuePort` from the **CoreContainer** — it must, since
+  it needs a queue before it has a job to build a module container for — so a
+  plugin binding `QueuePort` per request is invisible to the worker. Measured:
+  HTTP pushed to Redis, the worker popped from the file queue, printed
+  `Remaining in 'default': 0` and exited, and the jobs stayed in Redis with
+  nothing thrown. The comment now says so and shows the core binding that fixes
+  it.
+- **`README.md` carries the measured performance numbers** — three SAPIs, the
+  configuration lever, the framework comparison with both its caveats, the
+  behaviour under load, and a real application rather than a probe.
+
+### Documentation
+
+- Nine pages corrected where they disagreed with the kernel, each found by
+  running what the page says: `inspectBody` is a rule parameter and
+  `new WafLayer(inspectBody: true)` is a fatal; `PortAwareLayerContract` takes a
+  PSR-11 container, so the documented signature cannot be implemented;
+  `catch (\PDOException)` in a repository never fires, because the Database
+  plugin already translated it; an internally-bound listener fails loudly rather
+  than silently; `FakeEventBus extends EventBus` cannot compile, as `EventBus`,
+  `TransactionManager` and `DomainEventCollector` are all `final`;
+  percent-decoding never widens a typed route parameter; `absolute: true`
+  silently returns a relative URL with `APP_URL` unset; an undeclared env var
+  does not fail the boot; and `BootException` lives in `Kernel\Boot`.
+- `deployment/production.md`, `background/workers-and-jobs.md` and
+  `infrastructure/cache-and-locks.md` gain what the load tests measured: pool
+  sizing (4 → 32 children is 8.1× on an I/O route and −25% on a write path), the
+  refusal cliff (`somaxconn` caps the accept queue whatever `listen.backlog`
+  says, and PHP-FPM refuses rather than degrades), `BOOT_CACHE`'s 9.4× end to end
+  against its 86× compile step, and the rule that a cache is a bet worth pricing
+  — a Redis round trip measured slower than the query it replaced.
+
 ## [1.21.0] - 2026-11-11
 
 ### Added
