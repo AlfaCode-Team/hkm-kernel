@@ -61,12 +61,16 @@ use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\QueuePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\DatabasePort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\EncryptionPort;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\HashingPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\LoggerPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\ClockPort;
+use AlfacodeTeam\PhpServicePlatform\Kernel\Ports\SystemClock;
 use AlfacodeTeam\PhpServicePlatform\Kernel\Security\Layers\CsrfTokenLayer;
 
 use Project\Bootstrap\EntryHelpers;
 use Project\Bootstrap\Environment\ErrorGuard;
 use Project\Bootstrap\Environment\LoadEnvironment;
 use Project\Infrastructure\FileQueue;
+use Project\Infrastructure\FileCache;
 use Project\Infrastructure\InMemoryCache;
 
 // Plugins — port adapters / infrastructure.
@@ -134,6 +138,26 @@ $env = static fn(string $key, ?string $default = null): ?string =>
     (($v = env($key)) !== null ? (string) $v : $default);
 
 // -----------------------------------------------------------------------------
+// SQLITE DEFAULT PATH — one answer for every consumer.
+// Three things resolve the database independently: the migration CLI (which
+// reads config/let-migrate.php and defaults to <project>/database/app.sqlite),
+// the DatabasePort bound below, and the Database plugin's own per-request
+// binding — the last two both call fromEnvironment(), which defaults an unnamed
+// SQLite database to ':memory:'.
+//
+// Left to disagree, `migrate:run` reports success against the file while every
+// request runs against a fresh, empty in-memory database, and the only symptom
+// is "no such table" on a schema you just migrated. Setting the variable itself
+// — rather than one of the bindings — is what makes all three agree, because
+// every one of them reads it. An explicit DB_NAME/DB_DATABASE always wins.
+// -----------------------------------------------------------------------------
+if (in_array(strtolower($env('DB_DRIVER', 'sqlite') ?? 'sqlite'), ['sqlite', 'sqlite3'], true)
+    && ($env('DB_DATABASE') ?? $env('DB_NAME')) === null
+) {
+    $_ENV['DB_NAME'] = $_SERVER['DB_NAME'] = $projectRoot . '/database/app.sqlite';
+}
+
+// -----------------------------------------------------------------------------
 // TIMEZONE — pin the process to ONE basis, explicitly.
 // With date.timezone unset in php.ini, date() and DateTime fall back to UTC
 // while your database session may not, so a value written by PHP and a value
@@ -178,7 +202,40 @@ if ($appKeys === [] && !in_array($appEnv, ['local', 'testing'], true)) {
 //   MailPort::class  => static fn() => new SmtpMailer(...),
 // -----------------------------------------------------------------------------
 $ports = [
-    CachePort::class => static fn(): InMemoryCache => new InMemoryCache(),
+    // Application logging, bound HERE and not only as a module.
+    //
+    // The Logger plugin binds LoggerPort into the per-request ModuleContainer,
+    // which is the right home for anything a route resolves. But several kernel
+    // components resolve their logger from the CORE container, at materialize,
+    // before any module registers: security layers via PortAwareLayerContract
+    // (WafLayer), the EventBus when a listener throws, and ServerContext::info().
+    // Each of those degrades to SILENCE when LoggerPort is absent there — a WAF
+    // that blocks nothing visible, a listener failure nobody sees. Silent logging
+    // is indistinguishable from nothing having happened, so bind it up front.
+    LoggerPort::class => static fn(): LoggerPort => LoggerProvider::fromConfig(),
+
+    // Injectable time. The kernel ships SystemClock, but only the Scheduler
+    // falls back to it on its own — a module that resolves ClockPort (expiry,
+    // throttling, anything whose decision depends on elapsed time) needs it
+    // bound here, and tests substitute a frozen clock for it.
+    ClockPort::class => static fn(): ClockPort => new SystemClock(),
+
+    // Cache + locks, bound to a CROSS-PROCESS implementation on purpose.
+    //
+    // An in-memory adapter is a PHP array: under PHP-FPM it dies with the
+    // request, so anything built on the cache silently stops working while
+    // still looking like it works. Two security-relevant examples, both
+    // measured: the `throttle` route filter keeps emitting X-RateLimit-*
+    // headers and never limits anything, and CachePort::lock() hands out a
+    // lock that every caller acquires — "distributed mutual exclusion" with no
+    // exclusion. Under OpenSwoole it is worse than useless rather than inert:
+    // the limit applies PER WORKER, so the real ceiling is limit x workers.
+    //
+    // FileCache is correct on a single host: increment() is flock(LOCK_EX)'d
+    // and lock() hands out a real FileLock. Swap it for the Redis adapter the
+    // moment a second host appears — a file lock is not shared across machines.
+    //   hkm plugins install redis-cache
+    CachePort::class => static fn(): FileCache => new FileCache($projectRoot . '/var/cache/data'),
 
     // Central/default connection. The Database PLUGIN binds its own, better
     // configured DatabasePort (logger + query log + pool) into the request
@@ -200,8 +257,28 @@ $ports = [
         $appKeys === [] ? str_repeat('0', 32) : $appKeys,
     ),
 
-        // File-backed queue (cross-process, no Redis). RedisCache overrides this
-        // when REDIS_HOST is set. Lets `php app/worker/run.php` drain real jobs.
+    // File-backed queue (cross-process, no broker). Lets `php app/worker/run.php`
+    // drain real jobs on a fresh install.
+    //
+    // ⚠ A QUEUE MUST BE BOUND HERE, IN THE CORE, NOT ONLY BY A MODULE.
+    // `WorkerLoop` resolves QueuePort from the CoreContainer — it needs a queue
+    // BEFORE it has a job to build a module container for. A plugin that binds
+    // QueuePort inside the request/job ModuleContainer (the Redis cache plugin
+    // does, as an essential module) is therefore invisible to the worker: HTTP
+    // requests push to the broker, the worker pops from THIS FileQueue, and it
+    // prints "Remaining in 'default': 0" while every job sits in the broker
+    // forever. Nothing throws. Measured, not theorised.
+    //
+    // So when you move to a broker, bind it HERE as well as letting the plugin
+    // override it per request:
+    //
+    //   if (($env('REDIS_HOST') ?? '') !== '' && extension_loaded('redis')) {
+    //       $ports[QueuePort::class] = static fn() => new RedisQueueAdapter($connection);
+    //       $ports[CachePort::class] = static fn() => new RedisCacheAdapter($connection);
+    //   }
+    //
+    // The same applies to any port a long-running surface resolves before a
+    // module container exists.
     QueuePort::class => static fn(): FileQueue => new FileQueue($projectRoot . '/var/queue'),
 
     // ── When you enable the User + Tenancy plugins ───────────────────────────
