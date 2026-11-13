@@ -299,7 +299,51 @@ final class InMemoryLock extends AbstractLock
 
 ## Deployment notes
 
-**Cache backends**: Choose one that supports atomic operations (Redis, Memcached). File-based caches do not support atomic increment or locking and should only be used for development.
+::: danger An in-memory CachePort silently disables everything built on it
+An in-memory adapter is a PHP array. Under **PHP-FPM** it dies with the request, so every cache-backed guarantee quietly stops holding while still looking like it holds. Measured on a scaffolded project, same code and same config, only the SAPI differing:
+
+| Control | Swoole (resident worker) | PHP-FPM (process per request) |
+|---|---|---|
+| `throttle:5,1` route filter | 5 × `200`, then `429` | **12 × `200`** — never limits, and still sends `X-RateLimit-*` headers |
+| `CachePort::lock()` | second `acquire()` returns `false` | **every `acquire()` returns `true`** — no exclusion at all |
+| `increment()` | rises 1, 2, 3 … | **always returns 1** |
+
+Nothing throws, nothing is logged, and the rate-limit headers look correct — which is what makes it dangerous. Under OpenSwoole it is not safe either, merely less obviously broken: the counter lives in each worker, so the real ceiling is *limit × workers* and depends on which worker a client lands on.
+
+Bind a cross-process cache in `withPorts()`. Projects scaffolded by `hkm new` bind `FileCache`, which is correct on a single host; move to Redis as soon as there is a second host, because a file lock is not shared between machines.
+:::
+
+**Cache backends**: Choose one with atomic operations. Redis is the right answer for more than one host. A *naive* file cache has neither atomic increment nor locking — but the `FileCache` shipped in the project layer does: `increment()` holds `flock(LOCK_EX)` for its read-modify-write, and `lock()` returns a real `FileLock`. It is bounded by the host, not by the request.
+
+### Price the query before you cache it
+
+A cache is a bet that the thing behind it is more expensive than reaching the cache. That bet is not always won, and it is cheap to check. Measured in one resident process against a 500-row table:
+
+| | per call |
+|---|---|
+| SQLite: 25 rows + `COUNT(*)` | **129 µs** |
+| Redis: one `GET` + `json_decode` | **167–239 µs** |
+| Redis: `EXISTS` + `GET` | 267–279 µs |
+
+A local Redis round trip costs 145 µs at its best (`redis-cli --latency`: min 0.145 ms). So caching that page read made the endpoint **slower** under a resident runtime, and the uncached route won both benchmark passes. Under PHP-FPM the same cache paid about 1.4× — mostly by removing variance, not by removing work.
+
+Two rules follow:
+
+- **One round trip per hit.** `has()` followed by `remember()` reads the key twice and doubles the only cost the cache has. Use `get()`, and treat `null` as the miss:
+
+```php
+$cached = $cache->get($key);
+if (is_array($cached)) {
+    return $cached;
+}
+
+$fresh = $this->build();      // the expensive thing
+$cache->set($key, $fresh, $ttl);
+
+return $fresh;
+```
+
+- **Cache what is slow, not what is convenient.** A remote database, a third-party API, an aggregate over a million rows — yes. A keyed read of 25 local rows — measure first; it is likely already faster than the network hop you would add.
 
 **TTL and lock duration**: Set a lock TTL high enough to cover worst-case execution (e.g., 5 minutes for a background job), but low enough that a crashed worker doesn't strand the lock forever. 15–300 seconds is typical.
 

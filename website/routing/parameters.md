@@ -35,7 +35,7 @@ Does not match: `/users/alice` (not numeric), `/users/` (empty)
 | `alpha` | `[a-zA-Z]+` | alphabetic | `/categories/{name:alpha}` |
 | `alphanum` | `[a-zA-Z0-9]+` | alphanumeric | `/products/{code:alphanum}` |
 | `slug` | `[a-zA-Z0-9_-]+` | URL-friendly | `/articles/{slug:slug}` |
-| `uuid` | UUID v4 format | UUIDs | `/events/{id:uuid}` |
+| `uuid` | UUID **shape** — 8-4-4-4-12 hex, any version | UUIDs | `/events/{id:uuid}` |
 | `segment` | `[^/]+` | one segment | same as untyped; kept for compatibility |
 | `any` | `.*` | any characters (crosses `/`) | **risky** — no traversal guard |
 | `path` | traversal-safe catch-all | any string except `..` and control chars | `/files/{name:path}` |
@@ -68,16 +68,23 @@ An omitted optional parameter is reported to the controller as an empty string, 
 The matcher captures the **raw** (percent-encoded) path. Each captured value is then decoded and **re-validated** against its type:
 
 ```
-Raw:     /users/%32%30  (the string "20" percent-encoded)
-Decoded: /users/20       (valid for {id:num})
-Param:   id = '20'
-
 Raw:     /files/..%2F..%2Fetc%2Fpasswd
 Decoded: /files/../../etc/passwd (invalid for {name:path} — contains ..)
 Result:  no match (404, or try the next route)
 ```
 
 This guarantees that a controller receives a value that satisfies its type constraint, even if the wire bytes were percent-encoded.
+
+::: warning Decoding only ever NARROWS what matches — it never widens it
+Because the pattern is applied to the **raw** path first, an encoded value that would be valid once decoded still does not match:
+
+```
+Raw:     /users/%32%30     ("20", percent-encoded)
+Against: {id:num} → [0-9]+ matched on the RAW path → no match → 404   (measured)
+```
+
+So `%32%30` is **not** accepted by `{id:num}`, and no `{name:type}` becomes more permissive through decoding. Re-validation exists to stop a value *widening* after the match (the traversal case above), not to normalise input before it. If a client may send encoded digits, take the segment untyped and validate it yourself.
+:::
 
 ::: tip
 Because of this re-validation, `%2F` (encoded `/`) cannot smuggle a slash past a `{name}` parameter. The decoded value is checked against the pattern, so traversal escapes and null-byte injection are caught at the routing layer.

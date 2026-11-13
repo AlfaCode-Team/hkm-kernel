@@ -85,7 +85,9 @@ Read by the generated `app/swoole/index.php`:
 | `HKM_ENV` | `production` | Environment name passed to the server. |
 | `SWOOLE_MAX_REQUEST` | `0` (never) | Restart a worker after this many requests (`max_request`). |
 | `SWOOLE_DAEMONIZE` | `false` | Run the server as a daemon. |
-| `SWOOLE_COROUTINE` | `false` | Enable coroutine hooks. |
+| `SWOOLE_COROUTINE` | `false` | Run each request inside a coroutine (`enable_coroutine`). On its own it does **not** make blocking calls yield — measured, throughput is unchanged without `SWOOLE_HOOK_FLAGS`. |
+| `SWOOLE_HOOK_FLAGS` | `0` (none) | Swoole runtime hook mask, e.g. `2147483647` (`SWOOLE_HOOK_ALL`). This is what makes `sleep()`/PDO/socket calls yield: 76 → 3,653 req/s at concurrency 200 on a route that waits 50 ms. Requires `SWOOLE_COROUTINE=true`, and requires the request path to be coroutine-safe — see [Concurrency](/deployment/production#concurrency-the-two-settings-that-actually-move-it). |
+| `SWOOLE_DISPATCH_MODE` | unset (Swoole's `2`) | Worker dispatch. Mode 2 pins a connection to a worker by hashing its fd, which leaves workers idle behind a proxy's keepalive pool; `3` hands each request to an idle worker. Keep 2 only when a worker holds per-connection state. |
 
 ## Packages
 
@@ -101,12 +103,22 @@ LetMigrate reads no environment variables itself. Its connection settings are pa
 
 ## Your own variables
 
-Read your own variables with `env()`, and declare each one a module reads in that module's `module.json` `config[]`, or the boot fails:
+Read your own variables with `env()`, and declare each one a module reads in that module's `module.json` `config[]`:
 
 ```php
 $apiKey  = env('EXTERNAL_API_KEY');
 $timeout = (int) env('EXTERNAL_API_TIMEOUT', 30);
 ```
+
+::: info Declaring is a convention, not an enforced check
+`ValidateConfigStage` validates what a module **declares** — it cannot see what a module **reads**. A module reading an undeclared variable boots and runs normally (measured), so an undeclared var is not caught at boot; it is caught in production, as a `null`.
+
+Declare them anyway, for the three things declaring does buy:
+
+- `required` entries with no value **do** fail the boot, loudly, with the key named;
+- `type` is validated and cast;
+- `hkm plugins enable` seeds the keys and their defaults into the project's `.env`, so an operator gets a working file instead of a stack trace.
+:::
 
 For structured settings, prefer a `config/*.php` file read through `config()`. See [Configuration](/guide/configuration).
 

@@ -122,8 +122,22 @@ const preflight =
     \\  'opcache'    => 'production performance',
     \\];
     \\echo "\n  optional:\n";
+    \\// extension_loaded() matches the name PHP REGISTERED, and OPcache registers
+    \\// itself as "Zend OPcache" — so extension_loaded('opcache') is false on every
+    \\// machine that has it. Compare against the real list instead, or this reports
+    \\// the one setting that matters most for production as missing, always.
+    \\$loadedNames = array_map('strtolower', get_loaded_extensions());
+    \\$isLoaded = static function (string $e) use ($loadedNames): bool {
+    \\    if (in_array(strtolower($e), $loadedNames, true)) { return true; }
+    \\    return strtolower($e) === 'opcache' && in_array('zend opcache', $loadedNames, true);
+    \\};
     \\foreach ($optional as $e => $why) {
-    \\    printf("  ext-%-11s %-9s %s\n", $e, extension_loaded($e) ? 'present' : 'absent', $why);
+    \\    $state = $isLoaded($e) ? 'present' : 'absent';
+    \\    if ($e === 'opcache' && $state === 'present' && !filter_var(ini_get('opcache.enable'), FILTER_VALIDATE_BOOL)) {
+    \\        $state = 'OFF';
+    \\        $why   = 'production performance -- loaded but opcache.enable=0';
+    \\    }
+    \\    printf("  ext-%-11s %-9s %s\n", $e, $state, $why);
     \\}
     \\exit((!$okPhp || $missing || !$hasDriver) ? 1 : 0);
 ;

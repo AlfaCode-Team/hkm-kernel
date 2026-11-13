@@ -165,7 +165,19 @@ route('posts.show', ['id' => 7], absolute: true);
 // https://app.example.com/posts/7
 ```
 
-The base URL comes from `APP_URL` environment variable (or defaults to `https://` if absent).
+The base URL comes from the `APP_URL` environment variable.
+
+::: danger With `APP_URL` unset, `absolute: true` silently returns a RELATIVE url
+There is no `https://` fallback for an ungrouped route. Measured on a scaffolded project, which ships **no** `APP_URL` at all:
+
+```php
+route('p.num', ['a' => 7], absolute: true);   // => "/p/num/7"   — not absolute
+```
+
+No exception, no warning. A `signed_route(..., absolute: true)` dropped into a verification email is then a broken link, and the failure surfaces in a user's inbox rather than in a test.
+
+The `https://host` form appears only when the route is grouped under a concrete `domain` (below), which is why that example looks right while this one does not. **Set `APP_URL` in every environment**, and treat an absolute URL built in a CLI command, a job or a mail template as requiring it.
+:::
 
 For routes grouped under a concrete domain, the generator uses that domain instead:
 

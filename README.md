@@ -27,17 +27,18 @@ upgrade it like a Go/Rust binary — no Composer needed to get started.
 2. [What we're building toward](#what-were-building-toward)
 3. [Project status — done vs. cooking](#project-status--done-vs-cooking)
 4. [Why GDA?](#why-gda)
-5. [Install](#install)
-6. [The `hkm` CLI](#the-hkm-cli)
-7. [Your first project](#your-first-project)
-8. [Core concepts](#core-concepts)
-9. [The request lifecycle](#the-request-lifecycle)
-10. [Building a feature — end to end](#building-a-feature--end-to-end)
-11. [The five access rules](#the-five-access-rules)
-12. [Batteries included (plugins)](#batteries-included-plugins)
-13. [Development from source](#development-from-source)
-14. [Security defaults](#security-defaults)
-15. [License](#license)
+5. [Performance — measured](#performance--measured)
+6. [Install](#install)
+7. [The `hkm` CLI](#the-hkm-cli)
+8. [Your first project](#your-first-project)
+9. [Core concepts](#core-concepts)
+10. [The request lifecycle](#the-request-lifecycle)
+11. [Building a feature — end to end](#building-a-feature--end-to-end)
+12. [The five access rules](#the-five-access-rules)
+13. [Batteries included (plugins)](#batteries-included-plugins)
+14. [Development from source](#development-from-source)
+15. [Security defaults](#security-defaults)
+16. [License](#license)
 
 ---
 
@@ -171,6 +172,207 @@ code.
 - **Kernel** — knows nothing about your domains. Changes rarely.
 - **Module/Plugin** — knows nothing about the project. Wires to the kernel through contracts.
 - **Project** — knows everything, contains no business logic. Pure wiring.
+
+---
+
+## Performance — measured
+
+Every number below was measured on one machine — against a scaffolded project, and against a
+complete application built on it (see *A real application, not a probe*). None is estimated,
+and none is copied from a third party.
+
+**Harness:** Apple M3 (8 cores, 16 GB), macOS 27.2, PHP 8.5.12 with OPcache
+(`opcache.enable=1`), Swoole 6.2.5, nginx 1.31.8. Load generated with `ab -k -c 20 -n 4000`
+after a 300-request warm-up, against a dedicated `php-fpm` master (`pm=static`, 4 children)
+and a dedicated nginx on their own ports and logs. Swoole ran 4 workers. Run-to-run variance
+is ±10–25% on a busy machine, so treat the **ordering** as solid and the absolute figures as
+this laptop's.
+
+### The same application on three SAPIs
+
+Same routes, same `.env` — only the server differs.
+
+| Server | small JSON `/ping` | DB route (SQLite) | serial latency (`-c 1`) |
+|---|---|---|---|
+| `php -S` built-in (1 process) | 609 req/s | 346 req/s | 2.6 ms |
+| nginx + PHP-FPM (4 workers) | 1,591 req/s | 1,209 req/s | 2.6 ms |
+| **Swoole (4 workers)** | **8,994 req/s** | **4,840 req/s** | **0.44 ms** |
+| *raw PHP, no framework (FPM)* | *11,791 req/s* | — | *0.45 ms* |
+
+**The serial number is the headline, not the throughput one.** With a resident kernel, HKM
+answers a request in **0.44 ms** against **0.45 ms** for a bare PHP script with no framework
+at all — the per-request cost of the framework is, within measurement error, nothing. The
+5.7× gap between Swoole and PHP-FPM is almost entirely `Kernel::build()` running again on
+every request.
+
+`php -S` serves one request at a time. That row exists only to show why it must never be
+used for a benchmark or a deployment.
+
+### What configuration alone is worth on PHP-FPM
+
+Same server, same code — only `.env` changed:
+
+| Configuration | req/s | vs. shipped |
+|---|---|---|
+| As scaffolded (`APP_DEBUG=true`, no `BOOT_CACHE`) | 163 | 1.0× |
+| `BOOT_CACHE=1` | 997 | 6.1× |
+| `+ APP_ENV=production`, `APP_DEBUG=false`, `ENV_CACHE=1` | 1,542 | **9.4×** |
+
+`BOOT_CACHE` is documented as ~86× on the compile step in isolation; **end to end it is 9.4×
+on throughput.** A project deployed to PHP-FPM with the development defaults runs at roughly
+a tenth of its capacity. Set all three on any FPM deployment, and clear
+`var/cache/manifests/` on deploy.
+
+### Against other frameworks
+
+Identical conditions: the same nginx, the same `php-fpm` pool, the same one-route `/ping`
+returning the same small JSON, each framework in its own production mode (Laravel
+`artisan optimize`, Symfony `APP_ENV=prod` with a warmed cache).
+
+| Framework | req/s | p50 | p99 |
+|---|---|---|---|
+| raw PHP (no framework) | 11,791 | 2 ms | 3 ms |
+| **HKM 1.21 — Swoole** | **8,994** | 2 ms | 9 ms |
+| Slim 4.15 — FPM | 5,299 | 4 ms | 5 ms |
+| Symfony 8.1 — FPM | 2,470 | 8 ms | 14 ms |
+| HKM 1.21 — FPM | 1,591 | 12 ms | 33 ms |
+| Laravel 13.42 — FPM | 554 | 32 ms | 81 ms |
+
+Read honestly, that says two different things:
+
+- **Resident, HKM is the fastest full framework here** — 76% of raw PHP, 1.7× Slim (a
+  micro-framework), 3.6× Symfony, 16× Laravel.
+- **Per-request on FPM, HKM is mid-pack** — behind Symfony, ahead of Laravel. Symfony
+  compiles its container and routing to PHP at build time; HKM re-reads its manifests,
+  revalidates ports and security layers and boots every module on each request, and
+  `BOOT_CACHE` shortens that without removing it.
+
+Two caveats that matter before anyone quotes this table:
+
+1. **It is not equal work.** HKM's `/ping` passes a WAF, a CSRF layer and a security gateway,
+   and emits security headers. Slim's is a closure. That is a design difference, not overhead
+   to be optimised away — but it is not like-for-like.
+2. **Swoole vs. FPM is architecture, not merit.** Laravel Octane or Symfony with a persistent
+   runtime would close most of that gap. Comparing HKM-on-Swoole with Laravel-on-FPM measures
+   the deployment model, not the framework.
+
+### Under load, on a route that waits
+
+Every table above measures a route that returns a constant, which is the one case where
+framework overhead is the whole request. Add 50 ms of I/O — one database call, one API call,
+one queue push, i.e. **any real endpoint** — and run four workers on each target:
+
+| Target (50 ms I/O, 4 workers) | c=4 | c=50 | c=200 |
+|---|---|---|---|
+| raw PHP — FPM | 76 | — | — |
+| Slim 4.15 — FPM | — | 76 | — |
+| Symfony 8.1 — FPM | — | 75 | — |
+| **HKM 1.21 — FPM** | **70** | **70** | **refused** |
+| Laravel 13.42 — FPM | — | 71 | — |
+| **HKM 1.21 — Swoole + coroutine hooks** | **77** | **925** | **3,653** |
+
+The arithmetic ceiling for four workers at 50 ms is 78 req/s, and every blocking
+configuration sits on it. **The five frameworks that spanned 21× on `/ping` span 9% here** —
+framework overhead is a fixed cost, so it matters in proportion to how little the handler
+does. What changed throughput by 47× was the concurrency model, not the framework:
+`enable_coroutine=true` alone buys nothing (the request runs in a coroutine, but a blocking
+call still holds the worker), while `SWOOLE_HOOK_FLAGS=2147483647` serves 3,653 req/s at
+concurrency 200 with p50 unchanged at 52 ms.
+
+Two other measured limits worth knowing before a deploy:
+
+- **PHP-FPM does not degrade past its pool — it refuses.** At c=200, 199,624 of 200,000
+  responses were non-2xx in 2 ms: `kern.ipc.somaxconn` (128 here) caps the listen queue
+  whatever `listen.backlog` says, and raising `pm.max_children` does not move it. Swoole at
+  the same concurrency queued and kept serving.
+- **Swoole's default `dispatch_mode = 2` pins a connection to a worker** by hashing its fd.
+  Four keepalive connections landed on two of four workers — half the server idle, 38 of
+  78 req/s. `dispatch_mode = 3` fixed it. This is exactly the shape of a reverse proxy's
+  upstream pool.
+
+### A real application, not a probe
+
+Every number above is a route that returns a constant or sleeps. To measure what an
+application does, a complete GDA plugin was built and benchmarked — not a controller with a
+query in it, but the full shape the framework asks for:
+
+| Layer | What it holds |
+|---|---|
+| `Domain/` | `Money` (integer cents), `Product` and `Order` entities with private constructors, named constructors and recorded domain events, an `OrderStatus` enum |
+| `Application/` | `CatalogService` (cache-aside read), `CheckoutService` in the mandated transaction → collect → commit → dispatch shape, a validating `PlaceOrderDTO` |
+| `Infrastructure/` | two repositories touching `DatabasePort` only, three controllers at ≤3 lines, an audit listener on the integration event, a queued `ReserveStockJob` |
+| `module.json` | `solves: shop.catalog`, five routes with `filters` and per-route `requires`, `jobs[]`, `config[]` |
+
+Backed by 500 seeded products, SQLite in WAL mode, Redis for cache and queue, and the
+project's WAF + CSRF + security gateway in front of every request.
+
+`POST /api/shop/orders` does all of this per request: validate a DTO → authorize against the
+`Identity` → load the products → open a transaction → insert the order → insert its lines →
+decrement stock with a guarded `UPDATE` → commit → dispatch an integration event → write an
+audit row from a listener → push a job to Redis.
+
+| Route (c=20) | FPM 4ch | FPM 32ch | Swoole 4w | Swoole 32w |
+|---|---|---|---|---|
+| `/ping` (no work) | 1,171 | 1,450 | 4,460 | **13,112** |
+| catalogue read, 1 Redis `GET` | 996 | 1,081 | 1,888 | 2,887 |
+| catalogue read, 2 SQL queries | 990 | 557 | 871 | 3,834 |
+| server-rendered HTML + layout | 905 | 1,257 | 859 | 3,085 |
+| uncached DB list (`/api/tasks`) | — | 1,191 | 1,374 | — |
+| `POST /orders` (the chain above) | 515 | 385 | 286 | 578 |
+
+Read the columns, not the rows. **At equal worker counts Swoole loses the HTML render and the
+write** (859 vs 905, 286 vs 515): four resident workers are fewer parallel slots than four
+FPM children plus the OS scheduler, once a request blocks on disk. Equalise at 32 and it wins
+everything — 1.5× on the write, 9× on `/ping`. So the resident-kernel advantage is largest
+where the framework is most of the request, and smallest where it is least of it.
+
+**Worker count, not the framework, set every number here.** 4 → 32 children is worth 8.1× on
+an I/O-bound route and costs 25% on the write path, where 32 processes contend for 8 cores and
+one SQLite writer. Size the pool from the workload.
+
+**The Redis cache made the catalogue read slower** — the opposite of the usual advice, so it
+was priced directly: one local Redis round trip is 167–239 µs (floor 145 µs), the two SQLite
+queries it replaced are 129 µs. Under a resident runtime the uncached route won both passes.
+A cache is a bet that the thing behind it is expensive; check before taking it. (An earlier
+version called `has()` then `remember()` — two round trips, 267–279 µs — which turns a small
+win into a clear loss. One `get()` per hit.)
+
+**Correctness held exactly under load**, which matters more than the throughput: 2,602 orders
+produced 5,203 line rows, the queue's jobs wrote 5,203 reservation rows, the event listener
+wrote 2,602 audit rows, and the queue drained to zero. Every job ran once; nothing was lost or
+duplicated.
+
+> **These routes exist only in HKM, so this table is not a framework comparison.** The
+> cross-framework numbers are the `/ping` and 50 ms rows above: resident, HKM is the fastest
+> full framework measured; on an I/O-bound route all five land within 9% of each other; and
+> per-request on PHP-FPM with cheap routes, HKM is behind Symfony, whose container and routes
+> are compiled at build time.
+
+### Workers
+
+File-backed queue (`FileQueue`), with a job that reads from SQLite through `DatabasePort`:
+
+| | rate |
+|---|---|
+| enqueue | ~20,000 jobs/s |
+| drain (500-job batch) | 2,558 jobs/s |
+| drain (2,000-job batch) | 1,902 jobs/s |
+
+The queue drained to zero on every run. Throughput falls as the batch grows because
+`FileQueue` rewrites the whole file on each pop — fine for development, quadratic overall.
+A Redis queue is O(1) per pop.
+
+A job that does real work — two inserts, through a Redis queue, with its own
+`ModuleContainer` — runs **7–9× slower than that**: 269 jobs/s on one worker, 715 on four
+(sub-linear, because the SQLite writer serialises). Plan a queue against the second number,
+not the first.
+
+> **Bind the queue in `withPorts()`, not only in a module.** `WorkerLoop` resolves
+> `QueuePort` from the `CoreContainer`, because it needs a queue *before* it has a job to
+> build a module container for. A plugin that binds `QueuePort` per request is invisible to
+> the worker: HTTP pushes to the broker, the worker pops from the core binding, and it prints
+> `Remaining in 'default': 0` while every job sits in the broker. Nothing throws. Measured,
+> and the project template now says so where the binding lives.
 
 ---
 

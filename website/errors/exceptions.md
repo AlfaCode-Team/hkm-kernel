@@ -47,10 +47,12 @@ abstract class FrameworkException extends \RuntimeException
 | **`LockTimeoutException`** | 409 | warning | `Lock::block()` | Could not acquire a lock in time |
 | **`ScopeViolationException`** | 500 | critical | DI container | Internal binding resolved outside its module |
 | **`CircularDependencyException`** | n/a (boot) | n/a | Boot pipeline | Cycle in `requires[]` |
-| **`BootException`** | n/a (boot) | n/a | Boot stages | One stage's validation failed (wrapped in `BootFailureException`) |
+| **`BootException`** ¹ | n/a (boot) | n/a | Boot stages | One stage's validation failed (wrapped in `BootFailureException`) |
 | **`BootFailureException`** | n/a (boot) | n/a | `BootPipeline` | Boot failed; the application cannot start |
 | **`EntryNotFoundException`** | 500 | critical | DI container | Container cannot resolve a requested id |
 | **`RejectedJobException`** | n/a (worker) | warning | Worker pipeline | Dequeued job failed signature verification (extends `SecurityException`) |
+
+¹ `BootException` is the one entry here that is **not** in `Kernel\Exceptions` and **not** a `FrameworkException`: it lives in `AlfacodeTeam\PhpServicePlatform\Kernel\Boot` and extends `\RuntimeException` directly, so it carries no `layer` or `context`. Catching `FrameworkException` does not catch it.
 
 How the status is chosen (`ErrorStage::resolveHttpCode()`), in order:
 

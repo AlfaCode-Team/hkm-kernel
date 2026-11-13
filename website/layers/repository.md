@@ -7,7 +7,7 @@ Repositories are the exclusive bridge between the domain and data access layers.
 - **Implement ONE per entity** — `InvoiceRepository`, `PaymentRepository`
 - **Depend on `DatabasePort` only** — no HTTP clients, no vendor SDKs, no ORM
 - **Inject `Identity` for tenant scoping** — ALWAYS filter by `$identity->tenantId`
-- **Translate `\PDOException` to `RepositoryException`** — never let database errors escape
+- **Translate every database failure to `RepositoryException`** — catch `\Throwable`, not `\PDOException`; see [Translating Errors](#translating-errors)
 - **Use hydrators** — map rows to domain objects; reverse-map objects back
 - **Call `upsert()` not hand-written `ON DUPLICATE KEY`** — portable across databases
 - **Use `lastInsertId(sequence)`** — pass the sequence name on PostgreSQL
@@ -46,7 +46,7 @@ final class InvoiceRepository
                     'tenant' => $this->identity->tenantId,
                 ],
             );
-        } catch (\PDOException $e) {
+        } catch (\Throwable $e) {
             throw new RepositoryException(
                 "Failed to fetch invoice [{$id}].",
                 layer:    'repository.invoice.find',
@@ -90,7 +90,7 @@ final class InvoiceRepository
                 'invoices' => array_map([InvoiceHydrator::class, 'hydrate'], $invoices),
                 'total'    => (int) ($total['count'] ?? 0),
             ];
-        } catch (\PDOException $e) {
+        } catch (\Throwable $e) {
             throw new RepositoryException(
                 'Failed to fetch invoices.',
                 layer:    'repository.invoice.paginate',
@@ -122,7 +122,7 @@ final class InvoiceRepository
                     'updated_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
                 ],
             );
-        } catch (\PDOException $e) {
+        } catch (\Throwable $e) {
             throw new RepositoryException(
                 'Failed to save invoice.',
                 layer:    'repository.invoice.save',
@@ -149,7 +149,7 @@ final class InvoiceRepository
                     'updated_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
                 ],
             );
-        } catch (\PDOException $e) {
+        } catch (\Throwable $e) {
             throw new RepositoryException(
                 'Failed to update invoice.',
                 layer:    'repository.invoice.update',
@@ -175,7 +175,7 @@ final class InvoiceRepository
                     'now'    => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
                 ],
             );
-        } catch (\PDOException $e) {
+        } catch (\Throwable $e) {
             throw new RepositoryException(
                 "Failed to delete invoice [{$id}].",
                 layer:    'repository.invoice.delete',
@@ -296,12 +296,27 @@ To be portable across databases, pass the sequence name (PostgreSQL uses it; MyS
 
 ## Translating Errors
 
-**Always catch `\PDOException` and re-throw as `RepositoryException`.** Never let database-layer exceptions escape to the service or controller.
+**Always catch `\Throwable` and re-throw as `RepositoryException`.** Never let database-layer exceptions escape to the service or controller.
+
+::: danger `catch (\PDOException)` never fires on a scaffolded project
+The adapter every project binds to `DatabasePort` — the Database plugin's `MultiDriverDatabaseAdapter` — **already** translates PDO errors into its own `Plugins\Database\Exceptions\ConnectionException`, which extends `\RuntimeException`. A `\PDOException` therefore never reaches your `catch`. Measured through the documented catch block:
+
+```json
+{ "documentedCatchFired": false,
+  "escapedClass": "Plugins\\Database\\Exceptions\\ConnectionException",
+  "isPdoException": false,
+  "isRepositoryException": false }
+```
+
+The database error escapes un-translated as a generic 500 `server_error` with the SQL in the message — the exact outcome this rule exists to prevent.
+
+Catch `\Throwable` in a repository. It is the only catch that holds whatever adapter is bound: a raw PDO adapter, the Database plugin's, or a fake in a test.
+:::
 
 ```php
 try {
     $result = $this->db->execute($sql, $params);
-} catch (\PDOException $e) {
+} catch (\Throwable $e) {
     throw new RepositoryException(
         'Failed to update invoice.',
         layer:    'repository.invoice.update',
@@ -335,7 +350,7 @@ try {
             layer: 'repository.invoice.update',
         );
     }
-} catch (\PDOException $e) {
+} catch (\Throwable $e) {
     throw new RepositoryException(
         'Failed to update invoice.',
         layer:    'repository.invoice.update',
