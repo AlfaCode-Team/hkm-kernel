@@ -24,32 +24,54 @@ const EnvMap = std.process.Environ.Map;
 /// GitHub organisation hosting the first-party plugins.
 pub const default_org = "AlfaCode-Team";
 
-/// Repo names are `hkm-plugin-<slug>`; the slug is the lower-cased plugin
-/// folder name EXCEPT where the repo was created with a different spelling.
-/// This table is the whole of that irregularity — keep it here rather than
-/// scattering special cases through the commands.
+/// Repo names are `hkm-plugin-<slug>`, and the slug is the plugin folder name
+/// kebab-cased: `FileManager` → `file-manager`, `SchoolApiV1` →
+/// `school-api-v1`. This table holds ONLY the repos that do not follow that
+/// rule — keep the irregularity here rather than scattering special cases
+/// through the commands.
+///
+/// The default used to be a plain lower-case with no hyphen, and every
+/// multi-word repo had to be listed. It was listed for six of them. Measured
+/// against the org on 2026-11-14, FORTY repos were missing — every `school-*`
+/// and every `loan-*` among them — so `hkm plugins install school-grading`
+/// resolved `hkm-plugin-schoolgrading`, which does not exist. GitHub answers
+/// 404 for "private" as well as "absent", so git then prompted for a username
+/// and password for a repo that is public. Deriving the hyphen and listing the
+/// exceptions inverts that: a new multi-word plugin works with no edit here,
+/// and only a genuinely single-word repo needs a line.
 const slug_overrides = [_]struct { folder: []const u8, slug: []const u8 }{
+    // Repos created as ONE word although the folder reads as two. The rule
+    // cannot derive these: a trailing run of capitals (SiteSEO) has no word
+    // boundary to find, and the rest are simply how the repo was named.
+    .{ .folder = "ClamAv", .slug = "clamav" },
+    .{ .folder = "MongoDb", .slug = "mongodb" },
+    .{ .folder = "OAuth2", .slug = "oauth2" },
+    .{ .folder = "SiteSEO", .slug = "siteseo" },
+    .{ .folder = "ViteManifest", .slug = "vitemanifest" },
+    .{ .folder = "WebSocket", .slug = "websocket" },
+
+    // Hyphenated exactly as the rule derives them. Listed anyway so the
+    // SQUASHED spelling a user may type still resolves: `canonicalName`
+    // matches this table case-insensitively, so `hkm plugins install devtools`
+    // reaches DevTools. Without the entry it would studly-case to `Devtools`
+    // and install to a directory the PSR-4 autoloader cannot see.
     .{ .folder = "DevTools", .slug = "dev-tools" },
     .{ .folder = "FileManager", .slug = "file-manager" },
     .{ .folder = "HttpClient", .slug = "http-client" },
     .{ .folder = "RedisCache", .slug = "redis-cache" },
     .{ .folder = "SecurityFilters", .slug = "security-filters" },
     .{ .folder = "SocialAuth", .slug = "social-auth" },
-    // Deliberately NOT hyphenated — these repos exist as single words.
-    .{ .folder = "SiteSEO", .slug = "siteseo" },
-    .{ .folder = "ViteManifest", .slug = "vitemanifest" },
-    .{ .folder = "OAuth2", .slug = "oauth2" },
 };
 
 /// The repo slug for a plugin folder name.
 ///
 /// Case-insensitive on the override table so `hkm plugins enable sociaLAuth`
-/// resolves the same as `SocialAuth`.
+/// resolves the same as `SocialAuth`; otherwise the folder is kebab-cased.
 pub fn slugFor(allocator: std.mem.Allocator, folder: []const u8) ![]const u8 {
     for (slug_overrides) |o| {
         if (util.eqlIgnoreCase(folder, o.folder)) return allocator.dupe(u8, o.slug);
     }
-    return util.lower(allocator, folder);
+    return util.hyphenate(allocator, folder);
 }
 
 /// The canonical FOLDER name for a plugin, whatever spelling the user typed.
@@ -384,19 +406,42 @@ test "only the configured org's plugin repos count as first-party" {
 }
 
 test "every multi-word plugin folder maps to its real hyphenated repo slug" {
-    // These are the repos that actually exist under the org with a hyphen. A
-    // folder missing from slug_overrides silently loses the hyphen — the URL
-    // 404s, and because GitHub answers 404 for "private" too, git asks for a
-    // username and password for a repo that is PUBLIC. FileManager was missing
-    // here, and that is exactly how it presented: an account prompt during
-    // `hkm install`, on a plugin anyone can clone.
+    // Every one of these repos EXISTS under the org with a hyphen, checked
+    // against `gh repo list AlfaCode-Team` on 2026-11-14. A folder whose slug
+    // loses the hyphen points at a URL that 404s, and because GitHub answers
+    // 404 for "private" as well as "absent", git asks for a username and
+    // password for a repo anyone can clone. FileManager presented exactly that
+    // way, which is why the list below is long: it is the measured truth, not
+    // a sample.
     const cases = [_]struct { folder: []const u8, slug: []const u8 }{
+        // listed in slug_overrides
         .{ .folder = "DevTools", .slug = "dev-tools" },
         .{ .folder = "FileManager", .slug = "file-manager" },
         .{ .folder = "HttpClient", .slug = "http-client" },
         .{ .folder = "RedisCache", .slug = "redis-cache" },
         .{ .folder = "SecurityFilters", .slug = "security-filters" },
         .{ .folder = "SocialAuth", .slug = "social-auth" },
+        // derived by the rule — none of these was resolvable before
+        .{ .folder = "AccountingOhada", .slug = "accounting-ohada" },
+        .{ .folder = "LegacyPasswords", .slug = "legacy-passwords" },
+        .{ .folder = "LocaleData", .slug = "locale-data" },
+        .{ .folder = "PlatformConsole", .slug = "platform-console" },
+        .{ .folder = "PlatformTasks", .slug = "platform-tasks" },
+        .{ .folder = "ResourceTokens", .slug = "resource-tokens" },
+        .{ .folder = "UploadGuard", .slug = "upload-guard" },
+        .{ .folder = "LoanSync", .slug = "loan-sync" },
+        .{ .folder = "LoanCustomers", .slug = "loan-customers" },
+        .{ .folder = "LoanOrganisation", .slug = "loan-organisation" },
+        .{ .folder = "LoanLoans", .slug = "loan-loans" },
+        .{ .folder = "LoanRepayments", .slug = "loan-repayments" },
+        .{ .folder = "LoanCash", .slug = "loan-cash" },
+        .{ .folder = "LoanExpenses", .slug = "loan-expenses" },
+        .{ .folder = "LoanField", .slug = "loan-field" },
+        .{ .folder = "SchoolGrading", .slug = "school-grading" },
+        .{ .folder = "SchoolEnrolment", .slug = "school-enrolment" },
+        .{ .folder = "SchoolAiPlanner", .slug = "school-ai-planner" },
+        // a digit ends the word, so the capital after it still starts a new one
+        .{ .folder = "SchoolApiV1", .slug = "school-api-v1" },
     };
     for (cases) |c| {
         const got = try slugFor(std.testing.allocator, c.folder);
@@ -414,12 +459,41 @@ test "single-word repos are NOT hyphenated by accident" {
         .{ .folder = "SiteSEO", .slug = "siteseo" },
         .{ .folder = "ViteManifest", .slug = "vitemanifest" },
         .{ .folder = "OAuth2", .slug = "oauth2" },
+        .{ .folder = "ClamAv", .slug = "clamav" },
+        .{ .folder = "MongoDb", .slug = "mongodb" },
+        .{ .folder = "WebSocket", .slug = "websocket" },
         .{ .folder = "View", .slug = "view" },
         .{ .folder = "Crypto", .slug = "crypto" },
+        // a digit inside one word is not a boundary
+        .{ .folder = "I18n", .slug = "i18n" },
     };
     for (cases) |c| {
         const got = try slugFor(std.testing.allocator, c.folder);
         defer std.testing.allocator.free(got);
         try std.testing.expectEqualStrings(c.slug, got);
+        // the repo name is what a user types, so it must reach the folder too
+        const back = try canonicalName(std.testing.allocator, c.slug);
+        defer std.testing.allocator.free(back);
+        try std.testing.expectEqualStrings(c.folder, back);
+    }
+}
+
+test "the squashed spelling of a hyphenated repo still reaches its folder" {
+    // `hkm plugins install devtools` worked while every multi-word folder was
+    // in slug_overrides. Deriving the hyphen instead would have quietly broken
+    // it — studly("devtools") is "Devtools", a directory PSR-4 cannot see — so
+    // those entries stay in the table as aliases.
+    const cases = [_]struct { typed: []const u8, folder: []const u8 }{
+        .{ .typed = "devtools", .folder = "DevTools" },
+        .{ .typed = "filemanager", .folder = "FileManager" },
+        .{ .typed = "httpclient", .folder = "HttpClient" },
+        .{ .typed = "socialauth", .folder = "SocialAuth" },
+        .{ .typed = "securityfilters", .folder = "SecurityFilters" },
+        .{ .typed = "rediscache", .folder = "RedisCache" },
+    };
+    for (cases) |c| {
+        const got = try canonicalName(std.testing.allocator, c.typed);
+        defer std.testing.allocator.free(got);
+        try std.testing.expectEqualStrings(c.folder, got);
     }
 }

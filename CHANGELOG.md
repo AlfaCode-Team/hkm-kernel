@@ -4,6 +4,40 @@ All notable changes to the AlfacodeTeam PhpServicePlatform (Sentinel) kernel are
 documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.1] - 2026-11-14
+
+### Fixed
+
+- **`hkm` resolved the wrong git remote for forty first-party plugins.** A
+  plugin's repo is `hkm-plugin-<slug>`, and the slug was the plugin FOLDER
+  lower-cased with no hyphen — so every multi-word plugin had to be listed in
+  `slug_overrides` in `tools/src/lib/plugin_registry.zig`. Six were listed.
+  Checked against the organisation on 2026-11-14, **forty repositories were
+  missing**: every `school-*`, every `loan-*`, and `accounting-ohada`,
+  `legacy-passwords`, `locale-data`, `platform-console`, `platform-tasks`,
+  `resource-tokens` and `upload-guard`. `hkm plugins install SchoolGrading`
+  asked GitHub for `hkm-plugin-schoolgrading`, which does not exist.
+  - The failure does not look like a missing repository. GitHub answers 404 for
+    *private* as well as *absent*, so git falls back to asking for a **username
+    and password for a repository that is public** — which is how `FileManager`
+    was found, as an account prompt in the middle of an install.
+  - The default is now inverted: `util.hyphenate()` derives the slug from the
+    folder's case boundaries (`HttpClient` → `http-client`, `SchoolApiV1` →
+    `school-api-v1`, a capital after a digit still starting a word), and the
+    table carries only the exceptions. Measured over all 101 plugin
+    repositories, the rule is right for 95; the six that were created as a
+    single word — `ClamAv`, `MongoDb`, `OAuth2`, `SiteSEO`, `ViteManifest`,
+    `WebSocket` — are listed. A new multi-word plugin now needs no edit here,
+    which is the property the old arrangement lacked and the reason the list
+    fell forty behind.
+  - The six multi-word folders that were already listed **stay** listed, as
+    aliases. They are what lets `hkm plugins install devtools` reach `DevTools`:
+    without the entry it studly-cases to `Devtools`, and the install lands in a
+    directory the PSR-4 autoloader cannot see.
+  - Only the PascalCase spelling was ever affected. `hkm plugins install
+    loan-cash` passes the typed string straight through and always worked; the
+    folder name is what `install` uses once a plugin is on disk.
+
 ## [1.22.0] - 2026-11-13
 
 Everything in this release came out of building a project from the templates,
