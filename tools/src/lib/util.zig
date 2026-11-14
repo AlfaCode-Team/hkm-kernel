@@ -412,6 +412,30 @@ pub fn contains(haystack: []const []const u8, needle: []const u8) bool {
 
 // ── case / naming helpers ─────────────────────────────────────────────────────
 
+/// kebab-case a PascalCase name: `BillingEngine` → `billing-engine`.
+///
+/// A hyphen is inserted before an upper-case letter that either follows a
+/// lower-case letter or digit (`HttpClient` → `http-client`, `SchoolApiV1` →
+/// `school-api-v1`) or begins a new word inside a run of capitals
+/// (`XMLParser` → `xml-parser`). A run of capitals with nothing after it is
+/// left alone, which is why `SiteSEO` cannot be derived and has to be stated.
+pub fn hyphenate(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (name, 0..) |c, i| {
+        if (std.ascii.isUpper(c) and i > 0) {
+            const prev = name[i - 1];
+            const prev_is_lower_or_digit = std.ascii.isLower(prev) or std.ascii.isDigit(prev);
+            const starts_word_in_caps = std.ascii.isUpper(prev) and
+                i + 1 < name.len and std.ascii.isLower(name[i + 1]);
+            if (prev_is_lower_or_digit or starts_word_in_caps) {
+                try out.append(allocator, '-');
+            }
+        }
+        try out.append(allocator, std.ascii.toLower(c));
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 /// PascalCase a name: `billing-engine` / `billing_engine` → `BillingEngine`.
 pub fn studly(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -495,6 +519,27 @@ pub fn appendJsonString(allocator: std.mem.Allocator, out: *std.ArrayList(u8), s
     try out.append(allocator, '"');
     try appendJsonEscaped(allocator, out, s);
     try out.append(allocator, '"');
+}
+
+test "hyphenate finds the word boundaries a repo slug needs" {
+    const cases = [_]struct { in: []const u8, out: []const u8 }{
+        .{ .in = "FileManager", .out = "file-manager" },
+        .{ .in = "SchoolApiV1", .out = "school-api-v1" },
+        .{ .in = "LoanOrganisation", .out = "loan-organisation" },
+        // a run of capitals breaks where the next word starts, not before it
+        .{ .in = "XMLParser", .out = "xml-parser" },
+        // ...and a run with nothing after it has no boundary to find, which is
+        // why SiteSEO has to be stated in slug_overrides rather than derived
+        .{ .in = "SiteSEO", .out = "site-seo" },
+        .{ .in = "View", .out = "view" },
+        .{ .in = "I18n", .out = "i18n" },
+        .{ .in = "", .out = "" },
+    };
+    for (cases) |c| {
+        const got = try hyphenate(std.testing.allocator, c.in);
+        defer std.testing.allocator.free(got);
+        try std.testing.expectEqualStrings(c.out, got);
+    }
 }
 
 test "snake_case keeps underscores the caller already wrote" {
